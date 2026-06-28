@@ -1,0 +1,47 @@
+<h3 class="text-xl text-center text-gray-600 dark:text-gray-200">Log in</h3>
+
+<.form :let={f} for={%{}} as={:user} action={~p"/users/log_in"}>
+  <div :if={@error_message} class="alert alert-danger">
+    <small>{@error_message}</small>
+  </div>
+
+  <.input field={f[:email]} type="email" label="Email" required />
+
+  <div class="mt-4">
+    <div class="flex justify-between">
+      <span class="block text-gray-600 dark:text-gray-200 text-sm font-medium mb-2">Password</span>
+      <.link
+        href={~p"/users/reset_password"}
+        class="text-xs text-gray-500 dark:text-gray-300 hover:underline"
+      >
+        Forgot password?
+      </.link>
+    </div>
+    <input
+      type="password"
+      id={f[:password].id}
+      name={f[:password].name}
+      required
+      class="form-control"
+    />
+  </div>
+
+  <.input field={f[:remember_me]} type="checkbox" label="Keep me logged in for 60 days" />
+
+  <div class="mt-8">
+    <.button class="w-full">Log in</.button>
+  </div>
+</.form>
+
+<div class="flex items-center justify-between mt-6">
+  <span class="w-1/5 border-b dark:border-gray-600 md:w-1/4"></span>
+
+  <.link
+    href={~p"/users/register"}
+    class="text-xs text-gray-500 dark:text-gray-400 uppercase hover:underline"
+  >
+    Or Register
+  </.link>
+
+  <span class="w-1/5 border-b dark:border-gray-600 md:w-1/4"></span>
+</div>

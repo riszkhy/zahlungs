@@ -1,0 +1,59 @@
+<h2 class="text-lg font-semibold text-gray-700 capitalize dark:text-white">Account settings</h2>
+
+<h3 class="mt-12 font-semibold text-gray-700 dark:text-white">Change email</h3>
+
+<.form :let={f} for={@email_changeset} action={~p"/users/settings"} id="update_email">
+  <div :if={@email_changeset.action} class="alert alert-danger">
+    <p>Oops, something went wrong! Please check the errors below.</p>
+  </div>
+
+  <input type="hidden" name="action" value="update_email" />
+
+  <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-6">
+    <.input field={f[:email]} type="email" label="Email" required />
+    <.input
+      field={f[:current_password]}
+      type="password"
+      label="Current password"
+      name="current_password"
+      id="current_password_for_email"
+      required
+    />
+  </div>
+
+  <div class="flex justify-end mt-6">
+    <.button>Change email</.button>
+  </div>
+</.form>
+
+<h3 class="mt-12 font-semibold text-gray-700 dark:text-white">Change password</h3>
+
+<.form :let={f} for={@password_changeset} action={~p"/users/settings"} id="update_password" class="mb-12">
+  <div :if={@password_changeset.action} class="alert alert-danger">
+    <p>Oops, something went wrong! Please check the errors below.</p>
+  </div>
+
+  <input type="hidden" name="action" value="update_password" />
+
+  <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-6">
+    <.input field={f[:password]} type="password" label="New password" required />
+    <.input
+      field={f[:password_confirmation]}
+      type="password"
+      label="Confirm new password"
+      required
+    />
+    <.input
+      field={f[:current_password]}
+      type="password"
+      label="Current password"
+      name="current_password"
+      id="current_password_for_password"
+      required
+    />
+  </div>
+
+  <div class="flex justify-end mt-6">
+    <.button>Change password</.button>
+  </div>
+</.form>

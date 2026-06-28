@@ -1,0 +1,16 @@
+{
+  "scripts": {
+    "deploy": "NODE_ENV=production postcss css/app.css -o ../priv/static/assets/app.css"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.7",
+    "postcss": "^8.4.13",
+    "postcss-cli": "^9.1.0",
+    "postcss-import": "^14.1.0"
+  },
+  "dependencies": {
+    "alpinejs": "^3.10.2",
+    "daisyui": "^2.14.3",
+    "topbar": "^1.0.1"
+  }
+}

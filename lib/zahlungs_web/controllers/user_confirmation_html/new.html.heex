@@ -1,0 +1,14 @@
+<h1 class="text-lg font-semibold">Resend confirmation instructions</h1>
+
+<.form :let={f} for={%{}} as={:user} action={~p"/users/confirm"}>
+  <.input field={f[:email]} type="email" label="Email" required />
+
+  <div class="mt-4">
+    <.button>Resend confirmation instructions</.button>
+  </div>
+</.form>
+
+<p class="mt-4">
+  <.link href={~p"/users/register"}>Register</.link>
+  | <.link href={~p"/users/log_in"}>Log in</.link>
+</p>

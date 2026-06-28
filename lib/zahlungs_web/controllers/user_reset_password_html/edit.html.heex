@@ -1,0 +1,33 @@
+<h3 class="text-xl text-center text-gray-600 dark:text-gray-200">Reset password</h3>
+
+<.form :let={f} for={@changeset} action={~p"/users/reset_password/#{@token}"}>
+  <div :if={@changeset.action} class="alert alert-danger">
+    <p>Oops, something went wrong! Please check the errors below.</p>
+  </div>
+
+  <.input field={f[:password]} type="password" label="New password" required />
+  <.input field={f[:password_confirmation]} type="password" label="Confirm new password" required />
+
+  <div class="mt-8">
+    <.button class="w-full">Reset password</.button>
+  </div>
+</.form>
+
+<div class="flex items-center justify-between mt-6">
+  <span class="w-1/5 border-b dark:border-gray-600 md:w-1/4"></span>
+
+  <.link
+    href={~p"/users/register"}
+    class="text-xs text-gray-500 dark:text-gray-400 uppercase hover:underline"
+  >
+    Register
+  </.link>
+  <.link
+    href={~p"/users/log_in"}
+    class="text-xs text-gray-500 dark:text-gray-400 uppercase hover:underline"
+  >
+    Log in
+  </.link>
+
+  <span class="w-1/5 border-b dark:border-gray-600 md:w-1/4"></span>
+</div>
