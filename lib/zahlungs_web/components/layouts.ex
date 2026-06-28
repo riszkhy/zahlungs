@@ -24,6 +24,7 @@ defmodule ZahlungsWeb.Layouts do
         <.link href={~p"/home"} class="btn btn-sm btn-link">Home</.link>
         <.link href={~p"/cashier"} class="btn btn-sm btn-link">Cashier</.link>
         <.link href={~p"/catalog"} class="btn btn-sm btn-link">Catalog</.link>
+        <.link href={~p"/sales"} class="btn btn-sm btn-link">Sales</.link>
         <.link :if={@current_user.role == "admin"} href={~p"/products"} class="btn btn-sm btn-link">
           Products
         </.link>
@@ -34,9 +35,9 @@ defmodule ZahlungsWeb.Layouts do
         <span class="hidden md:inline text-base-content text-opacity-60">
           {@current_user.email}
         </span>
-        <.link href={~p"/users/log_out"} method="delete" class="btn btn-sm btn-link">
-          Log out
-        </.link>
+        <.form for={%{}} action={~p"/users/log_out"} method="delete" class="inline">
+          <button type="submit" class="btn btn-sm btn-link">Log out</button>
+        </.form>
       <% else %>
         <.link href={~p"/users/register"} class="btn btn-sm btn-link">Register</.link>
         <.link href={~p"/users/log_in"} class="btn btn-sm btn-link">Log in</.link>

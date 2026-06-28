@@ -194,7 +194,10 @@ defmodule ZahlungsWeb.UserAuth do
         else
           socket =
             socket
-            |> Phoenix.LiveView.put_flash(:error, "You do not have permission to access this page.")
+            |> Phoenix.LiveView.put_flash(
+              :error,
+              "You do not have permission to access this page."
+            )
             |> Phoenix.LiveView.redirect(to: ~p"/")
 
           {:halt, socket}

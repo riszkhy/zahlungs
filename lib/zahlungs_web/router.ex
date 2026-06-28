@@ -67,6 +67,8 @@ defmodule ZahlungsWeb.Router do
       live "/home", HomeLive, :index
       live "/catalog", CatalogLive, :index
       live "/cashier", CashierLive, :index
+      live "/sales", SalesLive.Index, :index
+      live "/sales/:id", SalesLive.Index, :show
     end
 
     get "/users/settings", UserSettingsController, :edit

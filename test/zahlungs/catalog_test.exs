@@ -32,7 +32,10 @@ defmodule Zahlungs.CatalogTest do
 
     test "update_category/2 and delete_category/1" do
       category = category_fixture()
-      assert {:ok, %Category{name: "Renamed"}} = Catalog.update_category(category, %{name: "Renamed"})
+
+      assert {:ok, %Category{name: "Renamed"}} =
+               Catalog.update_category(category, %{name: "Renamed"})
+
       assert {:ok, _} = Catalog.delete_category(category)
       assert_raise Ecto.NoResultsError, fn -> Catalog.get_category!(category.id) end
     end
@@ -41,7 +44,12 @@ defmodule Zahlungs.CatalogTest do
   describe "products" do
     test "create_product/1 with valid data defaults to active" do
       assert {:ok, %Product{} = product} =
-               Catalog.create_product(%{sku: "A1", name: "Widget", price: Decimal.new("5"), stock: 2})
+               Catalog.create_product(%{
+                 sku: "A1",
+                 name: "Widget",
+                 price: Decimal.new("5"),
+                 stock: 2
+               })
 
       assert product.active == true
     end
@@ -55,7 +63,10 @@ defmodule Zahlungs.CatalogTest do
 
     test "create_product/1 enforces a unique sku" do
       product_fixture(sku: "DUP1")
-      assert {:error, changeset} = Catalog.create_product(%{sku: "DUP1", name: "Y", price: 1, stock: 1})
+
+      assert {:error, changeset} =
+               Catalog.create_product(%{sku: "DUP1", name: "Y", price: 1, stock: 1})
+
       assert %{sku: ["has already been taken"]} = errors_on(changeset)
     end
 
@@ -118,6 +129,41 @@ defmodule Zahlungs.CatalogTest do
       low_stock = Catalog.list_low_stock_products(5)
       assert low.id in Enum.map(low_stock, & &1.id)
       refute Enum.any?(low_stock, &(&1.stock > 5))
+    end
+
+    test "list_products/1 with in_stock excludes zero-stock products" do
+      in_stock = product_fixture(stock: 5)
+      out = product_fixture(stock: 0)
+
+      ids = Catalog.list_products(in_stock: true) |> Enum.map(& &1.id)
+      assert in_stock.id in ids
+      refute out.id in ids
+    end
+
+    test "count_products/1 applies the same filters as list_products/1" do
+      category = category_fixture()
+      product_fixture(category_id: category.id)
+      product_fixture(category_id: category.id)
+      _other = product_fixture()
+
+      assert Catalog.count_products(category_id: category.id) == 2
+    end
+
+    test "list_products/1 supports limit and offset for pagination" do
+      category = category_fixture()
+      for i <- 1..5, do: product_fixture(category_id: category.id, name: "P#{i}")
+
+      page1 = Catalog.list_products(category_id: category.id, limit: 2, offset: 0)
+      page2 = Catalog.list_products(category_id: category.id, limit: 2, offset: 2)
+
+      assert length(page1) == 2
+      assert length(page2) == 2
+      assert Catalog.count_products(category_id: category.id) == 5
+      # Distinct pages
+      assert MapSet.disjoint?(
+               MapSet.new(Enum.map(page1, & &1.id)),
+               MapSet.new(Enum.map(page2, & &1.id))
+             )
     end
   end
 end

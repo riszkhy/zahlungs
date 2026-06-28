@@ -21,19 +21,39 @@ defmodule Zahlungs.Catalog do
     * `:search` - filters by name or SKU (case-insensitive, substring match)
     * `:category_id` - filters by category
     * `:active` - filters by active flag (`true`/`false`); omit for all
+    * `:in_stock` - when `true`, only products with stock > 0
     * `:order_by` - column to order by (defaults to `:name`)
+    * `:limit` / `:offset` - pagination
 
   Results preload the associated category.
   """
   def list_products(opts \\ []) do
+    opts
+    |> base_query()
+    |> order_by(^(opts[:order_by] || :name))
+    |> maybe_limit(opts[:limit])
+    |> maybe_offset(opts[:offset])
+    |> preload(:category)
+    |> Repo.all()
+  end
+
+  defp base_query(opts) do
     Product
     |> filter_search(opts[:search])
     |> filter_category(opts[:category_id])
     |> filter_active(opts[:active])
-    |> order_by(^(opts[:order_by] || :name))
-    |> preload(:category)
-    |> Repo.all()
+    |> filter_in_stock(opts[:in_stock])
   end
+
+  defp maybe_limit(query, nil), do: query
+  defp maybe_limit(query, n), do: limit(query, ^n)
+
+  defp maybe_offset(query, nil), do: query
+  defp maybe_offset(query, 0), do: query
+  defp maybe_offset(query, n), do: offset(query, ^n)
+
+  defp filter_in_stock(query, true), do: where(query, [p], p.stock > 0)
+  defp filter_in_stock(query, _), do: query
 
   defp filter_search(query, term) when is_binary(term) do
     trimmed = String.trim(term)
@@ -64,10 +84,10 @@ defmodule Zahlungs.Catalog do
   @doc "Gets a single product (raises if not found). Preloads category."
   def get_product!(id), do: Product |> Repo.get!(id) |> Repo.preload(:category)
 
-  @doc "Counts products matching the given options (see `list_products/1`)."
+  @doc "Counts products matching the given options (same filters as `list_products/1`)."
   def count_products(opts \\ []) do
-    Product
-    |> filter_active(opts[:active])
+    opts
+    |> base_query()
     |> Repo.aggregate(:count)
   end
 
