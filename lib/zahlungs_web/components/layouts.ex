@@ -19,28 +19,26 @@ defmodule ZahlungsWeb.Layouts do
 
   def user_menu(assigns) do
     ~H"""
-    <div class="flex items-center space-x-1 text-sm">
+    <div class="flex items-center gap-3 text-sm font-medium">
       <%= if @current_user do %>
-        <.link href={~p"/home"} class="btn btn-sm btn-link">Home</.link>
-        <.link href={~p"/cashier"} class="btn btn-sm btn-link">Cashier</.link>
-        <.link href={~p"/catalog"} class="btn btn-sm btn-link">Catalog</.link>
-        <.link href={~p"/sales"} class="btn btn-sm btn-link">Sales</.link>
-        <.link :if={@current_user.role == "admin"} href={~p"/products"} class="btn btn-sm btn-link">
+        <.link href={~p"/home"} class="text-white/90 hover:text-white hover:underline">Home</.link>
+        <.link href={~p"/cashier"} class="text-white/90 hover:text-white hover:underline">Cashier</.link>
+        <.link href={~p"/catalog"} class="text-white/90 hover:text-white hover:underline">Catalog</.link>
+        <.link href={~p"/sales"} class="text-white/90 hover:text-white hover:underline">Sales</.link>
+        <.link :if={@current_user.role == "admin"} href={~p"/products"} class="text-white/90 hover:text-white hover:underline">
           Products
         </.link>
-        <.link :if={@current_user.role == "admin"} href={~p"/categories"} class="btn btn-sm btn-link">
+        <.link :if={@current_user.role == "admin"} href={~p"/categories"} class="text-white/90 hover:text-white hover:underline">
           Categories
         </.link>
-        <.link href={~p"/users/settings"} class="btn btn-sm btn-link">Profile</.link>
-        <span class="hidden md:inline text-base-content text-opacity-60">
-          {@current_user.email}
-        </span>
+        <.link href={~p"/users/settings"} class="text-white/90 hover:text-white hover:underline">Profile</.link>
+        <span class="hidden md:inline text-white/70">{@current_user.email}</span>
         <.form for={%{}} action={~p"/users/log_out"} method="delete" class="inline">
-          <button type="submit" class="btn btn-sm btn-link">Log out</button>
+          <button type="submit" class="text-white/90 hover:text-white hover:underline">Log out</button>
         </.form>
       <% else %>
-        <.link href={~p"/users/register"} class="btn btn-sm btn-link">Register</.link>
-        <.link href={~p"/users/log_in"} class="btn btn-sm btn-link">Log in</.link>
+        <.link href={~p"/users/register"} class="text-white/90 hover:text-white hover:underline">Register</.link>
+        <.link href={~p"/users/log_in"} class="text-white/90 hover:text-white hover:underline">Log in</.link>
       <% end %>
     </div>
     """

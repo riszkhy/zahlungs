@@ -184,6 +184,16 @@ defmodule ZahlungsWeb.CoreComponents do
     """
   end
 
+  def input(%{type: "password"} = assigns) do
+    ~H"""
+    <div class="mt-4">
+      <.label for={@id}>{@label}</.label>
+      <.password_field id={@id} name={@name} {@rest} />
+      <.error :for={msg <- @errors}>{msg}</.error>
+    </div>
+    """
+  end
+
   def input(%{type: "checkbox"} = assigns) do
     assigns =
       assign_new(assigns, :checked, fn ->
@@ -251,6 +261,33 @@ defmodule ZahlungsWeb.CoreComponents do
   end
 
   @doc """
+  A password input with a show/hide toggle.
+
+  Uses a tiny inline-JS toggle (no LiveView hook needed), so it works on the
+  controller-rendered auth pages too.
+  """
+  attr :id, :string, required: true
+  attr :name, :string, required: true
+  attr :rest, :global, include: ~w(required placeholder autocomplete minlength maxlength)
+
+  def password_field(assigns) do
+    ~H"""
+    <div class="relative">
+      <input type="password" id={@id} name={@name} class="form-control pr-16" {@rest} />
+      <button
+        type="button"
+        data-target={@id}
+        onclick="(function(b){var i=document.getElementById(b.dataset.target);if(!i)return;var s=i.type==='password';i.type=s?'text':'password';b.textContent=s?'Hide':'Show';})(this)"
+        tabindex="-1"
+        class="absolute inset-y-0 right-0 px-3 text-xs font-medium text-gray-500 hover:text-gray-700"
+      >
+        Show
+      </button>
+    </div>
+    """
+  end
+
+  @doc """
   Renders a label.
   """
   attr :for, :string, default: nil
@@ -293,7 +330,7 @@ defmodule ZahlungsWeb.CoreComponents do
     ~H"""
     <header class={[@actions != [] && "flex items-center justify-between gap-6", @class]}>
       <div>
-        <h1 class="text-lg font-semibold leading-8 text-gray-800 dark:text-white">
+        <h1 class="text-lg font-semibold leading-8 text-black">
           {render_slot(@inner_block)}
         </h1>
         <p :if={@subtitle != []} class="mt-2 text-sm leading-6 text-gray-600 dark:text-gray-300">
@@ -457,6 +494,54 @@ defmodule ZahlungsWeb.CoreComponents do
     |> JS.hide(to: "##{id}", transition: {"block", "block", "hidden"})
     |> JS.remove_class("overflow-hidden", to: "body")
   end
+
+  @doc """
+  Renders the body of a sale receipt: header line, item table and totals.
+
+  Expects a `%Sale{}` preloaded with `:user` and `items: :product`. Used by both
+  the cashier (post-sale preview) and the sales history detail so they look
+  identical.
+  """
+  attr :sale, :any, required: true
+
+  def sale_receipt(assigns) do
+    ~H"""
+    <p class="text-xs text-gray-400">
+      {Calendar.strftime(@sale.inserted_at, "%d %b %Y %H:%M")} · {@sale.user && @sale.user.email}
+    </p>
+
+    <table class="w-full mt-4 text-sm">
+      <thead class="text-left text-gray-500">
+        <tr>
+          <th class="py-1">Item</th>
+          <th class="py-1 text-center">Qty</th>
+          <th class="py-1 text-right">Unit</th>
+          <th class="py-1 text-right">Line</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr :for={item <- @sale.items} class="border-t border-gray-100">
+          <td class="py-1">{(item.product && item.product.name) || "(deleted)"}</td>
+          <td class="py-1 text-center">{item.quantity}</td>
+          <td class="py-1 text-right">{receipt_money(item.unit_price)}</td>
+          <td class="py-1 text-right">{receipt_money(item.line_total)}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <dl class="mt-4 space-y-1 text-sm border-t border-gray-200 pt-3">
+      <div class="flex justify-between"><dt>Subtotal</dt><dd>{receipt_money(@sale.subtotal)}</dd></div>
+      <div class="flex justify-between"><dt>Discount</dt><dd>{receipt_money(@sale.discount)}</dd></div>
+      <div class="flex justify-between"><dt>Tax</dt><dd>{receipt_money(@sale.tax)}</dd></div>
+      <div class="flex justify-between font-semibold"><dt>Total</dt><dd>{receipt_money(@sale.total)}</dd></div>
+      <div class="flex justify-between"><dt>Paid</dt><dd>{receipt_money(@sale.amount_paid)}</dd></div>
+      <div class="flex justify-between"><dt>Change</dt><dd>{receipt_money(@sale.change_due)}</dd></div>
+    </dl>
+    """
+  end
+
+  defp receipt_money(%Decimal{} = d), do: "Rp " <> Decimal.to_string(d)
+  defp receipt_money(other), do: "Rp #{other}"
 
   @doc """
   Translates an error message using gettext.

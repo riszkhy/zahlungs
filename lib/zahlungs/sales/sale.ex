@@ -11,6 +11,7 @@ defmodule Zahlungs.Sales.Sale do
     field :amount_paid, :decimal, default: Decimal.new(0)
     field :change_due, :decimal, default: Decimal.new(0)
     field :status, :string, default: "completed"
+    field :returned_at, :naive_datetime
 
     belongs_to :user, Zahlungs.Accounts.User
     has_many :items, Zahlungs.Sales.SaleItem
@@ -44,4 +45,14 @@ defmodule Zahlungs.Sales.Sale do
     |> validate_required([:code])
     |> unique_constraint(:code)
   end
+
+  @doc "Marks a sale as returned/refunded."
+  def return_changeset(sale) do
+    now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+    change(sale, status: "returned", returned_at: now)
+  end
+
+  @doc "Returns true if the sale has been returned/refunded."
+  def returned?(%__MODULE__{status: "returned"}), do: true
+  def returned?(%__MODULE__{}), do: false
 end

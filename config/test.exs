@@ -16,7 +16,14 @@ config :zahlungs, Zahlungs.Repo,
   hostname: System.get_env("DB_HOST", "localhost"),
   port: String.to_integer(System.get_env("DB_PORT", "3306")),
   pool: Ecto.Adapters.SQL.Sandbox,
-  pool_size: 10
+  pool_size: 10,
+  # The dev/test DB may be a high-latency remote (≈100–400ms/query). Let the
+  # connection pool wait for a slot instead of dropping checkouts, so async
+  # tests don't fail spuriously with DBConnection.ConnectionError.
+  queue_target: 5_000,
+  queue_interval: 30_000,
+  timeout: 30_000,
+  ownership_timeout: 120_000
 
 # We don't run a server during test. If one is required,
 # you can enable the server option below.

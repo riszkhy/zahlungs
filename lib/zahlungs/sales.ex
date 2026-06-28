@@ -73,7 +73,7 @@ defmodule Zahlungs.Sales do
     |> insert_items_and_decrement_stock(items)
     |> Repo.transaction()
     |> case do
-      {:ok, %{sale: sale}} -> {:ok, Repo.preload(sale, items: :product)}
+      {:ok, %{sale: sale}} -> {:ok, Repo.preload(sale, [:user, items: :product])}
       {:error, _step, reason, _changes} -> {:error, reason}
     end
   end
@@ -94,6 +94,7 @@ defmodule Zahlungs.Sales do
           product_id: item.product_id,
           quantity: item.quantity,
           unit_price: item.unit_price,
+          purchase_price: item.purchase_price,
           line_total: item.line_total
         })
       end)
@@ -130,12 +131,48 @@ defmodule Zahlungs.Sales do
               name: product.name,
               quantity: qty,
               unit_price: product.price,
+              purchase_price: product.purchase_price,
               line_total: Decimal.mult(product.price, qty)
             }
           ]
 
         _ ->
           []
+      end
+    end)
+  end
+
+  @doc """
+  Returns/refunds a completed sale: restores stock for each item and marks the
+  sale as `returned`, atomically. Returns `{:error, :already_returned}` if the
+  sale was already returned.
+  """
+  def return_sale(%Sale{status: "completed"} = sale) do
+    sale = Repo.preload(sale, :items)
+
+    Multi.new()
+    |> Multi.update(:sale, Sale.return_changeset(sale))
+    |> restore_stock(sale.items)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{sale: returned}} -> {:ok, returned}
+      {:error, _step, reason, _changes} -> {:error, reason}
+    end
+  end
+
+  def return_sale(%Sale{}), do: {:error, :already_returned}
+
+  defp restore_stock(multi, items) do
+    Enum.reduce(items, multi, fn item, multi ->
+      if item.product_id do
+        Multi.update_all(
+          multi,
+          {:restore, item.id},
+          from(p in Product, where: p.id == ^item.product_id),
+          inc: [stock: item.quantity]
+        )
+      else
+        multi
       end
     end)
   end
@@ -179,7 +216,7 @@ defmodule Zahlungs.Sales do
   def sales_summary_today do
     start = NaiveDateTime.new!(Date.utc_today(), ~T[00:00:00])
 
-    query = from s in Sale, where: s.inserted_at >= ^start
+    query = from s in Sale, where: s.inserted_at >= ^start and s.status == "completed"
 
     %{
       count: Repo.aggregate(query, :count),

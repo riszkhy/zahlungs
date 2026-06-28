@@ -154,7 +154,7 @@ defmodule ZahlungsWeb.ProductLive.Index do
       <:action :let={product}>
         <.link
           phx-click={JS.push("delete", value: %{id: product.id})}
-          data-confirm="Delete this product permanently?"
+          data-confirm="Delete this product? It will be hidden but kept for history."
         >
           Delete
         </.link>

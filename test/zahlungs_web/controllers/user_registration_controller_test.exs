@@ -13,7 +13,7 @@ defmodule ZahlungsWeb.UserRegistrationControllerTest do
 
     test "redirects if already logged in", %{conn: conn} do
       conn = conn |> log_in_user(user_fixture()) |> get(Routes.user_registration_path(conn, :new))
-      assert redirected_to(conn) == "/"
+      assert redirected_to(conn) == "/home"
     end
   end
 

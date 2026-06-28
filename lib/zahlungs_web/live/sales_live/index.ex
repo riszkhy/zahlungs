@@ -37,6 +37,29 @@ defmodule ZahlungsWeb.SalesLive.Index do
     {:noreply, socket |> assign(:date, date) |> load_sales()}
   end
 
+  def handle_event("return", %{"id" => id}, socket) do
+    if socket.assigns.current_user.role == "admin" do
+      sale = Sales.get_sale!(id)
+
+      case Sales.return_sale(sale) do
+        {:ok, _returned} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "Sale #{sale.code} returned; stock restored.")
+           |> load_sales()
+           |> push_patch(to: ~p"/sales")}
+
+        {:error, :already_returned} ->
+          {:noreply, put_flash(socket, :error, "This sale has already been returned.")}
+
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Could not return the sale.")}
+      end
+    else
+      {:noreply, put_flash(socket, :error, "You do not have permission to return sales.")}
+    end
+  end
+
   defp load_sales(socket) do
     assign(socket, :sales, Sales.list_sales(date: parse_date(socket.assigns.date)))
   end
@@ -75,6 +98,14 @@ defmodule ZahlungsWeb.SalesLive.Index do
       <:col :let={sale} label="Cashier">{sale.user && sale.user.email}</:col>
       <:col :let={sale} label="Items">{length(sale.items)}</:col>
       <:col :let={sale} label="Total">{money(sale.total)}</:col>
+      <:col :let={sale} label="Status">
+        <span class={[
+          "text-xs px-2 py-0.5 rounded-full",
+          (sale.status == "returned" && "bg-red-100 text-red-700") || "bg-green-100 text-green-700"
+        ]}>
+          {sale.status}
+        </span>
+      </:col>
       <:action :let={sale}>
         <.link patch={~p"/sales/#{sale}"}>View</.link>
       </:action>
@@ -82,37 +113,33 @@ defmodule ZahlungsWeb.SalesLive.Index do
 
     <.modal :if={@live_action == :show and @sale} id="sale-modal" show on_cancel={JS.patch(~p"/sales")}>
       <h3 class="text-lg font-semibold">Sale {@sale.code}</h3>
-      <p class="text-xs text-gray-400">
-        {Calendar.strftime(@sale.inserted_at, "%d %b %Y %H:%M")} · {@sale.user && @sale.user.email}
-      </p>
 
-      <table class="w-full mt-4 text-sm">
-        <thead class="text-left text-gray-500">
-          <tr>
-            <th class="py-1">Item</th>
-            <th class="py-1 text-center">Qty</th>
-            <th class="py-1 text-right">Unit</th>
-            <th class="py-1 text-right">Line</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr :for={item <- @sale.items} class="border-t border-gray-100">
-            <td class="py-1">{(item.product && item.product.name) || "(deleted)"}</td>
-            <td class="py-1 text-center">{item.quantity}</td>
-            <td class="py-1 text-right">{money(item.unit_price)}</td>
-            <td class="py-1 text-right">{money(item.line_total)}</td>
-          </tr>
-        </tbody>
-      </table>
+      <.sale_receipt sale={@sale} />
 
-      <dl class="mt-4 space-y-1 text-sm border-t border-gray-200 pt-3">
-        <div class="flex justify-between"><dt>Subtotal</dt><dd>{money(@sale.subtotal)}</dd></div>
-        <div class="flex justify-between"><dt>Discount</dt><dd>{money(@sale.discount)}</dd></div>
-        <div class="flex justify-between"><dt>Tax</dt><dd>{money(@sale.tax)}</dd></div>
-        <div class="flex justify-between font-semibold"><dt>Total</dt><dd>{money(@sale.total)}</dd></div>
-        <div class="flex justify-between"><dt>Paid</dt><dd>{money(@sale.amount_paid)}</dd></div>
-        <div class="flex justify-between"><dt>Change</dt><dd>{money(@sale.change_due)}</dd></div>
-      </dl>
+      <div class="mt-2 flex justify-between text-sm">
+        <dt>Status</dt>
+        <dd class={(@sale.status == "returned" && "text-red-600") || "text-green-600"}>
+          {@sale.status}
+        </dd>
+      </div>
+
+      <div class="mt-6 flex items-center justify-between gap-3">
+        <.link
+          href={~p"/sales/#{@sale.id}/receipt"}
+          target="_blank"
+          class="btn btn-sm btn-link"
+        >
+          Print receipt
+        </.link>
+        <.button
+          :if={@current_user.role == "admin" and @sale.status == "completed"}
+          phx-click={JS.push("return", value: %{id: @sale.id})}
+          data-confirm="Return this sale and restore stock? This cannot be undone."
+          class="!bg-red-600"
+        >
+          Return / Refund
+        </.button>
+      </div>
     </.modal>
     """
   end

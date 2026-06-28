@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Receipt {@sale.code}</title>
+    <style>
+      body { font-family: ui-monospace, "Courier New", monospace; max-width: 320px; margin: 16px auto; color: #111; padding: 0 12px; }
+      h1 { font-size: 16px; text-align: center; margin: 0 0 4px; }
+      .muted { color: #666; font-size: 11px; text-align: center; margin: 0 0 12px; line-height: 1.5; }
+      table { width: 100%; border-collapse: collapse; font-size: 12px; }
+      td { padding: 2px 0; vertical-align: top; }
+      .r { text-align: right; }
+      .c { text-align: center; }
+      .line { border-top: 1px dashed #999; margin: 8px 0; }
+      .row { display: flex; justify-content: space-between; font-size: 12px; padding: 1px 0; }
+      .b { font-weight: bold; }
+      .returned { color: #b00020; font-weight: bold; text-align: center; margin-top: 8px; }
+      .foot { text-align: center; font-size: 11px; color: #666; margin-top: 12px; }
+      .noprint { text-align: center; margin-top: 16px; }
+      @media print { .noprint { display: none; } body { margin: 0; } }
+    </style>
+  </head>
+  <body>
+    <h1>Zahlungs POS</h1>
+    <p class="muted">
+      {@sale.code}<br />
+      {Calendar.strftime(@sale.inserted_at, "%d %b %Y %H:%M")}<br />
+      Cashier: {@sale.user && @sale.user.email}
+    </p>
+
+    <div class="line"></div>
+
+    <table>
+      <tr :for={item <- @sale.items}>
+        <td>{(item.product && item.product.name) || "(deleted)"}</td>
+        <td class="c">{item.quantity}x</td>
+        <td class="r">{money(item.line_total)}</td>
+      </tr>
+    </table>
+
+    <div class="line"></div>
+
+    <div class="row"><span>Subtotal</span><span>{money(@sale.subtotal)}</span></div>
+    <div class="row"><span>Discount</span><span>{money(@sale.discount)}</span></div>
+    <div class="row"><span>Tax</span><span>{money(@sale.tax)}</span></div>
+    <div class="row b"><span>Total</span><span>{money(@sale.total)}</span></div>
+    <div class="row"><span>Paid</span><span>{money(@sale.amount_paid)}</span></div>
+    <div class="row"><span>Change</span><span>{money(@sale.change_due)}</span></div>
+
+    <p :if={@sale.status == "returned"} class="returned">*** RETURNED / REFUNDED ***</p>
+
+    <p class="foot">Terima kasih &middot; Thank you</p>
+
+    <div class="noprint">
+      <button type="button" onclick="window.print()">Print</button>
+    </div>
+
+    <script>
+      window.addEventListener("load", function () { window.print(); });
+    </script>
+  </body>
+</html>

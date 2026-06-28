@@ -71,6 +71,8 @@ defmodule ZahlungsWeb.Router do
       live "/sales/:id", SalesLive.Index, :show
     end
 
+    get "/sales/:id/receipt", ReceiptController, :show
+
     get "/users/settings", UserSettingsController, :edit
     put "/users/settings", UserSettingsController, :update
     get "/users/settings/confirm_email/:token", UserSettingsController, :confirm_email

@@ -1,23 +1,23 @@
-<h2 class="text-lg font-semibold text-gray-700 capitalize dark:text-white">Account settings</h2>
+<h2 class="text-lg font-semibold capitalize text-black">Account settings</h2>
 
 <dl class="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-4 rounded-lg border border-gray-200 p-4">
   <div>
     <dt class="text-xs text-gray-500">Email</dt>
-    <dd class="text-sm font-medium text-gray-800 dark:text-white">{@current_user.email}</dd>
+    <dd class="text-sm font-medium text-black">{@current_user.email}</dd>
   </div>
   <div>
     <dt class="text-xs text-gray-500">Role</dt>
-    <dd class="text-sm font-medium capitalize text-gray-800 dark:text-white">{@current_user.role}</dd>
+    <dd class="text-sm font-medium capitalize text-black">{@current_user.role}</dd>
   </div>
   <div>
     <dt class="text-xs text-gray-500">Member since</dt>
-    <dd class="text-sm font-medium text-gray-800 dark:text-white">
+    <dd class="text-sm font-medium text-black">
       {Calendar.strftime(@current_user.inserted_at, "%d %b %Y")}
     </dd>
   </div>
 </dl>
 
-<h3 class="mt-12 font-semibold text-gray-700 dark:text-white">Change email</h3>
+<h3 class="mt-12 font-semibold text-black">Change email</h3>
 
 <.form :let={f} for={@email_changeset} action={~p"/users/settings"} id="update_email">
   <div :if={@email_changeset.action} class="alert alert-danger">
@@ -43,7 +43,7 @@
   </div>
 </.form>
 
-<h3 class="mt-12 font-semibold text-gray-700 dark:text-white">Change password</h3>
+<h3 class="mt-12 font-semibold text-black">Change password</h3>
 
 <.form :let={f} for={@password_changeset} action={~p"/users/settings"} id="update_password" class="mb-12">
   <div :if={@password_changeset.action} class="alert alert-danger">

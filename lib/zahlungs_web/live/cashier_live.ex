@@ -196,35 +196,7 @@ defmodule ZahlungsWeb.CashierLive do
       <:subtitle>Layar transaksi penjualan</:subtitle>
     </.header>
 
-    <div :if={@last_sale} class="mt-6 max-w-md mx-auto rounded-lg border border-gray-200 p-6 shadow-sm">
-      <h3 class="text-center text-lg font-semibold">Receipt {@last_sale.code}</h3>
-      <p class="text-center text-xs text-gray-400">
-        {NaiveDateTime.to_string(@last_sale.inserted_at)} · {@last_sale.user && @last_sale.user.email}
-      </p>
-
-      <table class="w-full mt-4 text-sm">
-        <tr :for={item <- @last_sale.items} class="border-t border-gray-100">
-          <td class="py-1">{(item.product && item.product.name) || "(deleted)"}</td>
-          <td class="py-1 text-center text-gray-500">{item.quantity}×</td>
-          <td class="py-1 text-right">{money(item.line_total)}</td>
-        </tr>
-      </table>
-
-      <dl class="mt-4 space-y-1 text-sm border-t border-gray-200 pt-3">
-        <.receipt_row label="Subtotal" value={money(@last_sale.subtotal)} />
-        <.receipt_row label="Discount" value={money(@last_sale.discount)} />
-        <.receipt_row label="Tax" value={money(@last_sale.tax)} />
-        <.receipt_row label="Total" value={money(@last_sale.total)} bold />
-        <.receipt_row label="Paid" value={money(@last_sale.amount_paid)} />
-        <.receipt_row label="Change" value={money(@last_sale.change_due)} bold />
-      </dl>
-
-      <div class="mt-6 text-center">
-        <.button phx-click="new_sale">New Transaction</.button>
-      </div>
-    </div>
-
-    <div :if={is_nil(@last_sale)} class="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
+    <div class="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
       <%!-- Product search --%>
       <div>
         <form phx-change="search" phx-submit="search">
@@ -311,6 +283,20 @@ defmodule ZahlungsWeb.CashierLive do
         </div>
       </div>
     </div>
+
+    <.modal :if={@last_sale} id="receipt-modal" show on_cancel={JS.push("new_sale")}>
+      <h3 class="text-lg font-semibold text-center">Transaction complete</h3>
+      <p class="text-center text-sm text-gray-500">Receipt {@last_sale.code}</p>
+
+      <.sale_receipt sale={@last_sale} />
+
+      <div class="mt-6 flex items-center justify-between gap-3">
+        <.link href={~p"/sales/#{@last_sale.id}/receipt"} target="_blank" class="btn btn-sm btn-link">
+          Print receipt
+        </.link>
+        <.button phx-click="new_sale">New Transaction</.button>
+      </div>
+    </.modal>
     """
   end
 

@@ -4,6 +4,7 @@ defmodule Zahlungs.Catalog.Category do
 
   schema "categories" do
     field :name, :string
+    field :deleted_at, :naive_datetime
 
     has_many :products, Zahlungs.Catalog.Product
 

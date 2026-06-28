@@ -7,9 +7,9 @@ defmodule Zahlungs.SalesTest do
   import Zahlungs.CatalogFixtures
 
   describe "create_sale/3" do
-    test "records a sale with items and decrements stock" do
+    test "records a sale with items (incl. purchase price snapshot) and decrements stock" do
       user = user_fixture()
-      product = product_fixture(price: Decimal.new("1000"), stock: 10)
+      product = product_fixture(price: Decimal.new("1000"), purchase_price: Decimal.new("700"), stock: 10)
 
       assert {:ok, sale} =
                Sales.create_sale(user, [%{product_id: product.id, quantity: 3}], %{
@@ -25,6 +25,8 @@ defmodule Zahlungs.SalesTest do
       assert [item] = sale.items
       assert item.quantity == 3
       assert Decimal.equal?(item.line_total, Decimal.new("3000"))
+      assert Decimal.equal?(item.unit_price, Decimal.new("1000"))
+      assert Decimal.equal?(item.purchase_price, Decimal.new("700"))
 
       assert Catalog.get_product!(product.id).stock == 7
     end
@@ -82,6 +84,48 @@ defmodule Zahlungs.SalesTest do
 
       # Whole transaction rolled back: stock not touched.
       assert Catalog.get_product!(product.id).stock == 2
+    end
+  end
+
+  describe "return_sale/1" do
+    test "restores stock and marks the sale returned" do
+      user = user_fixture()
+      product = product_fixture(price: Decimal.new("1000"), stock: 10)
+
+      {:ok, sale} =
+        Sales.create_sale(user, [%{product_id: product.id, quantity: 3}], %{amount_paid: "3000"})
+
+      assert Catalog.get_product!(product.id).stock == 7
+
+      assert {:ok, returned} = Sales.return_sale(sale)
+      assert returned.status == "returned"
+      assert returned.returned_at
+      assert Catalog.get_product!(product.id).stock == 10
+    end
+
+    test "cannot return a sale twice" do
+      user = user_fixture()
+      product = product_fixture(price: Decimal.new("1000"), stock: 10)
+
+      {:ok, sale} =
+        Sales.create_sale(user, [%{product_id: product.id, quantity: 1}], %{amount_paid: "1000"})
+
+      assert {:ok, returned} = Sales.return_sale(sale)
+      assert {:error, :already_returned} = Sales.return_sale(returned)
+    end
+
+    test "returned sales drop out of today's summary" do
+      user = user_fixture()
+      product = product_fixture(price: Decimal.new("1000"), stock: 10)
+
+      {:ok, sale} =
+        Sales.create_sale(user, [%{product_id: product.id, quantity: 1}], %{amount_paid: "1000"})
+
+      before = Sales.sales_summary_today()
+      {:ok, _} = Sales.return_sale(sale)
+      after_return = Sales.sales_summary_today()
+
+      assert after_return.count == before.count - 1
     end
   end
 

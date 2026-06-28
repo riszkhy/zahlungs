@@ -17,13 +17,7 @@
         Forgot password?
       </.link>
     </div>
-    <input
-      type="password"
-      id={f[:password].id}
-      name={f[:password].name}
-      required
-      class="form-control"
-    />
+    <.password_field id={f[:password].id} name={f[:password].name} required />
   </div>
 
   <.input field={f[:remember_me]} type="checkbox" label="Keep me logged in for 60 days" />

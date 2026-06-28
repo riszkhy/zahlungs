@@ -30,14 +30,17 @@ defmodule Zahlungs.CatalogTest do
       assert category.id in Enum.map(Catalog.list_categories(), & &1.id)
     end
 
-    test "update_category/2 and delete_category/1" do
+    test "update_category/2 and delete_category/1 (soft delete)" do
       category = category_fixture()
 
       assert {:ok, %Category{name: "Renamed"}} =
                Catalog.update_category(category, %{name: "Renamed"})
 
-      assert {:ok, _} = Catalog.delete_category(category)
+      assert {:ok, deleted} = Catalog.delete_category(category)
+      assert deleted.deleted_at
       assert_raise Ecto.NoResultsError, fn -> Catalog.get_category!(category.id) end
+      refute category.id in Enum.map(Catalog.list_categories(), & &1.id)
+      assert Zahlungs.Repo.get(Zahlungs.Catalog.Category, category.id)
     end
   end
 
@@ -54,11 +57,11 @@ defmodule Zahlungs.CatalogTest do
       assert product.active == true
     end
 
-    test "create_product/1 requires sku and name" do
-      assert {:error, changeset} = Catalog.create_product(%{})
+    test "create_product/1 requires name (SKU is auto-generated)" do
+      assert {:error, changeset} = Catalog.create_product(%{price: 1, stock: 1})
       errors = errors_on(changeset)
-      assert "can't be blank" in errors.sku
       assert "can't be blank" in errors.name
+      refute Map.has_key?(errors, :sku)
     end
 
     test "create_product/1 enforces a unique sku" do
@@ -77,6 +80,37 @@ defmodule Zahlungs.CatalogTest do
       errors = errors_on(changeset)
       assert "must be greater than or equal to 0" in errors.price
       assert "must be greater than or equal to 0" in errors.stock
+    end
+
+    test "create_product/1 stores purchase price and margin" do
+      {:ok, product} =
+        Catalog.create_product(%{
+          sku: unique_sku(),
+          name: "Widget",
+          price: Decimal.new("1200"),
+          stock: 1,
+          purchase_price: Decimal.new("1000"),
+          margin_percent: Decimal.new("20")
+        })
+
+      assert Decimal.equal?(product.purchase_price, Decimal.new("1000"))
+      assert Decimal.equal?(product.margin_percent, Decimal.new("20"))
+    end
+
+    test "create_product/1 rejects negative purchase price and margin" do
+      assert {:error, changeset} =
+               Catalog.create_product(%{
+                 sku: unique_sku(),
+                 name: "Z",
+                 price: 1,
+                 stock: 1,
+                 purchase_price: -1,
+                 margin_percent: -5
+               })
+
+      errors = errors_on(changeset)
+      assert "must be greater than or equal to 0" in errors.purchase_price
+      assert "must be greater than or equal to 0" in errors.margin_percent
     end
 
     test "list_products/1 searches by name and sku (case-insensitive)" do
@@ -116,10 +150,17 @@ defmodule Zahlungs.CatalogTest do
       assert {:ok, %Product{active: false}} = Catalog.set_product_active(product, false)
     end
 
-    test "delete_product/1 hard-deletes" do
+    test "delete_product/1 soft-deletes (hidden but row kept)" do
       product = product_fixture()
-      assert {:ok, _} = Catalog.delete_product(product)
+      assert {:ok, deleted} = Catalog.delete_product(product)
+      assert deleted.deleted_at
+
+      # Excluded from all queries...
       assert_raise Ecto.NoResultsError, fn -> Catalog.get_product!(product.id) end
+      refute product.id in Enum.map(Catalog.list_products(), & &1.id)
+
+      # ...but the row still exists in the database.
+      assert Zahlungs.Repo.get(Zahlungs.Catalog.Product, product.id)
     end
 
     test "list_low_stock_products/1 returns only low active stock" do
@@ -164,6 +205,67 @@ defmodule Zahlungs.CatalogTest do
                MapSet.new(Enum.map(page1, & &1.id)),
                MapSet.new(Enum.map(page2, & &1.id))
              )
+    end
+  end
+
+  describe "compute_price/2" do
+    test "applies margin to the purchase price" do
+      assert Decimal.equal?(Catalog.compute_price("1000", "20"), Decimal.new("1200.00"))
+    end
+
+    test "zero margin returns the purchase price" do
+      assert Decimal.equal?(Catalog.compute_price(Decimal.new("1500"), Decimal.new("0")), Decimal.new("1500.00"))
+    end
+
+    test "blank inputs yield zero" do
+      assert Decimal.equal?(Catalog.compute_price("", ""), Decimal.new("0"))
+    end
+  end
+
+  describe "generate_sku/1 and barcode" do
+    test "uses 3 category consonants + an incrementing counter" do
+      category = category_fixture(name: "Drinks #{System.unique_integer([:positive])}")
+
+      sku1 = Catalog.generate_sku(category.id)
+      assert sku1 =~ ~r/^DRN\d{3,}$/
+
+      # creating a product without a SKU auto-generates it
+      {:ok, product} =
+        Catalog.create_product(%{name: "A", price: 1, stock: 1, category_id: category.id})
+
+      assert product.sku == sku1
+
+      sku2 = Catalog.generate_sku(category.id)
+      n1 = sku1 |> String.replace("DRN", "") |> String.to_integer()
+      n2 = sku2 |> String.replace("DRN", "") |> String.to_integer()
+      assert n2 == n1 + 1
+    end
+
+    test "falls back to GEN without a category" do
+      assert Catalog.generate_sku(nil) =~ ~r/^GEN\d{3,}$/
+    end
+
+    test "stores barcode and makes products searchable by it" do
+      barcode = "899#{System.unique_integer([:positive])}"
+      product = product_fixture(barcode: barcode)
+
+      assert product.barcode == barcode
+      assert product.id in Enum.map(Catalog.list_products(search: barcode), & &1.id)
+    end
+  end
+
+  describe "compute_margin/2" do
+    test "derives margin from selling and purchase price" do
+      assert Decimal.equal?(Catalog.compute_margin("1200", "1000"), Decimal.new("20.00"))
+    end
+
+    test "is zero when purchase price is not positive" do
+      assert Decimal.equal?(Catalog.compute_margin("1200", "0"), Decimal.new("0"))
+    end
+
+    test "round-trips with compute_price" do
+      price = Catalog.compute_price("1000", "35")
+      assert Decimal.equal?(Catalog.compute_margin(price, "1000"), Decimal.new("35.00"))
     end
   end
 end
