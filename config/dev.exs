@@ -24,6 +24,15 @@ config :zahlungs, ZahlungsWeb.Endpoint,
   # Binding to loopback ipv4 address prevents access from other machines.
   # Change to `ip: {0, 0, 0, 0}` to allow access from other machines.
   http: [ip: {127, 0, 0, 1}, port: 4000],
+  # HTTPS for camera access over the LAN (getUserMedia requires a secure context).
+  # Bound to 0.0.0.0 so a phone on the same network can reach https://<your-ip>:4001.
+  https: [
+    ip: {0, 0, 0, 0},
+    port: 4001,
+    cipher_suite: :strong,
+    certfile: "priv/cert/selfsigned.pem",
+    keyfile: "priv/cert/selfsigned_key.pem"
+  ],
   check_origin: false,
   code_reloader: true,
   debug_errors: true,

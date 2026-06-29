@@ -28,7 +28,31 @@ defmodule ZahlungsWeb.ProductLive.FormComponent do
         <% end %>
 
         <.input field={@form[:name]} type="text" label="Name" required />
+
         <.input field={@form[:barcode]} type="text" label="Barcode" />
+        <button
+          type="button"
+          id="barcode-scan-toggle"
+          phx-click="toggle_barcode_scan"
+          phx-target={@myself}
+          class="mt-1 text-sm text-blue-600 hover:underline"
+        >
+          {if @scanning, do: "■ Stop camera", else: "📷 Scan barcode with camera"}
+        </button>
+        <div :if={@scanning} class="mt-2">
+          <video
+            id="product-barcode-scanner"
+            phx-hook="BarcodeInput"
+            phx-update="ignore"
+            data-target={@form[:barcode].id}
+            autoplay
+            muted
+            class="w-full max-w-xs rounded border border-gray-300 bg-black aspect-video"
+          >
+          </video>
+          <p data-scan-status class="mt-1 text-xs text-gray-400">Point the camera at a barcode.</p>
+        </div>
+
         <.input field={@form[:description]} type="textarea" label="Description" />
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
@@ -78,7 +102,13 @@ defmodule ZahlungsWeb.ProductLive.FormComponent do
      socket
      |> assign(assigns)
      |> assign(:category_options, Catalog.category_options())
+     |> assign_new(:scanning, fn -> false end)
      |> assign(:form, to_form(Catalog.change_product(product)))}
+  end
+
+  @impl true
+  def handle_event("toggle_barcode_scan", _params, socket) do
+    {:noreply, assign(socket, :scanning, not socket.assigns.scanning)}
   end
 
   @impl true

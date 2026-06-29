@@ -271,6 +271,26 @@ defmodule Zahlungs.CatalogTest do
     end
   end
 
+  describe "get_product_by_code/1 (barcode scan)" do
+    test "finds an active product by barcode or SKU" do
+      barcode = "899#{System.unique_integer([:positive])}"
+      product = product_fixture(barcode: barcode)
+
+      assert Catalog.get_product_by_code(barcode).id == product.id
+      assert Catalog.get_product_by_code(product.sku).id == product.id
+    end
+
+    test "ignores inactive products, unknown and blank codes" do
+      barcode = "899#{System.unique_integer([:positive])}"
+      product = product_fixture(barcode: barcode)
+      {:ok, _} = Catalog.set_product_active(product, false)
+
+      assert is_nil(Catalog.get_product_by_code(barcode))
+      assert is_nil(Catalog.get_product_by_code("nope-#{System.unique_integer([:positive])}"))
+      assert is_nil(Catalog.get_product_by_code(""))
+    end
+  end
+
   describe "compute_margin/2" do
     test "derives margin from selling and purchase price" do
       assert Decimal.equal?(Catalog.compute_margin("1200", "1000"), Decimal.new("20.00"))

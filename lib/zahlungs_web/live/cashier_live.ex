@@ -11,7 +11,7 @@ defmodule ZahlungsWeb.CashierLive do
   def mount(_params, _session, socket) do
     {:ok,
      socket
-     |> assign(page_title: "Cashier", last_sale: nil)
+     |> assign(page_title: "Cashier", last_sale: nil, scanning: false)
      |> reset_cart()}
   end
 
@@ -27,10 +27,56 @@ defmodule ZahlungsWeb.CashierLive do
     {:noreply, assign(socket, search: q, results: results)}
   end
 
+  # Submit (Enter) — also fired by a barcode scanner after it "types" the code.
+  # An exact barcode/SKU match is added to the cart and the box is cleared so the
+  # next item can be scanned immediately.
+  def handle_event("scan", %{"q" => code}, socket) do
+    case Catalog.get_product_by_code(code) do
+      nil ->
+        {:noreply,
+         socket
+         |> assign(search: code)
+         |> put_flash(:error, "No product found for \"#{String.trim(code)}\".")}
+
+      %{stock: stock} when stock <= 0 ->
+        {:noreply, put_flash(socket, :error, "Product is out of stock.")}
+
+      product ->
+        {:noreply,
+         socket
+         |> add_to_cart(product)
+         |> assign(search: "", results: [])
+         |> assign_totals()
+         |> push_event("beep", %{})
+         |> put_flash(:info, "Added #{product.name}.")}
+    end
+  end
+
+  def handle_event("toggle_camera", _params, socket) do
+    {:noreply, assign(socket, :scanning, not socket.assigns.scanning)}
+  end
+
+  def handle_event("camera_unsupported", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:scanning, false)
+     |> put_flash(:error, "Camera scanning isn't supported on this browser. Use a USB scanner or type the code.")}
+  end
+
+  def handle_event("camera_error", %{"message" => message}, socket) do
+    {:noreply,
+     socket
+     |> assign(:scanning, false)
+     |> put_flash(:error, "Could not start the camera: #{message}")}
+  end
+
   def handle_event("add", %{"id" => id}, socket) do
     id = to_int(id)
     product = Enum.find(socket.assigns.results, &(&1.id == id))
-    socket = if product, do: add_to_cart(socket, product), else: socket
+
+    socket =
+      if product, do: socket |> add_to_cart(product) |> push_event("beep", %{}), else: socket
+
     {:noreply, assign_totals(socket)}
   end
 
@@ -191,6 +237,8 @@ defmodule ZahlungsWeb.CashierLive do
   @impl true
   def render(assigns) do
     ~H"""
+    <div id="cashier-beeper" phx-hook="Beeper" class="hidden"></div>
+
     <.header>
       Cashier
       <:subtitle>Layar transaksi penjualan</:subtitle>
@@ -199,17 +247,37 @@ defmodule ZahlungsWeb.CashierLive do
     <div class="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
       <%!-- Product search --%>
       <div>
-        <form phx-change="search" phx-submit="search">
+        <form phx-change="search" phx-submit="scan">
           <input
             type="text"
             name="q"
             value={@search}
-            placeholder="Search product to add (name / SKU)..."
+            placeholder="Scan barcode or search by name / SKU, then Enter..."
             phx-debounce="200"
             autocomplete="off"
             class="form-control"
           />
+          <p class="mt-1 text-xs text-gray-400">
+            Tip: a barcode scanner types the code and presses Enter to add the item.
+          </p>
         </form>
+
+        <button type="button" phx-click="toggle_camera" class="mt-2 text-sm text-blue-600 hover:underline">
+          {if @scanning, do: "■ Stop camera", else: "📷 Scan with camera"}
+        </button>
+
+        <div :if={@scanning} class="mt-2">
+          <video
+            id="cashier-scanner"
+            phx-hook="BarcodeScanner"
+            phx-update="ignore"
+            autoplay
+            muted
+            class="w-full max-w-xs rounded border border-gray-300 bg-black aspect-video"
+          >
+          </video>
+          <p class="mt-1 text-xs text-gray-400">Point the camera at a barcode.</p>
+        </div>
 
         <ul class="mt-3 divide-y divide-gray-100">
           <li :for={product <- @results} class="flex items-center justify-between py-2">

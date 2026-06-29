@@ -93,6 +93,34 @@ defmodule Zahlungs.Catalog do
     |> Repo.preload(:category)
   end
 
+  @doc """
+  Finds a single active, non-deleted product by an exact barcode or SKU match
+  (used by the cashier barcode scanner). Returns the product (category preloaded)
+  or `nil`.
+  """
+  def get_product_by_code(code) when is_binary(code) do
+    trimmed = String.trim(code)
+
+    if trimmed == "" do
+      nil
+    else
+      from(p in Product,
+        where:
+          is_nil(p.deleted_at) and p.active == true and
+            (p.barcode == ^trimmed or p.sku == ^trimmed),
+        limit: 1
+      )
+      |> Repo.all()
+      |> List.first()
+      |> case do
+        nil -> nil
+        product -> Repo.preload(product, :category)
+      end
+    end
+  end
+
+  def get_product_by_code(_), do: nil
+
   @doc "Counts products matching the given options (same filters as `list_products/1`)."
   def count_products(opts \\ []) do
     opts
