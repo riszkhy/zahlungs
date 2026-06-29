@@ -157,22 +157,28 @@ Hooks.BarcodeInput = {
 // Generated with the Web Audio API (no audio file needed).
 Hooks.Beeper = {
   mounted() {
-    this.handleEvent("beep", () => this.beep())
+    this.handleEvent("beep", (payload) => this.beep(payload && payload.type))
   },
-  beep() {
+  beep(type) {
     try {
       this.ctx = this.ctx || new (window.AudioContext || window.webkitAudioContext)()
       if (this.ctx.state === "suspended") this.ctx.resume()
+
+      const ok = type !== "error"
+      const t = this.ctx.currentTime
+      const dur = ok ? 0.15 : 0.35
+
       const osc = this.ctx.createOscillator()
       const gain = this.ctx.createGain()
       osc.connect(gain)
       gain.connect(this.ctx.destination)
-      osc.type = "square"
-      osc.frequency.value = 880
-      gain.gain.setValueAtTime(0.2, this.ctx.currentTime)
-      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.15)
-      osc.start()
-      osc.stop(this.ctx.currentTime + 0.15)
+      osc.type = ok ? "square" : "sawtooth"
+      // High, short beep on success; low, longer buzz on error.
+      osc.frequency.value = ok ? 880 : 200
+      gain.gain.setValueAtTime(0.2, t)
+      gain.gain.exponentialRampToValueAtTime(0.001, t + dur)
+      osc.start(t)
+      osc.stop(t + dur)
     } catch (e) {
       // ignore (e.g. autoplay policy before any user gesture)
     }

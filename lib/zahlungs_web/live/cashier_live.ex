@@ -36,10 +36,14 @@ defmodule ZahlungsWeb.CashierLive do
         {:noreply,
          socket
          |> assign(search: code)
+         |> push_event("beep", %{type: "error"})
          |> put_flash(:error, "No product found for \"#{String.trim(code)}\".")}
 
       %{stock: stock} when stock <= 0 ->
-        {:noreply, put_flash(socket, :error, "Product is out of stock.")}
+        {:noreply,
+         socket
+         |> push_event("beep", %{type: "error"})
+         |> put_flash(:error, "Product is out of stock.")}
 
       product ->
         {:noreply,
@@ -47,7 +51,7 @@ defmodule ZahlungsWeb.CashierLive do
          |> add_to_cart(product)
          |> assign(search: "", results: [])
          |> assign_totals()
-         |> push_event("beep", %{})
+         |> push_event("beep", %{type: "ok"})
          |> put_flash(:info, "Added #{product.name}.")}
     end
   end
@@ -75,7 +79,9 @@ defmodule ZahlungsWeb.CashierLive do
     product = Enum.find(socket.assigns.results, &(&1.id == id))
 
     socket =
-      if product, do: socket |> add_to_cart(product) |> push_event("beep", %{}), else: socket
+      if product,
+        do: socket |> add_to_cart(product) |> push_event("beep", %{type: "ok"}),
+        else: socket
 
     {:noreply, assign_totals(socket)}
   end
