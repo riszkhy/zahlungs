@@ -111,6 +111,10 @@ defmodule ZahlungsWeb.CashierLive do
     {:noreply, socket |> remove_item(to_int(id)) |> assign_totals()}
   end
 
+  def handle_event("set_amount_paid", %{"value" => value}, socket) do
+    {:noreply, socket |> assign(:amount_paid, value) |> assign_totals()}
+  end
+
   def handle_event("payment", params, socket) do
     {:noreply,
      socket
@@ -137,6 +141,7 @@ defmodule ZahlungsWeb.CashierLive do
          socket
          |> assign(:last_sale, sale)
          |> reset_cart()
+         |> push_event("reset_amount_paid", %{})
          |> put_flash(:info, "Sale #{sale.code} completed.")}
 
       {:error, reason} ->
@@ -145,7 +150,7 @@ defmodule ZahlungsWeb.CashierLive do
   end
 
   def handle_event("new_sale", _params, socket) do
-    {:noreply, socket |> assign(:last_sale, nil) |> reset_cart()}
+    {:noreply, socket |> assign(:last_sale, nil) |> reset_cart() |> push_event("reset_amount_paid", %{})}
   end
 
   ## Cart helpers
@@ -232,8 +237,6 @@ defmodule ZahlungsWeb.CashierLive do
 
   defp to_dec(_), do: Decimal.new(0)
 
-  defp money(%Decimal{} = d), do: "Rp " <> Decimal.to_string(d)
-  defp money(other), do: "Rp #{other}"
 
   defp error_message(:empty_cart), do: "Cart is empty."
   defp error_message(:insufficient_payment), do: "Amount paid is less than the total."
@@ -289,7 +292,7 @@ defmodule ZahlungsWeb.CashierLive do
           <li :for={product <- @results} class="flex items-center justify-between py-2">
             <div>
               <p class="text-sm font-medium">{product.name}</p>
-              <p class="text-xs text-gray-400">{product.sku} · stock {product.stock} · {money(product.price)}</p>
+              <p class="text-xs text-gray-400">{product.sku} · stock {product.stock} · {format_money(product.price)}</p>
             </div>
             <.button phx-click={JS.push("add", value: %{id: product.id})} class="!py-1 !px-3 !text-sm">
               Add
@@ -311,7 +314,7 @@ defmodule ZahlungsWeb.CashierLive do
           <tr :for={item <- @cart} class="border-t border-gray-100">
             <td class="py-2">
               <p class="font-medium">{item.name}</p>
-              <p class="text-xs text-gray-400">{money(item.unit_price)} each</p>
+              <p class="text-xs text-gray-400">{format_money(item.unit_price)} each</p>
             </td>
             <td class="py-2">
               <div class="flex items-center gap-2">
@@ -320,7 +323,7 @@ defmodule ZahlungsWeb.CashierLive do
                 <.link phx-click={JS.push("inc", value: %{id: item.product_id})} class="px-2 border rounded">+</.link>
               </div>
             </td>
-            <td class="py-2 text-right">{money(Decimal.mult(item.unit_price, item.quantity))}</td>
+            <td class="py-2 text-right">{format_money(Decimal.mult(item.unit_price, item.quantity))}</td>
             <td class="py-2 text-right">
               <.link phx-click={JS.push("remove", value: %{id: item.product_id})} class="text-red-600 text-xs">remove</.link>
             </td>
@@ -338,16 +341,25 @@ defmodule ZahlungsWeb.CashierLive do
               <input type="number" name="tax" value={@tax} min="0" step="0.01" class="form-control" />
             </label>
           </div>
-          <label class="block text-sm">
-            Amount paid
-            <input type="number" name="amount_paid" value={@amount_paid} min="0" step="0.01" class="form-control" />
-          </label>
         </form>
 
+        <label class="block text-sm mt-2">
+          Amount paid
+          <input
+            type="text"
+            id="amount-paid"
+            phx-hook="CurrencyInput"
+            phx-update="ignore"
+            inputmode="numeric"
+            placeholder="0"
+            class="form-control"
+          />
+        </label>
+
         <dl class="mt-4 space-y-1 text-sm border-t border-gray-200 pt-3">
-          <.receipt_row label="Subtotal" value={money(@subtotal)} />
-          <.receipt_row label="Total" value={money(@total)} bold />
-          <.receipt_row label="Change" value={money(@change_due)} />
+          <.receipt_row label="Subtotal" value={format_money(@subtotal)} />
+          <.receipt_row label="Total" value={format_money(@total)} bold />
+          <.receipt_row label="Change" value={format_money(@change_due)} />
         </dl>
 
         <div class="mt-4">

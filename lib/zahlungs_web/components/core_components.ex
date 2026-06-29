@@ -523,25 +523,63 @@ defmodule ZahlungsWeb.CoreComponents do
         <tr :for={item <- @sale.items} class="border-t border-gray-100">
           <td class="py-1">{(item.product && item.product.name) || "(deleted)"}</td>
           <td class="py-1 text-center">{item.quantity}</td>
-          <td class="py-1 text-right">{receipt_money(item.unit_price)}</td>
-          <td class="py-1 text-right">{receipt_money(item.line_total)}</td>
+          <td class="py-1 text-right">{format_money(item.unit_price)}</td>
+          <td class="py-1 text-right">{format_money(item.line_total)}</td>
         </tr>
       </tbody>
     </table>
 
     <dl class="mt-4 space-y-1 text-sm border-t border-gray-200 pt-3">
-      <div class="flex justify-between"><dt>Subtotal</dt><dd>{receipt_money(@sale.subtotal)}</dd></div>
-      <div class="flex justify-between"><dt>Discount</dt><dd>{receipt_money(@sale.discount)}</dd></div>
-      <div class="flex justify-between"><dt>Tax</dt><dd>{receipt_money(@sale.tax)}</dd></div>
-      <div class="flex justify-between font-semibold"><dt>Total</dt><dd>{receipt_money(@sale.total)}</dd></div>
-      <div class="flex justify-between"><dt>Paid</dt><dd>{receipt_money(@sale.amount_paid)}</dd></div>
-      <div class="flex justify-between"><dt>Change</dt><dd>{receipt_money(@sale.change_due)}</dd></div>
+      <div class="flex justify-between"><dt>Subtotal</dt><dd>{format_money(@sale.subtotal)}</dd></div>
+      <div class="flex justify-between"><dt>Discount</dt><dd>{format_money(@sale.discount)}</dd></div>
+      <div class="flex justify-between"><dt>Tax</dt><dd>{format_money(@sale.tax)}</dd></div>
+      <div class="flex justify-between font-semibold"><dt>Total</dt><dd>{format_money(@sale.total)}</dd></div>
+      <div class="flex justify-between"><dt>Paid</dt><dd>{format_money(@sale.amount_paid)}</dd></div>
+      <div class="flex justify-between"><dt>Change</dt><dd>{format_money(@sale.change_due)}</dd></div>
     </dl>
     """
   end
 
-  defp receipt_money(%Decimal{} = d), do: "Rp " <> Decimal.to_string(d)
-  defp receipt_money(other), do: "Rp #{other}"
+  @doc ~S"""
+  Formats a money amount as Indonesian Rupiah, e.g. `Rp 12.500,00`
+  (thousands separator `.`, decimal separator `,`, 2 decimals).
+
+  Accepts a `Decimal`, integer, or numeric string.
+  """
+  def format_money(%Decimal{} = amount) do
+    sign = if Decimal.negative?(amount), do: "-", else: ""
+
+    [int, frac] =
+      amount
+      |> Decimal.abs()
+      |> Decimal.round(2)
+      |> Decimal.to_string(:normal)
+      |> String.split(".")
+      |> case do
+        [i] -> [i, "00"]
+        [i, f] -> [i, String.pad_trailing(f, 2, "0")]
+      end
+
+    "#{sign}Rp #{group_thousands(int)},#{frac}"
+  end
+
+  def format_money(amount) when is_integer(amount), do: format_money(Decimal.new(amount))
+
+  def format_money(amount) when is_binary(amount) do
+    case Decimal.parse(amount) do
+      {decimal, _} -> format_money(decimal)
+      :error -> "Rp 0,00"
+    end
+  end
+
+  def format_money(_), do: "Rp 0,00"
+
+  defp group_thousands(int_string) do
+    int_string
+    |> String.reverse()
+    |> String.replace(~r/(\d{3})(?=\d)/, "\\1.")
+    |> String.reverse()
+  end
 
   @doc """
   Translates an error message using gettext.

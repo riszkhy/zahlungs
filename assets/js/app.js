@@ -185,6 +185,44 @@ Hooks.Beeper = {
   }
 }
 
+// Formats a money input as the user types (e.g. 12500 -> "12.500") while pushing
+// the clean integer to the server via "set_amount_paid".
+Hooks.CurrencyInput = {
+  mounted() {
+    this.reformat()
+    this.el.addEventListener("input", () => this.reformat())
+    this.handleEvent("reset_amount_paid", () => {
+      this.el.value = ""
+      this.pushEvent("set_amount_paid", { value: "" })
+    })
+  },
+  reformat() {
+    const digits = this.el.value.replace(/\D/g, "")
+    this.el.value = digits === "" ? "" : digits.replace(/\B(?=(\d{3})+(?!\d))/g, ".")
+    this.pushEvent("set_amount_paid", { value: digits })
+  }
+}
+
+// Thousands-separator formatting for a form money field (integer Rupiah). The
+// field keeps its form name, so the formatted value is submitted and the server
+// strips the separators. Server-computed values are pushed back via "money_set".
+Hooks.MoneyInput = {
+  mounted() {
+    this.fmt()
+    this.el.addEventListener("input", () => this.fmt())
+    this.handleEvent("money_set", ({ id, value }) => {
+      if (id === this.el.id) this.el.value = this.group(String(value).replace(/\D/g, ""))
+    })
+  },
+  fmt() {
+    const digits = this.el.value.replace(/\D/g, "")
+    this.el.value = digits === "" ? "" : this.group(digits)
+  },
+  group(digits) {
+    return digits === "" ? "" : digits.replace(/\B(?=(\d{3})+(?!\d))/g, ".")
+  }
+}
+
 let csrfToken = document
   .querySelector("meta[name='csrf-token']")
   .getAttribute('content')

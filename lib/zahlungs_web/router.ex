@@ -20,7 +20,7 @@ defmodule ZahlungsWeb.Router do
   scope "/", ZahlungsWeb do
     pipe_through :browser
 
-    live "/", PageLive, :index
+    get "/", PageController, :index
   end
 
   # Other scopes may use custom stacks.

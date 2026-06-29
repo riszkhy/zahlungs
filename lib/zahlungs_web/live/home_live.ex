@@ -23,7 +23,7 @@ defmodule ZahlungsWeb.HomeLive do
      |> assign(:low_stock_products, low_stock_products)
      |> assign(:low_stock, length(low_stock_products))
      |> assign(:categories, length(Catalog.list_categories()))
-     |> assign(:sales_today_total, "Rp #{Decimal.to_string(summary.total)}")
+     |> assign(:sales_today_total, ZahlungsWeb.CoreComponents.format_money(summary.total))
      |> assign(:sales_today_count, summary.count)}
   end
 

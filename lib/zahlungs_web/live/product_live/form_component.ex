@@ -56,24 +56,15 @@ defmodule ZahlungsWeb.ProductLive.FormComponent do
         <.input field={@form[:description]} type="textarea" label="Description" />
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
-          <.input
-            field={@form[:purchase_price]}
-            type="number"
-            label="Purchase price (Harga Beli)"
-            step="0.01"
-            min="0"
-          />
+          <.money_field field={@form[:purchase_price]} id="purchase-price-input" label="Purchase price (Harga Beli)" />
           <.input field={@form[:margin_percent]} type="number" label="Margin (%)" step="0.01" min="0" />
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
-          <.input
+          <.money_field
             field={@form[:price]}
-            type="number"
+            id="selling-price-input"
             label="Selling price (auto from purchase + margin)"
-            step="0.01"
-            min="0"
-            required
           />
           <.input field={@form[:stock]} type="number" label="Stock" min="0" required />
         </div>
@@ -96,6 +87,50 @@ defmodule ZahlungsWeb.ProductLive.FormComponent do
     """
   end
 
+  # A thousands-formatted money input (integer Rupiah). The visible value is
+  # formatted client-side by the MoneyInput hook; the form submits the formatted
+  # string and the server strips the separators (see strip_money/1).
+  attr :field, Phoenix.HTML.FormField, required: true
+  attr :id, :string, required: true
+  attr :label, :string, required: true
+
+  defp money_field(assigns) do
+    ~H"""
+    <div class="mt-4">
+      <.label for={@id}>{@label}</.label>
+      <input
+        type="text"
+        id={@id}
+        name={@field.name}
+        value={money_str(@field.value)}
+        phx-hook="MoneyInput"
+        phx-update="ignore"
+        inputmode="numeric"
+        class="form-control"
+      />
+      <.error :for={msg <- Enum.map(@field.errors, &translate_error/1)}>{msg}</.error>
+    </div>
+    """
+  end
+
+  # Renders any money value as a plain integer string (no separators/decimals)
+  # for the initial input value.
+  defp money_str(nil), do: ""
+  defp money_str(""), do: ""
+
+  defp money_str(%Decimal{} = d) do
+    d |> Decimal.round(0) |> Decimal.to_integer() |> Integer.to_string()
+  end
+
+  defp money_str(n) when is_integer(n), do: Integer.to_string(n)
+
+  defp money_str(s) when is_binary(s) do
+    case s |> String.replace(".", "") |> Decimal.parse() do
+      {d, _} -> money_str(d)
+      :error -> ""
+    end
+  end
+
   @impl true
   def update(%{product: product} = assigns, socket) do
     {:ok,
@@ -113,14 +148,42 @@ defmodule ZahlungsWeb.ProductLive.FormComponent do
 
   @impl true
   def handle_event("validate", %{"product" => params} = unsigned, socket) do
-    params = recalculate(params, unsigned["_target"])
+    params = params |> strip_money() |> recalculate(unsigned["_target"])
     changeset = Catalog.change_product(socket.assigns.product, params)
-    {:noreply, assign(socket, form: to_form(changeset, action: :validate))}
+
+    {:noreply,
+     socket
+     |> assign(form: to_form(changeset, action: :validate))
+     |> maybe_push_price(unsigned["_target"], params)}
   end
 
   def handle_event("save", %{"product" => params}, socket) do
-    save_product(socket, socket.assigns.action, params)
+    save_product(socket, socket.assigns.action, strip_money(params))
   end
+
+  # The money inputs submit thousands-separated strings ("12.500"); strip the
+  # separators so the changeset and price math see clean numbers.
+  defp strip_money(params) do
+    params
+    |> strip_separators("purchase_price")
+    |> strip_separators("price")
+  end
+
+  defp strip_separators(params, key) do
+    case params do
+      %{^key => value} when is_binary(value) -> Map.put(params, key, String.replace(value, ".", ""))
+      _ -> params
+    end
+  end
+
+  # When purchase price or margin changed, the selling price was recomputed —
+  # push the new value to the (hook-managed) selling-price input.
+  defp maybe_push_price(socket, target, params)
+       when target in [["product", "purchase_price"], ["product", "margin_percent"]] do
+    push_event(socket, "money_set", %{id: "selling-price-input", value: money_str(params["price"])})
+  end
+
+  defp maybe_push_price(socket, _target, _params), do: socket
 
   # Two-way pricing:
   #   * editing purchase price or margin  -> recompute the selling price
@@ -134,7 +197,8 @@ defmodule ZahlungsWeb.ProductLive.FormComponent do
   defp maybe_compute_price(params) do
     if positive_number?(params["purchase_price"]) do
       price = Catalog.compute_price(params["purchase_price"], params["margin_percent"])
-      Map.put(params, "price", Decimal.to_string(price))
+      # Store as a clean integer string (Rupiah) so the money input/formatting works.
+      Map.put(params, "price", money_str(price))
     else
       params
     end

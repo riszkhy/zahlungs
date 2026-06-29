@@ -35,18 +35,18 @@
       <tr :for={item <- @sale.items}>
         <td>{(item.product && item.product.name) || "(deleted)"}</td>
         <td class="c">{item.quantity}x</td>
-        <td class="r">{money(item.line_total)}</td>
+        <td class="r">{format_money(item.line_total)}</td>
       </tr>
     </table>
 
     <div class="line"></div>
 
-    <div class="row"><span>Subtotal</span><span>{money(@sale.subtotal)}</span></div>
-    <div class="row"><span>Discount</span><span>{money(@sale.discount)}</span></div>
-    <div class="row"><span>Tax</span><span>{money(@sale.tax)}</span></div>
-    <div class="row b"><span>Total</span><span>{money(@sale.total)}</span></div>
-    <div class="row"><span>Paid</span><span>{money(@sale.amount_paid)}</span></div>
-    <div class="row"><span>Change</span><span>{money(@sale.change_due)}</span></div>
+    <div class="row"><span>Subtotal</span><span>{format_money(@sale.subtotal)}</span></div>
+    <div class="row"><span>Discount</span><span>{format_money(@sale.discount)}</span></div>
+    <div class="row"><span>Tax</span><span>{format_money(@sale.tax)}</span></div>
+    <div class="row b"><span>Total</span><span>{format_money(@sale.total)}</span></div>
+    <div class="row"><span>Paid</span><span>{format_money(@sale.amount_paid)}</span></div>
+    <div class="row"><span>Change</span><span>{format_money(@sale.change_due)}</span></div>
 
     <p :if={@sale.status == "returned"} class="returned">*** RETURNED / REFUNDED ***</p>
 

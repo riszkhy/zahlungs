@@ -74,8 +74,6 @@ defmodule ZahlungsWeb.SalesLive.Index do
     end
   end
 
-  defp money(%Decimal{} = d), do: "Rp " <> Decimal.to_string(d)
-  defp money(other), do: "Rp #{other}"
 
   @impl true
   def render(assigns) do
@@ -97,7 +95,7 @@ defmodule ZahlungsWeb.SalesLive.Index do
       <:col :let={sale} label="Date">{Calendar.strftime(sale.inserted_at, "%d %b %Y %H:%M")}</:col>
       <:col :let={sale} label="Cashier">{sale.user && sale.user.email}</:col>
       <:col :let={sale} label="Items">{length(sale.items)}</:col>
-      <:col :let={sale} label="Total">{money(sale.total)}</:col>
+      <:col :let={sale} label="Total">{format_money(sale.total)}</:col>
       <:col :let={sale} label="Status">
         <span class={[
           "text-xs px-2 py-0.5 rounded-full",

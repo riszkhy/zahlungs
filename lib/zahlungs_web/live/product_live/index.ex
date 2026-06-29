@@ -136,7 +136,7 @@ defmodule ZahlungsWeb.ProductLive.Index do
       <:col :let={product} label="SKU">{product.sku}</:col>
       <:col :let={product} label="Name">{product.name}</:col>
       <:col :let={product} label="Category">{product.category && product.category.name}</:col>
-      <:col :let={product} label="Price">{product.price}</:col>
+      <:col :let={product} label="Price">{format_money(product.price)}</:col>
       <:col :let={product} label="Stock">{product.stock}</:col>
       <:col :let={product} label="Status">
         <span class={if product.active, do: "text-green-600", else: "text-gray-400"}>

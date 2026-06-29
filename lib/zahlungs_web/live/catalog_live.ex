@@ -115,7 +115,7 @@ defmodule ZahlungsWeb.CatalogLive do
         <p class="mt-1 text-xs text-gray-500">
           {(product.category && product.category.name) || "Uncategorized"}
         </p>
-        <p class="mt-3 text-lg font-medium text-blue-600">Rp {product.price}</p>
+        <p class="mt-3 text-lg font-medium text-blue-600">{format_money(product.price)}</p>
       </div>
     </div>
 
