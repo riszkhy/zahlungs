@@ -19,7 +19,7 @@ defmodule ZahlungsWeb.Layouts do
 
   def user_menu(assigns) do
     ~H"""
-    <div class="flex items-center gap-3 text-sm font-medium">
+    <div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-4 text-sm font-medium py-3 md:py-0">
       <%= if @current_user do %>
         <.link href={~p"/home"} class="text-white/90 hover:text-white hover:underline">Home</.link>
         <.link href={~p"/cashier"} class="text-white/90 hover:text-white hover:underline">Cashier</.link>
@@ -30,6 +30,9 @@ defmodule ZahlungsWeb.Layouts do
         </.link>
         <.link :if={@current_user.role == "admin"} href={~p"/categories"} class="text-white/90 hover:text-white hover:underline">
           Categories
+        </.link>
+        <.link :if={@current_user.role == "admin"} href={~p"/admin/users"} class="text-white/90 hover:text-white hover:underline">
+          Users
         </.link>
         <.link href={~p"/users/settings"} class="text-white/90 hover:text-white hover:underline">Profile</.link>
         <span class="hidden md:inline text-white/70">{@current_user.email}</span>

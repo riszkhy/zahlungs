@@ -12,68 +12,43 @@
     <script defer phx-track-static type="text/javascript" src={~p"/assets/app.js"}>
     </script>
   </head>
-  <body class="flex flex-col h-full pt-24 text-base-content">
-    <header class="fixed top-0 left-0 right-0 z-30 px-2 py-4 shadow-md bg-green-700 text-white sm:px-4">
-      <div class="container flex items-center justify-between mx-auto">
-        <a
-          href={~p"/home"}
-          title="Zahlungs Home"
-          class="flex items-center text-xl font-bold text-white"
-        >
+  <body class="flex flex-col h-full pt-16 text-base-content">
+    <header
+      class="fixed top-0 left-0 right-0 z-30 shadow-md bg-green-700 text-white"
+      x-data="{ open: false }"
+    >
+      <div class="container mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-y-2">
+        <a href={~p"/home"} title="Zahlungs Home" class="text-xl font-bold text-white">
           Zahlungs
         </a>
-        <div class="flex items-center space-x-1">
+
+        <button
+          type="button"
+          class="md:hidden p-1 -mr-1 text-white"
+          @click="open = !open"
+          aria-label="Toggle menu"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="26"
+            height="26"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+
+        <nav class="w-full md:w-auto hidden md:block" x-bind:class="{ hidden: !open }">
           <.user_menu current_user={assigns[:current_user]} />
-          <div class="inline-flex md:hidden" x-data="{ open: false }">
-            <button class="flex-none px-2 btn btn-link btn-sm" @click="open = true">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="24"
-                height="24"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-              >
-                <line x1="3" y1="12" x2="21" y2="12"></line>
-                <line x1="3" y1="6" x2="21" y2="6"></line>
-                <line x1="3" y1="18" x2="21" y2="18"></line>
-              </svg>
-              <span class="sr-only">Open Menu</span>
-            </button>
-            <div
-              class="absolute top-0 left-0 right-0 z-50 flex flex-col p-2 pb-4 m-2 rounded shadow-xl bg-base-200 space-y-3"
-              x-show.transition="open"
-              @click.away="open = false"
-              x-cloak
-            >
-              <button
-                class="self-end flex-none px-2 ml-2 btn btn-link btn-icon"
-                @click="open = false"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="24"
-                  height="24"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  aria-hidden="true"
-                >
-                  <line x1="18" y1="6" x2="6" y2="18"></line>
-                  <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
-                <span class="sr-only">Close Menu</span>
-              </button>
-            </div>
-          </div>
-        </div>
+        </nav>
       </div>
     </header>
 

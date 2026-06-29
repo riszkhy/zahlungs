@@ -122,6 +122,20 @@ defmodule Zahlungs.Accounts.User do
   end
 
   @doc """
+  Changeset for an admin creating a user: email + password + role in one go.
+
+  Unlike `registration_changeset/3`, this DOES allow setting the role (it is
+  only ever reached from the admin-only user-management context).
+  """
+  def admin_changeset(user, attrs, opts \\ []) do
+    user
+    |> registration_changeset(attrs, opts)
+    |> cast(attrs, [:role])
+    |> validate_required([:role])
+    |> validate_inclusion(:role, @roles)
+  end
+
+  @doc """
   Confirms the account by setting `confirmed_at`.
   """
   def confirm_changeset(user) do

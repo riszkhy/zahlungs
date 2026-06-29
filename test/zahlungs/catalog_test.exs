@@ -252,6 +252,23 @@ defmodule Zahlungs.CatalogTest do
       assert product.barcode == barcode
       assert product.id in Enum.map(Catalog.list_products(search: barcode), & &1.id)
     end
+
+    test "barcode is unique when present" do
+      barcode = "899#{System.unique_integer([:positive])}"
+      product_fixture(barcode: barcode)
+
+      assert {:error, changeset} =
+               Catalog.create_product(%{name: "Dup", price: 1, stock: 1, barcode: barcode})
+
+      assert %{barcode: ["has already been taken"]} = errors_on(changeset)
+    end
+
+    test "blank barcodes are stored as nil and may repeat" do
+      assert {:ok, a} = Catalog.create_product(%{name: "A", price: 1, stock: 1, barcode: ""})
+      assert {:ok, b} = Catalog.create_product(%{name: "B", price: 1, stock: 1, barcode: "   "})
+      assert is_nil(a.barcode)
+      assert is_nil(b.barcode)
+    end
   end
 
   describe "compute_margin/2" do

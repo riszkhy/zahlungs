@@ -95,6 +95,30 @@ defmodule Zahlungs.Accounts do
     |> Repo.update()
   end
 
+  ## Admin user management
+
+  @doc "Lists all users, ordered by email."
+  def list_users do
+    Repo.all(from u in User, order_by: u.email)
+  end
+
+  @doc "Returns a changeset for an admin creating a user (no password hashing)."
+  def change_user(%User{} = user, attrs \\ %{}) do
+    User.admin_changeset(user, attrs, hash_password: false)
+  end
+
+  @doc """
+  Creates a user as an admin (email + password + role) and marks it confirmed.
+  """
+  def create_user(attrs) do
+    now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+
+    %User{}
+    |> User.admin_changeset(attrs)
+    |> Ecto.Changeset.put_change(:confirmed_at, now)
+    |> Repo.insert()
+  end
+
   ## User registration
 
   @doc """

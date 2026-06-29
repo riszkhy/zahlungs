@@ -6,6 +6,39 @@ defmodule Zahlungs.AccountsTest do
   import Zahlungs.AccountsFixtures
   alias Zahlungs.Accounts.{User, UserToken}
 
+  describe "admin user management" do
+    test "list_users/0 returns users" do
+      user = user_fixture()
+      assert user.id in Enum.map(Accounts.list_users(), & &1.id)
+    end
+
+    test "create_user/1 creates a confirmed user with the given role" do
+      email = unique_user_email()
+
+      assert {:ok, user} =
+               Accounts.create_user(%{email: email, password: valid_user_password(), role: "admin"})
+
+      assert user.email == email
+      assert user.role == "admin"
+      assert user.confirmed_at
+    end
+
+    test "create_user/1 rejects an invalid role" do
+      assert {:error, changeset} =
+               Accounts.create_user(%{
+                 email: unique_user_email(),
+                 password: valid_user_password(),
+                 role: "boss"
+               })
+
+      assert %{role: ["is invalid"]} = errors_on(changeset)
+    end
+
+    test "set_user_role/2 changes a user's role" do
+      assert {:ok, %User{role: "admin"}} = Accounts.set_user_role(user_fixture(), "admin")
+    end
+  end
+
   describe "get_user_by_email/1" do
     test "does not return the user if the email does not exist" do
       refute Accounts.get_user_by_email("unknown@example.com")
