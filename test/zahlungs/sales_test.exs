@@ -146,6 +146,74 @@ defmodule Zahlungs.SalesTest do
     end
   end
 
+  describe "sales_report/2 and top_products/3" do
+    test "aggregates completed sales with gross profit and lists top products" do
+      user = user_fixture()
+
+      product =
+        product_fixture(price: Decimal.new("1000"), purchase_price: Decimal.new("600"), stock: 10)
+
+      {:ok, _} =
+        Sales.create_sale(user, [%{product_id: product.id, quantity: 2}], %{amount_paid: "2000"})
+
+      today = Date.utc_today()
+      report = Sales.sales_report(today, today)
+
+      assert report.transactions >= 1
+      assert Decimal.gt?(report.gross_sales, Decimal.new("0"))
+      assert Decimal.gt?(report.gross_profit, Decimal.new("0"))
+
+      top = Sales.top_products(today, today, 1000)
+      assert Enum.any?(top, &(&1.name == product.name and &1.quantity >= 2))
+    end
+
+    test "sales_by_category/2 breaks down revenue by category" do
+      user = user_fixture()
+      category = category_fixture()
+      product = product_fixture(price: Decimal.new("1000"), stock: 10, category_id: category.id)
+
+      {:ok, _} =
+        Sales.create_sale(user, [%{product_id: product.id, quantity: 3}], %{amount_paid: "3000"})
+
+      today = Date.utc_today()
+      rows = Sales.sales_by_category(today, today)
+      assert Enum.any?(rows, &(&1.category == category.name and &1.quantity >= 3))
+    end
+
+    test "sales_by_day/2 and sales_by_cashier/2 break down the period" do
+      user = user_fixture()
+      product = product_fixture(price: Decimal.new("1000"), stock: 10)
+
+      {:ok, _} =
+        Sales.create_sale(user, [%{product_id: product.id, quantity: 2}], %{amount_paid: "2000"})
+
+      today = Date.utc_today()
+
+      day_rows = Sales.sales_by_day(today, today)
+      assert Enum.any?(day_rows, &(&1.transactions >= 1))
+
+      cashier_rows = Sales.sales_by_cashier(today, today)
+      assert Enum.any?(cashier_rows, &(&1.cashier == user.email and &1.transactions >= 1))
+    end
+
+    test "returned sales are excluded from the report" do
+      user = user_fixture()
+
+      product =
+        product_fixture(price: Decimal.new("1000"), purchase_price: Decimal.new("600"), stock: 10)
+
+      {:ok, sale} =
+        Sales.create_sale(user, [%{product_id: product.id, quantity: 1}], %{amount_paid: "1000"})
+
+      today = Date.utc_today()
+      before = Sales.sales_report(today, today)
+      {:ok, _} = Sales.return_sale(sale)
+      after_return = Sales.sales_report(today, today)
+
+      assert after_return.transactions == before.transactions - 1
+    end
+  end
+
   describe "sales_summary_today/0" do
     test "counts and sums sales recorded today" do
       user = user_fixture()

@@ -208,6 +208,22 @@ defmodule Zahlungs.CatalogTest do
     end
   end
 
+  describe "stock_report/1" do
+    test "summarizes value and lists low / out-of-stock products" do
+      low = product_fixture(stock: 2, price: Decimal.new("1000"), purchase_price: Decimal.new("600"))
+      out = product_fixture(stock: 0, price: Decimal.new("5000"))
+
+      report = Catalog.stock_report(5)
+
+      assert report.products >= 2
+      assert Decimal.gt?(report.cost_value, Decimal.new("0"))
+      assert Decimal.gt?(report.retail_value, Decimal.new("0"))
+      assert low.id in Enum.map(report.low_stock, & &1.id)
+      assert out.id in Enum.map(report.out_of_stock, & &1.id)
+      refute low.id in Enum.map(report.out_of_stock, & &1.id)
+    end
+  end
+
   describe "compute_price/2" do
     test "applies margin to the purchase price" do
       assert Decimal.equal?(Catalog.compute_price("1000", "20"), Decimal.new("1200.00"))

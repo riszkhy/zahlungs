@@ -224,6 +224,136 @@ defmodule Zahlungs.Sales do
     }
   end
 
+  ## Reporting
+
+  @doc """
+  Sales report metrics for the inclusive date range (completed sales only).
+
+  Returns a map with: `:transactions`, `:items_sold`, `:revenue` (net total after
+  discount/tax), `:discount`, `:tax`, `:gross_sales` (sum of line totals),
+  `:cogs` (cost of goods sold from the purchase-price snapshot), `:gross_profit`.
+  """
+  def sales_report(%Date{} = date_from, %Date{} = date_to) do
+    {start, finish} = day_range(date_from, date_to)
+
+    totals =
+      Repo.one(
+        from s in Sale,
+          where: s.status == "completed" and s.inserted_at >= ^start and s.inserted_at <= ^finish,
+          select: %{
+            transactions: count(s.id),
+            revenue: coalesce(sum(s.total), 0),
+            discount: coalesce(sum(s.discount), 0),
+            tax: coalesce(sum(s.tax), 0)
+          }
+      )
+
+    items =
+      Repo.one(
+        from i in SaleItem,
+          join: s in assoc(i, :sale),
+          where: s.status == "completed" and s.inserted_at >= ^start and s.inserted_at <= ^finish,
+          select: %{
+            items_sold: coalesce(sum(i.quantity), 0),
+            gross_sales: coalesce(sum(i.line_total), 0),
+            cogs: coalesce(sum(fragment("? * ?", i.purchase_price, i.quantity)), 0)
+          }
+      )
+
+    gross_sales = to_decimal(items.gross_sales)
+    cogs = to_decimal(items.cogs)
+
+    %{
+      transactions: totals.transactions,
+      items_sold: items.items_sold,
+      revenue: to_decimal(totals.revenue),
+      discount: to_decimal(totals.discount),
+      tax: to_decimal(totals.tax),
+      gross_sales: gross_sales,
+      cogs: cogs,
+      gross_profit: Decimal.sub(gross_sales, cogs)
+    }
+  end
+
+  @doc "Top-selling products by quantity for the date range (completed sales)."
+  def top_products(%Date{} = date_from, %Date{} = date_to, limit \\ 10) do
+    {start, finish} = day_range(date_from, date_to)
+
+    Repo.all(
+      from i in SaleItem,
+        join: s in assoc(i, :sale),
+        left_join: p in assoc(i, :product),
+        where: s.status == "completed" and s.inserted_at >= ^start and s.inserted_at <= ^finish,
+        group_by: [i.product_id, p.name],
+        order_by: [desc: sum(i.quantity)],
+        limit: ^limit,
+        select: %{
+          name: p.name,
+          quantity: coalesce(sum(i.quantity), 0),
+          revenue: coalesce(sum(i.line_total), 0)
+        }
+    )
+  end
+
+  @doc "Per-category breakdown (completed sales) for the date range: category, quantity, revenue."
+  def sales_by_category(%Date{} = date_from, %Date{} = date_to) do
+    {start, finish} = day_range(date_from, date_to)
+
+    Repo.all(
+      from i in SaleItem,
+        join: s in assoc(i, :sale),
+        left_join: p in assoc(i, :product),
+        left_join: c in assoc(p, :category),
+        where: s.status == "completed" and s.inserted_at >= ^start and s.inserted_at <= ^finish,
+        group_by: c.name,
+        order_by: [desc: sum(i.line_total)],
+        select: %{
+          category: c.name,
+          quantity: coalesce(sum(i.quantity), 0),
+          revenue: coalesce(sum(i.line_total), 0)
+        }
+    )
+  end
+
+  @doc "Daily breakdown (completed sales) for the date range: date, transactions, revenue."
+  def sales_by_day(%Date{} = date_from, %Date{} = date_to) do
+    {start, finish} = day_range(date_from, date_to)
+
+    Repo.all(
+      from s in Sale,
+        where: s.status == "completed" and s.inserted_at >= ^start and s.inserted_at <= ^finish,
+        group_by: fragment("DATE(?)", s.inserted_at),
+        order_by: fragment("DATE(?)", s.inserted_at),
+        select: %{
+          date: fragment("DATE(?)", s.inserted_at),
+          transactions: count(s.id),
+          revenue: coalesce(sum(s.total), 0)
+        }
+    )
+  end
+
+  @doc "Per-cashier breakdown (completed sales) for the date range: cashier, transactions, revenue."
+  def sales_by_cashier(%Date{} = date_from, %Date{} = date_to) do
+    {start, finish} = day_range(date_from, date_to)
+
+    Repo.all(
+      from s in Sale,
+        left_join: u in assoc(s, :user),
+        where: s.status == "completed" and s.inserted_at >= ^start and s.inserted_at <= ^finish,
+        group_by: [s.user_id, u.email],
+        order_by: [desc: sum(s.total)],
+        select: %{
+          cashier: u.email,
+          transactions: count(s.id),
+          revenue: coalesce(sum(s.total), 0)
+        }
+    )
+  end
+
+  defp day_range(date_from, date_to) do
+    {NaiveDateTime.new!(date_from, ~T[00:00:00]), NaiveDateTime.new!(date_to, ~T[23:59:59])}
+  end
+
   ## Helpers
 
   defp to_decimal(nil), do: Decimal.new(0)

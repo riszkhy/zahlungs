@@ -95,6 +95,9 @@ defmodule ZahlungsWeb.Router do
 
       live "/admin/users", UserLive.Index, :index
       live "/admin/users/new", UserLive.Index, :new
+
+      live "/reports/sales", ReportLive.Index, :index
+      live "/reports/stock", ReportLive.Stock, :index
     end
   end
 

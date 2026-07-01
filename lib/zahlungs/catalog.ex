@@ -136,6 +136,48 @@ defmodule Zahlungs.Catalog do
     |> Repo.all()
   end
 
+  @doc """
+  Current inventory snapshot for active products: counts, stock value at cost and
+  retail (potential profit), plus low-stock and out-of-stock product lists.
+  """
+  def stock_report(threshold \\ 5) do
+    base = from(p in Product, where: is_nil(p.deleted_at) and p.active == true)
+
+    summary =
+      Repo.one(
+        from p in base,
+          select: %{
+            products: count(p.id),
+            units: coalesce(sum(p.stock), 0),
+            cost_value: coalesce(sum(fragment("? * ?", p.purchase_price, p.stock)), 0),
+            retail_value: coalesce(sum(fragment("? * ?", p.price, p.stock)), 0)
+          }
+      )
+
+    low =
+      from(p in base, where: p.stock > 0 and p.stock <= ^threshold, order_by: [asc: p.stock])
+      |> Repo.all()
+      |> Repo.preload(:category)
+
+    out =
+      from(p in base, where: p.stock <= 0, order_by: [asc: p.name])
+      |> Repo.all()
+      |> Repo.preload(:category)
+
+    cost = to_decimal(summary.cost_value)
+    retail = to_decimal(summary.retail_value)
+
+    %{
+      products: summary.products,
+      units: summary.units,
+      cost_value: cost,
+      retail_value: retail,
+      potential_profit: Decimal.sub(retail, cost),
+      low_stock: low,
+      out_of_stock: out
+    }
+  end
+
   def create_product(attrs \\ %{}) do
     %Product{}
     |> Product.changeset(maybe_put_sku(attrs))
