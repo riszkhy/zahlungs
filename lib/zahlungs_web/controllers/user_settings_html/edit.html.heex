@@ -1,6 +1,12 @@
 <h2 class="text-lg font-semibold capitalize text-black">Account settings</h2>
 
-<dl class="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-4 rounded-lg border border-gray-200 p-4">
+<dl class="mt-6 grid grid-cols-1 sm:grid-cols-4 gap-4 rounded-lg border border-gray-200 p-4">
+  <div>
+    <dt class="text-xs text-gray-500">Name</dt>
+    <dd class="text-sm font-medium text-black">
+      {if @current_user.name in [nil, ""], do: "—", else: @current_user.name}
+    </dd>
+  </div>
   <div>
     <dt class="text-xs text-gray-500">Email</dt>
     <dd class="text-sm font-medium text-black">{@current_user.email}</dd>
@@ -16,6 +22,24 @@
     </dd>
   </div>
 </dl>
+
+<h3 class="mt-12 font-semibold text-black">Change name</h3>
+
+<.form :let={f} for={@name_changeset} action={~p"/users/settings"} id="update_name">
+  <div :if={@name_changeset.action} class="alert alert-danger">
+    <p>Oops, something went wrong! Please check the errors below.</p>
+  </div>
+
+  <input type="hidden" name="action" value="update_name" />
+
+  <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-6">
+    <.input field={f[:name]} type="text" label="Name" />
+  </div>
+
+  <div class="flex justify-end mt-6">
+    <.button>Change name</.button>
+  </div>
+</.form>
 
 <h3 class="mt-12 font-semibold text-black">Change email</h3>
 

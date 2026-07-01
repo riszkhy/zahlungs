@@ -16,10 +16,10 @@ alias Zahlungs.Repo
 
 defmodule Seeds do
   @doc "Idempotently create a confirmed user with the given role."
-  def ensure_user(email, password, role) do
+  def ensure_user(email, password, role, name) do
     case Accounts.get_user_by_email(email) do
       nil ->
-        {:ok, user} = Accounts.register_user(%{email: email, password: password})
+        {:ok, user} = Accounts.register_user(%{name: name, email: email, password: password})
 
         user =
           if role == "cashier" do
@@ -40,8 +40,8 @@ defmodule Seeds do
 end
 
 # Default accounts (change passwords before any real deployment).
-Seeds.ensure_user("admin@zahlungs.test", "adminpassword123", "admin")
-Seeds.ensure_user("cashier@zahlungs.test", "cashierpassword123", "cashier")
+Seeds.ensure_user("admin@zahlungs.test", "adminpassword123", "admin", "Administrator")
+Seeds.ensure_user("cashier@zahlungs.test", "cashierpassword123", "cashier", "Kasir Utama")
 
 ## Sample catalog data (idempotent by name / SKU)
 

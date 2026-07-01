@@ -5,6 +5,7 @@ defmodule Zahlungs.Accounts.User do
   @roles ~w(admin cashier)
 
   schema "users" do
+    field :name, :string
     field :email, :string
     field :password, :string, virtual: true, redact: true
     field :hashed_password, :string, redact: true
@@ -36,9 +37,14 @@ defmodule Zahlungs.Accounts.User do
   """
   def registration_changeset(user, attrs, opts \\ []) do
     user
-    |> cast(attrs, [:email, :password])
+    |> cast(attrs, [:name, :email, :password])
+    |> validate_name()
     |> validate_email()
     |> validate_password(opts)
+  end
+
+  defp validate_name(changeset) do
+    validate_length(changeset, :name, max: 160)
   end
 
   defp validate_email(changeset) do
@@ -71,6 +77,15 @@ defmodule Zahlungs.Accounts.User do
     else
       changeset
     end
+  end
+
+  @doc """
+  A user changeset for changing the display name.
+  """
+  def name_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:name])
+    |> validate_name()
   end
 
   @doc """

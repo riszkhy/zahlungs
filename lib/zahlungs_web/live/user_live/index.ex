@@ -68,6 +68,9 @@ defmodule ZahlungsWeb.UserLive.Index do
     </.header>
 
     <.table id="users" rows={@users}>
+      <:col :let={user} label="Name">
+        {if user.name in [nil, ""], do: "—", else: user.name}
+      </:col>
       <:col :let={user} label="Email">
         {user.email}
         <span :if={user.id == @current_user.id} class="text-xs text-gray-400">(you)</span>

@@ -10,6 +10,21 @@ defmodule ZahlungsWeb.UserSettingsController do
     render(conn, :edit)
   end
 
+  def update(conn, %{"action" => "update_name"} = params) do
+    %{"user" => user_params} = params
+    user = conn.assigns.current_user
+
+    case Accounts.update_user_name(user, user_params) do
+      {:ok, _user} ->
+        conn
+        |> put_flash(:info, "Name updated successfully.")
+        |> redirect(to: ~p"/users/settings")
+
+      {:error, changeset} ->
+        render(conn, :edit, name_changeset: changeset)
+    end
+  end
+
   def update(conn, %{"action" => "update_email"} = params) do
     %{"current_password" => password, "user" => user_params} = params
     user = conn.assigns.current_user
@@ -68,6 +83,7 @@ defmodule ZahlungsWeb.UserSettingsController do
     user = conn.assigns.current_user
 
     conn
+    |> assign(:name_changeset, Accounts.change_user_name(user))
     |> assign(:email_changeset, Accounts.change_user_email(user))
     |> assign(:password_changeset, Accounts.change_user_password(user))
   end

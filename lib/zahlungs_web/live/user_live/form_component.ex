@@ -10,6 +10,7 @@ defmodule ZahlungsWeb.UserLive.FormComponent do
       <.header>{@title}</.header>
 
       <.form for={@form} id="user-form" phx-target={@myself} phx-change="validate" phx-submit="save">
+        <.input field={@form[:name]} type="text" label="Name" />
         <.input field={@form[:email]} type="email" label="Email" required />
         <.input field={@form[:password]} type="password" label="Password" required />
         <.input
