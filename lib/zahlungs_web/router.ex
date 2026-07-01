@@ -69,6 +69,8 @@ defmodule ZahlungsWeb.Router do
       live "/cashier", CashierLive, :index
       live "/sales", SalesLive.Index, :index
       live "/sales/:id", SalesLive.Index, :show
+      live "/shifts", ShiftLive.Index, :index
+      live "/shifts/:id", ShiftLive.Index, :show
     end
 
     get "/sales/:id/receipt", ReceiptController, :show

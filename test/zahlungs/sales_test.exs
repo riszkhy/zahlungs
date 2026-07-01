@@ -47,6 +47,20 @@ defmodule Zahlungs.SalesTest do
       assert Decimal.equal?(sale.change_due, Decimal.new("400"))
     end
 
+    test "tags the sale with the given shift_id" do
+      user = user_fixture()
+      product = product_fixture(price: Decimal.new("1000"), stock: 5)
+      {:ok, shift} = Zahlungs.Shifts.open_shift(user, 0)
+
+      assert {:ok, sale} =
+               Sales.create_sale(user, [%{product_id: product.id, quantity: 1}], %{
+                 amount_paid: "1000",
+                 shift_id: shift.id
+               })
+
+      assert sale.shift_id == shift.id
+    end
+
     test "aggregates duplicate product lines" do
       user = user_fixture()
       product = product_fixture(price: Decimal.new("1000"), stock: 10)

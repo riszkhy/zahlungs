@@ -37,6 +37,7 @@ defmodule Zahlungs.Sales do
     discount = to_decimal(payment[:discount] || payment["discount"])
     tax = to_decimal(payment[:tax] || payment["tax"])
     amount_paid = to_decimal(payment[:amount_paid] || payment["amount_paid"])
+    shift_id = payment[:shift_id] || payment["shift_id"]
 
     items = build_items(cart)
 
@@ -58,7 +59,8 @@ defmodule Zahlungs.Sales do
             tax: tax,
             total: total,
             amount_paid: amount_paid,
-            change_due: change_due
+            change_due: change_due,
+            shift_id: shift_id
           })
         end
     end

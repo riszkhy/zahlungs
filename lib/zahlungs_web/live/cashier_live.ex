@@ -5,14 +5,59 @@ defmodule ZahlungsWeb.CashierLive do
   """
   use ZahlungsWeb, :live_view
 
-  alias Zahlungs.{Catalog, Sales}
+  alias Zahlungs.{Catalog, Sales, Shifts}
 
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
      socket
      |> assign(page_title: "Cashier", last_sale: nil, scanning: false)
+     |> assign(opening_cash: "", closing: false, counted_cash: "", close_note: "", summary: nil)
+     |> assign(:shift, Shifts.current_shift(socket.assigns.current_user))
      |> reset_cart()}
+  end
+
+  @impl true
+  def handle_event("open_shift", %{"opening_cash" => opening_cash}, socket) do
+    case Shifts.open_shift(socket.assigns.current_user, opening_cash) do
+      {:ok, shift} ->
+        {:noreply, socket |> assign(:shift, shift) |> put_flash(:info, "Shift opened.")}
+
+      {:error, :already_open} ->
+        {:noreply,
+         socket
+         |> assign(:shift, Shifts.current_shift(socket.assigns.current_user))
+         |> put_flash(:error, "You already have an open shift.")}
+
+      {:error, _changeset} ->
+        {:noreply, put_flash(socket, :error, "Could not open shift (check the opening cash).")}
+    end
+  end
+
+  def handle_event("toggle_close", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:closing, not socket.assigns.closing)
+     |> assign(:summary, socket.assigns.shift && Shifts.shift_summary(socket.assigns.shift))
+     |> assign(counted_cash: "", close_note: "")}
+  end
+
+  def handle_event("close_change", params, socket) do
+    {:noreply,
+     assign(socket, counted_cash: params["counted_cash"] || "", close_note: params["note"] || "")}
+  end
+
+  def handle_event("close_shift", %{"counted_cash" => counted, "note" => note}, socket) do
+    case Shifts.close_shift(socket.assigns.shift, counted, note) do
+      {:ok, closed} ->
+        {:noreply,
+         socket
+         |> assign(shift: nil, closing: false)
+         |> put_flash(:info, "Shift closed. Variance: #{format_money(closed.variance)}.")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Could not close the shift.")}
+    end
   end
 
   @impl true
@@ -132,7 +177,8 @@ defmodule ZahlungsWeb.CashierLive do
     payment = %{
       amount_paid: socket.assigns.amount_paid,
       discount: socket.assigns.discount,
-      tax: socket.assigns.tax
+      tax: socket.assigns.tax,
+      shift_id: socket.assigns.shift && socket.assigns.shift.id
     }
 
     case Sales.create_sale(socket.assigns.current_user, cart, payment) do
@@ -210,7 +256,7 @@ defmodule ZahlungsWeb.CashierLive do
       subtotal: subtotal,
       total: total,
       change_due: change,
-      can_checkout: socket.assigns.cart != [] and total_ok and paid_ok
+      can_checkout: socket.assigns[:shift] != nil and socket.assigns.cart != [] and total_ok and paid_ok
     )
   end
 
@@ -253,7 +299,30 @@ defmodule ZahlungsWeb.CashierLive do
       <:subtitle>Layar transaksi penjualan</:subtitle>
     </.header>
 
-    <div class="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
+    <div :if={is_nil(@shift)} class="mt-6 max-w-sm rounded-lg border border-gray-200 p-6 shadow-sm">
+      <h3 class="font-semibold text-gray-700">Open shift</h3>
+      <p class="mt-1 text-sm text-gray-500">
+        You must open a shift (enter the opening cash) before making sales.
+      </p>
+      <form phx-submit="open_shift" class="mt-4">
+        <label class="block text-sm">
+          Opening cash (modal awal)
+          <input type="number" name="opening_cash" value={@opening_cash} min="0" step="1" required class="form-control" />
+        </label>
+        <.button class="mt-4 w-full">Open Shift</.button>
+      </form>
+    </div>
+
+    <div :if={@shift} class="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-green-200 bg-green-50 p-3 text-sm">
+      <span class="text-gray-700">
+        Shift #{@shift.id} · opened {Calendar.strftime(@shift.opened_at, "%d %b %Y %H:%M")} · float {format_money(@shift.opening_cash)}
+      </span>
+      <button type="button" phx-click="toggle_close" class="font-medium text-red-600 hover:underline">
+        Close shift
+      </button>
+    </div>
+
+    <div :if={@shift} class="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
       <%!-- Product search --%>
       <div>
         <form phx-change="search" phx-submit="scan">
@@ -383,7 +452,58 @@ defmodule ZahlungsWeb.CashierLive do
         <.button phx-click="new_sale">New Transaction</.button>
       </div>
     </.modal>
+
+    <.modal :if={@closing and @summary} id="close-shift-modal" show on_cancel={JS.push("toggle_close")}>
+      <h3 class="text-lg font-semibold">Close shift</h3>
+
+      <dl class="mt-4 space-y-1 text-sm">
+        <div class="flex justify-between"><dt>Opening cash</dt><dd>{format_money(@summary.opening_cash)}</dd></div>
+        <div class="flex justify-between"><dt>Transactions</dt><dd>{@summary.transactions}</dd></div>
+        <div class="flex justify-between"><dt>Cash sales</dt><dd>{format_money(@summary.sales_total)}</dd></div>
+        <div class="flex justify-between font-semibold border-t border-gray-200 pt-1">
+          <dt>Expected cash</dt>
+          <dd>{format_money(@summary.expected_cash)}</dd>
+        </div>
+      </dl>
+
+      <form phx-change="close_change" phx-submit="close_shift" class="mt-4 space-y-3">
+        <label class="block text-sm">
+          Counted cash (hitung fisik)
+          <input type="number" name="counted_cash" value={@counted_cash} min="0" step="1" required class="form-control" />
+        </label>
+
+        <div class="flex justify-between text-sm font-medium">
+          <span>Variance</span>
+          <span class={variance_class(@counted_cash, @summary)}>
+            {format_money(preview_variance(@counted_cash, @summary))}
+          </span>
+        </div>
+
+        <label class="block text-sm">
+          Note (optional)
+          <input type="text" name="note" value={@close_note} class="form-control" />
+        </label>
+
+        <.button class="w-full !bg-red-600">Close shift</.button>
+      </form>
+    </.modal>
     """
+  end
+
+  defp preview_variance(counted, %{expected_cash: expected}) do
+    Decimal.sub(to_dec(counted), expected)
+  end
+
+  defp preview_variance(_counted, _summary), do: Decimal.new(0)
+
+  defp variance_class(counted, summary) do
+    v = preview_variance(counted, summary)
+
+    cond do
+      Decimal.equal?(v, Decimal.new(0)) -> "text-gray-600"
+      Decimal.negative?(v) -> "text-red-600"
+      true -> "text-green-600"
+    end
   end
 
   attr :label, :string, required: true

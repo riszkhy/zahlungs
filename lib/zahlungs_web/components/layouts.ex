@@ -25,6 +25,7 @@ defmodule ZahlungsWeb.Layouts do
         <.link href={~p"/cashier"} class="text-white/90 hover:text-white hover:underline">Cashier</.link>
         <.link href={~p"/catalog"} class="text-white/90 hover:text-white hover:underline">Catalog</.link>
         <.link href={~p"/sales"} class="text-white/90 hover:text-white hover:underline">Sales</.link>
+        <.link href={~p"/shifts"} class="text-white/90 hover:text-white hover:underline">Shifts</.link>
         <.link :if={@current_user.role == "admin"} href={~p"/products"} class="text-white/90 hover:text-white hover:underline">
           Products
         </.link>

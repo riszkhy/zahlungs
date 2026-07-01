@@ -14,6 +14,7 @@ defmodule Zahlungs.Sales.Sale do
     field :returned_at, :naive_datetime
 
     belongs_to :user, Zahlungs.Accounts.User
+    belongs_to :shift, Zahlungs.Shifts.Shift
     has_many :items, Zahlungs.Sales.SaleItem
 
     timestamps()
@@ -25,6 +26,7 @@ defmodule Zahlungs.Sales.Sale do
     |> cast(attrs, [
       :code,
       :user_id,
+      :shift_id,
       :subtotal,
       :discount,
       :tax,
