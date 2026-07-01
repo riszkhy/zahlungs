@@ -48,6 +48,35 @@ defmodule Zahlungs.ShiftsTest do
     assert {:error, :not_open} = Shifts.close_shift(closed, 0)
   end
 
+  test "expected_cash and summary count only cash sales" do
+    user = user_fixture()
+    product = product_fixture(price: Decimal.new("1000"), stock: 10)
+    {:ok, shift} = Shifts.open_shift(user, "100000")
+
+    {:ok, _} =
+      Sales.create_sale(user, [%{product_id: product.id, quantity: 1}], %{
+        amount_paid: "1000",
+        shift_id: shift.id,
+        payment_method: "cash"
+      })
+
+    {:ok, _} =
+      Sales.create_sale(user, [%{product_id: product.id, quantity: 2}], %{
+        shift_id: shift.id,
+        payment_method: "qris"
+      })
+
+    # cash 1000 counts toward the drawer; qris 2000 does not
+    assert Decimal.equal?(Shifts.expected_cash(shift), Decimal.new("101000"))
+
+    summary = Shifts.shift_summary(shift)
+    assert summary.transactions == 2
+    assert Decimal.equal?(summary.cash_total, Decimal.new("1000"))
+    assert Decimal.equal?(summary.noncash_total, Decimal.new("2000"))
+    assert Decimal.equal?(summary.sales_total, Decimal.new("3000"))
+    assert Decimal.equal?(summary.expected_cash, Decimal.new("101000"))
+  end
+
   test "list_shifts/1 can filter by user, and shift_sales/1 lists a shift's sales" do
     user = user_fixture()
     other = user_fixture()

@@ -36,8 +36,8 @@ defmodule Zahlungs.Sales do
   def create_sale(user, cart, payment) do
     discount = to_decimal(payment[:discount] || payment["discount"])
     tax = to_decimal(payment[:tax] || payment["tax"])
-    amount_paid = to_decimal(payment[:amount_paid] || payment["amount_paid"])
     shift_id = payment[:shift_id] || payment["shift_id"]
+    payment_method = payment[:payment_method] || payment["payment_method"] || "cash"
 
     items = build_items(cart)
 
@@ -48,9 +48,15 @@ defmodule Zahlungs.Sales do
       true ->
         subtotal = Enum.reduce(items, Decimal.new(0), &Decimal.add(&2, &1.line_total))
         total = subtotal |> Decimal.sub(discount) |> Decimal.add(tax)
-        change_due = Decimal.sub(amount_paid, total)
 
-        if Decimal.lt?(amount_paid, total) do
+        # Non-cash payments (QRIS/card/transfer) are settled for the exact total,
+        # so there is no tendered amount to validate and no change to give. Only
+        # cash payments must cover the total and can produce change.
+        cash? = payment_method == "cash"
+        amount_paid = if cash?, do: to_decimal(payment[:amount_paid] || payment["amount_paid"]), else: total
+        change_due = if cash?, do: Decimal.sub(amount_paid, total), else: Decimal.new(0)
+
+        if cash? and Decimal.lt?(amount_paid, total) do
           {:error, :insufficient_payment}
         else
           do_create_sale(user, items, %{
@@ -60,7 +66,8 @@ defmodule Zahlungs.Sales do
             total: total,
             amount_paid: amount_paid,
             change_due: change_due,
-            shift_id: shift_id
+            shift_id: shift_id,
+            payment_method: payment_method
           })
         end
     end

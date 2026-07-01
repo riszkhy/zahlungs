@@ -65,37 +65,53 @@ defmodule Zahlungs.Shifts do
   def close_shift(%Shift{}, _counted_cash, _note), do: {:error, :not_open}
 
   @doc """
-  Expected cash in the drawer for a shift = opening float + completed cash sales
-  tagged to the shift. (Returned sales are excluded; cross-shift refunds are a
-  future refinement — see docs/CONCEPT-cashier-shift.md.)
+  Expected cash in the drawer for a shift = opening float + completed **cash**
+  sales tagged to the shift. Non-cash sales (QRIS/card/transfer) never enter the
+  drawer, so they are excluded. (Returned sales are excluded; cross-shift refunds
+  are a future refinement — see docs/CONCEPT-cashier-shift.md.)
   """
   def expected_cash(%Shift{} = shift) do
-    sales_total =
+    cash_total =
       Repo.one(
         from s in Sale,
-          where: s.shift_id == ^shift.id and s.status == "completed",
+          where:
+            s.shift_id == ^shift.id and s.status == "completed" and
+              s.payment_method == "cash",
           select: coalesce(sum(s.total), 0)
       )
 
-    Decimal.add(to_decimal(shift.opening_cash), to_decimal(sales_total))
+    Decimal.add(to_decimal(shift.opening_cash), to_decimal(cash_total))
   end
 
-  @doc "Summary for the close screen: opening, transactions, sales total, expected."
+  @doc """
+  Summary for the close/detail screen: opening float, transaction count, cash vs
+  non-cash sales totals, and the expected drawer cash (opening + cash sales).
+  """
   def shift_summary(%Shift{} = shift) do
     row =
       Repo.one(
         from s in Sale,
           where: s.shift_id == ^shift.id and s.status == "completed",
-          select: %{transactions: count(s.id), sales_total: coalesce(sum(s.total), 0)}
+          select: %{
+            transactions: count(s.id),
+            sales_total: coalesce(sum(s.total), 0),
+            cash_total:
+              coalesce(sum(fragment("CASE WHEN ? = 'cash' THEN ? ELSE 0 END", s.payment_method, s.total)), 0)
+          }
       )
 
     sales_total = to_decimal(row.sales_total)
+    cash_total = to_decimal(row.cash_total)
+    noncash_total = Decimal.sub(sales_total, cash_total)
+    opening = to_decimal(shift.opening_cash)
 
     %{
-      opening_cash: to_decimal(shift.opening_cash),
+      opening_cash: opening,
       transactions: row.transactions,
       sales_total: sales_total,
-      expected_cash: Decimal.add(to_decimal(shift.opening_cash), sales_total)
+      cash_total: cash_total,
+      noncash_total: noncash_total,
+      expected_cash: Decimal.add(opening, cash_total)
     }
   end
 

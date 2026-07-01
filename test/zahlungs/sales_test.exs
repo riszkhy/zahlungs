@@ -61,6 +61,41 @@ defmodule Zahlungs.SalesTest do
       assert sale.shift_id == shift.id
     end
 
+    test "defaults to cash payment method" do
+      user = user_fixture()
+      product = product_fixture(price: Decimal.new("1000"), stock: 5)
+
+      assert {:ok, sale} =
+               Sales.create_sale(user, [%{product_id: product.id, quantity: 1}], %{amount_paid: "1000"})
+
+      assert sale.payment_method == "cash"
+    end
+
+    test "non-cash payment settles the exact total and ignores amount_paid" do
+      user = user_fixture()
+      product = product_fixture(price: Decimal.new("5000"), stock: 5)
+
+      assert {:ok, sale} =
+               Sales.create_sale(user, [%{product_id: product.id, quantity: 1}], %{
+                 payment_method: "qris"
+               })
+
+      assert sale.payment_method == "qris"
+      assert Decimal.equal?(sale.amount_paid, Decimal.new("5000"))
+      assert Decimal.equal?(sale.change_due, Decimal.new(0))
+    end
+
+    test "cash payment below total is rejected, but non-cash is not" do
+      user = user_fixture()
+      product = product_fixture(price: Decimal.new("5000"), stock: 5)
+      cart = [%{product_id: product.id, quantity: 1}]
+
+      assert {:error, :insufficient_payment} =
+               Sales.create_sale(user, cart, %{amount_paid: "1000", payment_method: "cash"})
+
+      assert {:ok, _} = Sales.create_sale(user, cart, %{amount_paid: "0", payment_method: "card"})
+    end
+
     test "aggregates duplicate product lines" do
       user = user_fixture()
       product = product_fixture(price: Decimal.new("1000"), stock: 10)

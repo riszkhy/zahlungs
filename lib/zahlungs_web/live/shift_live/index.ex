@@ -51,6 +51,12 @@ defmodule ZahlungsWeb.ShiftLive.Index do
   defp cashier_name(%{name: name}) when name not in [nil, ""], do: name
   defp cashier_name(%{email: email}), do: email
 
+  defp payment_label("cash"), do: "Tunai"
+  defp payment_label("qris"), do: "QRIS"
+  defp payment_label("card"), do: "Kartu"
+  defp payment_label("transfer"), do: "Transfer"
+  defp payment_label(other), do: other
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -98,7 +104,10 @@ defmodule ZahlungsWeb.ShiftLive.Index do
       <dl class="mt-4 space-y-1 text-sm border-t border-gray-200 pt-3">
         <div class="flex justify-between"><dt>Opening cash</dt><dd>{format_money(@shift.opening_cash)}</dd></div>
         <div class="flex justify-between"><dt>Transactions</dt><dd>{@summary.transactions}</dd></div>
-        <div class="flex justify-between"><dt>Cash sales</dt><dd>{format_money(@summary.sales_total)}</dd></div>
+        <div class="flex justify-between"><dt>Cash sales</dt><dd>{format_money(@summary.cash_total)}</dd></div>
+        <div class="flex justify-between text-gray-500">
+          <dt>Non-cash sales (QRIS/kartu/transfer)</dt><dd>{format_money(@summary.noncash_total)}</dd>
+        </div>
         <div class="flex justify-between font-semibold"><dt>Expected cash</dt><dd>{format_money(@summary.expected_cash)}</dd></div>
         <div :if={@shift.status == "closed"} class="flex justify-between">
           <dt>Counted cash</dt><dd>{format_money(@shift.counted_cash)}</dd>
@@ -117,6 +126,7 @@ defmodule ZahlungsWeb.ShiftLive.Index do
         <:col :let={sale} label="Code">{sale.code}</:col>
         <:col :let={sale} label="Time">{Calendar.strftime(sale.inserted_at, "%H:%M")}</:col>
         <:col :let={sale} label="Items">{length(sale.items)}</:col>
+        <:col :let={sale} label="Method">{payment_label(sale.payment_method)}</:col>
         <:col :let={sale} label="Total">{format_money(sale.total)}</:col>
         <:col :let={sale} label="Status">{sale.status}</:col>
       </.table>

@@ -2,8 +2,11 @@ defmodule Zahlungs.Sales.Sale do
   use Ecto.Schema
   import Ecto.Changeset
 
+  @payment_methods ~w(cash qris card transfer)
+
   schema "sales" do
     field :code, :string
+    field :payment_method, :string, default: "cash"
     field :subtotal, :decimal, default: Decimal.new(0)
     field :discount, :decimal, default: Decimal.new(0)
     field :tax, :decimal, default: Decimal.new(0)
@@ -20,6 +23,9 @@ defmodule Zahlungs.Sales.Sale do
     timestamps()
   end
 
+  @doc "Returns the list of valid payment methods."
+  def payment_methods, do: @payment_methods
+
   @doc false
   def changeset(sale, attrs) do
     sale
@@ -33,9 +39,11 @@ defmodule Zahlungs.Sales.Sale do
       :total,
       :amount_paid,
       :change_due,
-      :status
+      :status,
+      :payment_method
     ])
-    |> validate_required([:subtotal, :total, :amount_paid, :change_due, :status])
+    |> validate_required([:subtotal, :total, :amount_paid, :change_due, :status, :payment_method])
+    |> validate_inclusion(:payment_method, @payment_methods)
     |> validate_number(:total, greater_than_or_equal_to: 0)
     |> unique_constraint(:code)
   end

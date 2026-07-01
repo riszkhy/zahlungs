@@ -160,6 +160,11 @@ defmodule ZahlungsWeb.CashierLive do
     {:noreply, socket |> assign(:amount_paid, value) |> assign_totals()}
   end
 
+  def handle_event("set_payment_method", %{"method" => method}, socket)
+      when method in ~w(cash qris card transfer) do
+    {:noreply, socket |> assign(:payment_method, method) |> assign_totals()}
+  end
+
   def handle_event("payment", params, socket) do
     {:noreply,
      socket
@@ -178,6 +183,7 @@ defmodule ZahlungsWeb.CashierLive do
       amount_paid: socket.assigns.amount_paid,
       discount: socket.assigns.discount,
       tax: socket.assigns.tax,
+      payment_method: socket.assigns.payment_method,
       shift_id: socket.assigns.shift && socket.assigns.shift.id
     }
 
@@ -237,7 +243,7 @@ defmodule ZahlungsWeb.CashierLive do
 
   defp reset_cart(socket) do
     socket
-    |> assign(cart: [], discount: "", tax: "", amount_paid: "", search: "", results: [])
+    |> assign(cart: [], discount: "", tax: "", amount_paid: "", payment_method: "cash", search: "", results: [])
     |> assign_totals()
   end
 
@@ -246,11 +252,13 @@ defmodule ZahlungsWeb.CashierLive do
     discount = to_dec(socket.assigns.discount)
     tax = to_dec(socket.assigns.tax)
     total = subtotal |> Decimal.sub(discount) |> Decimal.add(tax)
-    paid = to_dec(socket.assigns.amount_paid)
-    change = Decimal.sub(paid, total)
+    cash? = socket.assigns.payment_method == "cash"
+    # Non-cash is settled for the exact total: no tendered amount, no change.
+    paid = if cash?, do: to_dec(socket.assigns.amount_paid), else: total
+    change = if cash?, do: Decimal.sub(paid, total), else: Decimal.new(0)
 
     total_ok = not Decimal.lt?(total, Decimal.new(0))
-    paid_ok = not Decimal.lt?(paid, total)
+    paid_ok = not cash? or not Decimal.lt?(paid, total)
 
     assign(socket,
       subtotal: subtotal,
@@ -288,6 +296,17 @@ defmodule ZahlungsWeb.CashierLive do
   defp error_message(:insufficient_payment), do: "Amount paid is less than the total."
   defp error_message({:insufficient_stock, name}), do: "Insufficient stock for #{name}."
   defp error_message(_), do: "Could not complete the sale."
+
+  defp payment_method_options do
+    [{"cash", "Tunai"}, {"qris", "QRIS"}, {"card", "Kartu"}, {"transfer", "Transfer"}]
+  end
+
+  defp payment_method_label(method) do
+    payment_method_options() |> List.keyfind(method, 0) |> case do
+      {_value, label} -> label
+      nil -> method
+    end
+  end
 
   @impl true
   def render(assigns) do
@@ -412,7 +431,25 @@ defmodule ZahlungsWeb.CashierLive do
           </div>
         </form>
 
-        <label class="block text-sm mt-2">
+        <div class="mt-3">
+          <span class="text-sm">Payment method</span>
+          <div class="mt-1 grid grid-cols-4 gap-2">
+            <button
+              :for={{value, label} <- payment_method_options()}
+              type="button"
+              phx-click={JS.push("set_payment_method", value: %{method: value})}
+              class={[
+                "text-sm py-1.5 rounded border",
+                (@payment_method == value && "bg-green-700 text-white border-green-700") ||
+                  "bg-white text-gray-700 border-gray-300 hover:border-green-500"
+              ]}
+            >
+              {label}
+            </button>
+          </div>
+        </div>
+
+        <label :if={@payment_method == "cash"} class="block text-sm mt-2">
           Amount paid
           <input
             type="text"
@@ -424,11 +461,14 @@ defmodule ZahlungsWeb.CashierLive do
             class="form-control"
           />
         </label>
+        <p :if={@payment_method != "cash"} class="text-sm text-gray-500 mt-2">
+          Dibayar pas sejumlah total ({payment_method_label(@payment_method)}).
+        </p>
 
         <dl class="mt-4 space-y-1 text-sm border-t border-gray-200 pt-3">
           <.receipt_row label="Subtotal" value={format_money(@subtotal)} />
           <.receipt_row label="Total" value={format_money(@total)} bold />
-          <.receipt_row label="Change" value={format_money(@change_due)} />
+          <.receipt_row :if={@payment_method == "cash"} label="Change" value={format_money(@change_due)} />
         </dl>
 
         <div class="mt-4">
@@ -459,7 +499,10 @@ defmodule ZahlungsWeb.CashierLive do
       <dl class="mt-4 space-y-1 text-sm">
         <div class="flex justify-between"><dt>Opening cash</dt><dd>{format_money(@summary.opening_cash)}</dd></div>
         <div class="flex justify-between"><dt>Transactions</dt><dd>{@summary.transactions}</dd></div>
-        <div class="flex justify-between"><dt>Cash sales</dt><dd>{format_money(@summary.sales_total)}</dd></div>
+        <div class="flex justify-between"><dt>Cash sales</dt><dd>{format_money(@summary.cash_total)}</dd></div>
+        <div class="flex justify-between text-gray-500">
+          <dt>Non-cash sales (QRIS/kartu/transfer)</dt><dd>{format_money(@summary.noncash_total)}</dd>
+        </div>
         <div class="flex justify-between font-semibold border-t border-gray-200 pt-1">
           <dt>Expected cash</dt>
           <dd>{format_money(@summary.expected_cash)}</dd>
