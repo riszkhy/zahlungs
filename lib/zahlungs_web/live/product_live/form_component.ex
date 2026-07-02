@@ -55,8 +55,27 @@ defmodule ZahlungsWeb.ProductLive.FormComponent do
 
         <.input field={@form[:description]} type="textarea" label="Description" />
 
+        <div class="rounded-lg border border-gray-200 p-3 mt-4">
+          <.input field={@form[:consignment]} type="checkbox" label="Konsinyasi (titip jual)" />
+          <.input
+            :if={consignment?(@form)}
+            field={@form[:supplier_id]}
+            type="select"
+            label="Supplier (pemilik barang)"
+            prompt="— pilih supplier —"
+            options={@supplier_options}
+          />
+          <p :if={consignment?(@form)} class="mt-1 text-xs text-gray-500">
+            Harga beli di bawah = harga titip yang dibayar ke supplier per unit terjual.
+          </p>
+        </div>
+
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
-          <.money_field field={@form[:purchase_price]} id="purchase-price-input" label="Purchase price (Harga Beli)" />
+          <.money_field
+            field={@form[:purchase_price]}
+            id="purchase-price-input"
+            label={if consignment?(@form), do: "Harga titip (bayar ke supplier)", else: "Purchase price (Harga Beli)"}
+          />
           <.input field={@form[:margin_percent]} type="number" label="Margin (%)" step="0.01" min="0" />
         </div>
 
@@ -137,6 +156,7 @@ defmodule ZahlungsWeb.ProductLive.FormComponent do
      socket
      |> assign(assigns)
      |> assign(:category_options, Catalog.category_options())
+     |> assign(:supplier_options, Catalog.supplier_options())
      |> assign_new(:scanning, fn -> false end)
      |> assign(:form, to_form(Catalog.change_product(product)))}
   end
@@ -249,6 +269,16 @@ defmodule ZahlungsWeb.ProductLive.FormComponent do
 
       {:error, %Ecto.Changeset{} = changeset} ->
         {:noreply, assign(socket, form: to_form(changeset))}
+    end
+  end
+
+  # Is the consignment checkbox currently on? Handles both the cast boolean value
+  # and the raw "true"/"false" form param string.
+  defp consignment?(form) do
+    case form[:consignment].value do
+      true -> true
+      "true" -> true
+      _ -> false
     end
   end
 

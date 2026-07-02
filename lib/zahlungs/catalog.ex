@@ -9,7 +9,7 @@ defmodule Zahlungs.Catalog do
   import Ecto.Query, warn: false
   alias Zahlungs.Repo
 
-  alias Zahlungs.Catalog.{Category, Product}
+  alias Zahlungs.Catalog.{Category, Product, Supplier}
 
   ## Products
 
@@ -387,6 +387,75 @@ defmodule Zahlungs.Catalog do
 
   def change_category(%Category{} = category, attrs \\ %{}) do
     Category.changeset(category, attrs)
+  end
+
+  ## Suppliers (consignors)
+
+  defp suppliers_query, do: from(s in Supplier, where: is_nil(s.deleted_at))
+
+  @doc "Lists all (non-deleted) suppliers ordered by name."
+  def list_suppliers do
+    suppliers_query() |> order_by(:name) |> Repo.all()
+  end
+
+  @doc "Returns `{name, id}` tuples for use in select inputs."
+  def supplier_options do
+    suppliers_query()
+    |> order_by(:name)
+    |> select([s], {s.name, s.id})
+    |> Repo.all()
+  end
+
+  def get_supplier!(id), do: suppliers_query() |> Repo.get!(id)
+
+  @doc """
+  Current on-hand consignment stock per supplier (units still in the shop that
+  could be returned to the consignor), valued at the consignment (purchase) price.
+  """
+  def consignment_stock_on_hand do
+    Repo.all(
+      from p in Product,
+        join: sup in assoc(p, :supplier),
+        where: is_nil(p.deleted_at) and p.consignment == true and p.stock > 0,
+        group_by: [sup.id, sup.name],
+        order_by: sup.name,
+        select: %{
+          supplier_id: sup.id,
+          supplier: sup.name,
+          products: count(p.id),
+          units: coalesce(sum(p.stock), 0),
+          cost_value: coalesce(sum(fragment("? * ?", p.purchase_price, p.stock)), 0)
+        }
+    )
+    |> Enum.map(fn row ->
+      %{row | cost_value: to_decimal(row.cost_value), units: to_int(row.units)}
+    end)
+  end
+
+  defp to_int(%Decimal{} = d), do: Decimal.to_integer(d)
+  defp to_int(n) when is_integer(n), do: n
+
+  def create_supplier(attrs \\ %{}) do
+    %Supplier{}
+    |> Supplier.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  def update_supplier(%Supplier{} = supplier, attrs) do
+    supplier
+    |> Supplier.changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc "Soft-deletes a supplier (sets `deleted_at`); the row is kept for history."
+  def delete_supplier(%Supplier{} = supplier) do
+    supplier
+    |> Ecto.Changeset.change(deleted_at: now())
+    |> Repo.update()
+  end
+
+  def change_supplier(%Supplier{} = supplier, attrs \\ %{}) do
+    Supplier.changeset(supplier, attrs)
   end
 
   defp now, do: NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)

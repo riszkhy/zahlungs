@@ -35,11 +35,17 @@ defmodule ZahlungsWeb.Layouts do
         <.link :if={@current_user.role == "admin"} href={~p"/admin/users"} class="text-white/90 hover:text-white hover:underline">
           Users
         </.link>
+        <.link :if={@current_user.role == "admin"} href={~p"/admin/suppliers"} class="text-white/90 hover:text-white hover:underline">
+          Suppliers
+        </.link>
         <.link :if={@current_user.role == "admin"} href={~p"/reports/sales"} class="text-white/90 hover:text-white hover:underline">
           Reports
         </.link>
         <.link :if={@current_user.role == "admin"} href={~p"/reports/stock"} class="text-white/90 hover:text-white hover:underline">
           Stock
+        </.link>
+        <.link :if={@current_user.role == "admin"} href={~p"/reports/consignment"} class="text-white/90 hover:text-white hover:underline">
+          Consignment
         </.link>
         <.link href={~p"/users/settings"} class="text-white/90 hover:text-white hover:underline">Profile</.link>
         <span class="hidden md:inline text-white/70">{@current_user.email}</span>

@@ -324,6 +324,45 @@ defmodule Zahlungs.Sales do
     )
   end
 
+  @doc """
+  Consignment settlement per supplier for the date range (completed sales only,
+  consignment products only). For each supplier returns the quantity sold, the
+  revenue, the amount payable to the supplier (Σ snapshot purchase_price × qty),
+  and the shop's margin (revenue − payable).
+  """
+  def consignment_settlement(%Date{} = date_from, %Date{} = date_to) do
+    {start, finish} = day_range(date_from, date_to)
+
+    Repo.all(
+      from i in SaleItem,
+        join: s in assoc(i, :sale),
+        join: p in assoc(i, :product),
+        join: sup in assoc(p, :supplier),
+        where:
+          s.status == "completed" and p.consignment == true and
+            s.inserted_at >= ^start and s.inserted_at <= ^finish,
+        group_by: [sup.id, sup.name],
+        order_by: [desc: sum(i.line_total)],
+        select: %{
+          supplier_id: sup.id,
+          supplier: sup.name,
+          qty_sold: coalesce(sum(i.quantity), 0),
+          revenue: coalesce(sum(i.line_total), 0),
+          payable: coalesce(sum(fragment("? * ?", i.purchase_price, i.quantity)), 0)
+        }
+    )
+    |> Enum.map(fn row ->
+      revenue = to_decimal(row.revenue)
+      payable = to_decimal(row.payable)
+
+      %{row | revenue: revenue, payable: payable, qty_sold: to_int(row.qty_sold)}
+      |> Map.put(:margin, Decimal.sub(revenue, payable))
+    end)
+  end
+
+  defp to_int(%Decimal{} = d), do: Decimal.to_integer(d)
+  defp to_int(n) when is_integer(n), do: n
+
   @doc "Daily breakdown (completed sales) for the date range: date, transactions, revenue."
   def sales_by_day(%Date{} = date_from, %Date{} = date_to) do
     {start, finish} = day_range(date_from, date_to)

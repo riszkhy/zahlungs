@@ -13,6 +13,12 @@ defmodule Zahlungs.CatalogFixtures do
     category
   end
 
+  def supplier_fixture(attrs \\ %{}) do
+    attrs = Enum.into(attrs, %{name: "Supplier #{System.unique_integer([:positive])}"})
+    {:ok, supplier} = Catalog.create_supplier(attrs)
+    supplier
+  end
+
   def product_fixture(attrs \\ %{}) do
     attrs =
       Enum.into(attrs, %{
