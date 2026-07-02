@@ -409,7 +409,7 @@ defmodule Zahlungs.Catalog do
   def get_supplier!(id), do: suppliers_query() |> Repo.get!(id)
 
   @doc """
-  Current on-hand consignment stock per supplier (units still in the shop that
+  Current on-hand consignment stock per product (units still in the shop that
   could be returned to the consignor), valued at the consignment (purchase) price.
   """
   def consignment_stock_on_hand do
@@ -417,23 +417,18 @@ defmodule Zahlungs.Catalog do
       from p in Product,
         join: sup in assoc(p, :supplier),
         where: is_nil(p.deleted_at) and p.consignment == true and p.stock > 0,
-        group_by: [sup.id, sup.name],
-        order_by: sup.name,
+        order_by: [sup.name, p.name],
         select: %{
           supplier_id: sup.id,
           supplier: sup.name,
-          products: count(p.id),
-          units: coalesce(sum(p.stock), 0),
-          cost_value: coalesce(sum(fragment("? * ?", p.purchase_price, p.stock)), 0)
+          product: p.name,
+          sku: p.sku,
+          units: p.stock,
+          cost_value: fragment("? * ?", p.purchase_price, p.stock)
         }
     )
-    |> Enum.map(fn row ->
-      %{row | cost_value: to_decimal(row.cost_value), units: to_int(row.units)}
-    end)
+    |> Enum.map(fn row -> %{row | cost_value: to_decimal(row.cost_value)} end)
   end
-
-  defp to_int(%Decimal{} = d), do: Decimal.to_integer(d)
-  defp to_int(n) when is_integer(n), do: n
 
   def create_supplier(attrs \\ %{}) do
     %Supplier{}

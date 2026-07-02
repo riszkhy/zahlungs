@@ -123,7 +123,8 @@ defmodule ZahlungsWeb.ReportLive.Consignment do
     <h3 class="mt-10 font-semibold text-amber-700">Sisa stok titipan (bisa dikembalikan)</h3>
     <.table id="on-hand" rows={@on_hand}>
       <:col :let={r} label="Supplier">{r.supplier}</:col>
-      <:col :let={r} label="Jenis produk">{r.products}</:col>
+      <:col :let={r} label="Produk">{r.product}</:col>
+      <:col :let={r} label="SKU">{r.sku}</:col>
       <:col :let={r} label="Unit">{r.units}</:col>
       <:col :let={r} label="Nilai (harga titip)">{format_money(r.cost_value)}</:col>
     </.table>
