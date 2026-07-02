@@ -19,7 +19,7 @@ defmodule ZahlungsWeb.CashierLive do
 
   @impl true
   def handle_event("open_shift", %{"opening_cash" => opening_cash}, socket) do
-    case Shifts.open_shift(socket.assigns.current_user, opening_cash) do
+    case Shifts.open_shift(socket.assigns.current_user, strip_money(opening_cash)) do
       {:ok, shift} ->
         {:noreply, socket |> assign(:shift, shift) |> put_flash(:info, "Shift opened.")}
 
@@ -297,6 +297,11 @@ defmodule ZahlungsWeb.CashierLive do
   defp error_message({:insufficient_stock, name}), do: "Insufficient stock for #{name}."
   defp error_message(_), do: "Could not complete the sale."
 
+  # The MoneyInput hook submits a thousands-formatted string (e.g. "100.000");
+  # strip the separators so it parses as integer Rupiah on the server.
+  defp strip_money(value) when is_binary(value), do: String.replace(value, ~r/\D/, "")
+  defp strip_money(value), do: value
+
   defp payment_method_options do
     [{"cash", "Tunai"}, {"qris", "QRIS"}, {"card", "Kartu"}, {"transfer", "Transfer"}]
   end
@@ -326,7 +331,18 @@ defmodule ZahlungsWeb.CashierLive do
       <form phx-submit="open_shift" class="mt-4">
         <label class="block text-sm">
           Opening cash (modal awal)
-          <input type="number" name="opening_cash" value={@opening_cash} min="0" step="1" required class="form-control" />
+          <input
+            type="text"
+            id="opening-cash-input"
+            name="opening_cash"
+            value={@opening_cash}
+            phx-hook="MoneyInput"
+            phx-update="ignore"
+            inputmode="numeric"
+            placeholder="0"
+            required
+            class="form-control"
+          />
         </label>
         <.button class="mt-4 w-full">Open Shift</.button>
       </form>
