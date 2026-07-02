@@ -18,7 +18,7 @@ defmodule ZahlungsWeb.ShiftLive.Index do
   end
 
   defp apply_action(socket, :index, _params) do
-    socket |> assign(page_title: "Shifts", shift: nil, sales: [], summary: nil)
+    socket |> assign(page_title: "Shifts", shift: nil, sales: [], summary: nil, movements: [])
   end
 
   defp apply_action(socket, :show, %{"id" => id}) do
@@ -31,6 +31,7 @@ defmodule ZahlungsWeb.ShiftLive.Index do
       |> assign(:shift, shift)
       |> assign(:sales, Shifts.shift_sales(shift))
       |> assign(:summary, Shifts.shift_summary(shift))
+      |> assign(:movements, Shifts.list_cash_movements(shift))
     else
       socket
       |> put_flash(:error, "You can only view your own shifts.")
@@ -56,6 +57,12 @@ defmodule ZahlungsWeb.ShiftLive.Index do
   defp payment_label("card"), do: "Kartu"
   defp payment_label("transfer"), do: "Transfer"
   defp payment_label(other), do: other
+
+  defp movement_label("expense"), do: "Pengeluaran"
+  defp movement_label("cash_drop"), do: "Setor brankas"
+  defp movement_label("cash_in"), do: "Uang masuk"
+  defp movement_label("consignment_payment"), do: "Bayar konsinyasi"
+  defp movement_label(other), do: other
 
   @impl true
   def render(assigns) do
@@ -108,6 +115,12 @@ defmodule ZahlungsWeb.ShiftLive.Index do
         <div class="flex justify-between text-gray-500">
           <dt>Non-cash sales (QRIS/kartu/transfer)</dt><dd>{format_money(@summary.noncash_total)}</dd>
         </div>
+        <div :if={not Decimal.equal?(@summary.cash_in, Decimal.new(0))} class="flex justify-between text-green-700">
+          <dt>Cash in</dt><dd>+{format_money(@summary.cash_in)}</dd>
+        </div>
+        <div :if={not Decimal.equal?(@summary.cash_out, Decimal.new(0))} class="flex justify-between text-red-600">
+          <dt>Cash out</dt><dd>−{format_money(@summary.cash_out)}</dd>
+        </div>
         <div class="flex justify-between font-semibold"><dt>Expected cash</dt><dd>{format_money(@summary.expected_cash)}</dd></div>
         <div :if={@shift.status == "closed"} class="flex justify-between">
           <dt>Counted cash</dt><dd>{format_money(@shift.counted_cash)}</dd>
@@ -129,6 +142,19 @@ defmodule ZahlungsWeb.ShiftLive.Index do
         <:col :let={sale} label="Method">{payment_label(sale.payment_method)}</:col>
         <:col :let={sale} label="Total">{format_money(sale.total)}</:col>
         <:col :let={sale} label="Status">{sale.status}</:col>
+      </.table>
+
+      <h4 :if={@movements != []} class="mt-6 font-semibold text-gray-700">Gerakan kas</h4>
+      <.table :if={@movements != []} id="shift-movements" rows={@movements}>
+        <:col :let={m} label="Time">{Calendar.strftime(m.inserted_at, "%H:%M")}</:col>
+        <:col :let={m} label="Tipe">{movement_label(m.category)}</:col>
+        <:col :let={m} label="Supplier">{m.supplier && m.supplier.name}</:col>
+        <:col :let={m} label="Catatan">{m.note}</:col>
+        <:col :let={m} label="Jumlah">
+          <span class={if m.direction == "in", do: "text-green-700", else: "text-red-600"}>
+            {if m.direction == "in", do: "+", else: "−"}{format_money(m.amount)}
+          </span>
+        </:col>
       </.table>
     </.modal>
     """

@@ -12,7 +12,7 @@ defmodule Zahlungs.Shifts do
 
   alias Zahlungs.Accounts.User
   alias Zahlungs.Sales.Sale
-  alias Zahlungs.Shifts.Shift
+  alias Zahlungs.Shifts.{Shift, CashMovement}
 
   @doc "Returns the user's currently open shift, or nil."
   def current_shift(%User{} = user) do
@@ -65,27 +65,73 @@ defmodule Zahlungs.Shifts do
   def close_shift(%Shift{}, _counted_cash, _note), do: {:error, :not_open}
 
   @doc """
-  Expected cash in the drawer for a shift = opening float + completed **cash**
-  sales tagged to the shift. Non-cash sales (QRIS/card/transfer) never enter the
-  drawer, so they are excluded. (Returned sales are excluded; cross-shift refunds
-  are a future refinement — see docs/CONCEPT-cashier-shift.md.)
+  Records a cash movement (drawer in/out) against an open shift. The shift and
+  user are taken from the shift itself (never from `attrs`, so they can't be
+  spoofed). Returns `{:error, :not_open}` for a closed shift.
+  """
+  def add_cash_movement(shift, attrs \\ %{})
+
+  def add_cash_movement(%Shift{status: "open"} = shift, attrs) do
+    %CashMovement{shift_id: shift.id, user_id: shift.user_id}
+    |> CashMovement.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  def add_cash_movement(%Shift{}, _attrs), do: {:error, :not_open}
+
+  @doc """
+  Total consignment payments (cash-out) per supplier within the date range,
+  as a map `%{supplier_id => Decimal}`. Used by the settlement report to show
+  how much has already been paid vs the payable amount.
+  """
+  def consignment_payments_by_supplier(%Date{} = date_from, %Date{} = date_to) do
+    start = NaiveDateTime.new!(date_from, ~T[00:00:00])
+    finish = NaiveDateTime.new!(date_to, ~T[23:59:59])
+
+    Repo.all(
+      from m in CashMovement,
+        where:
+          m.category == "consignment_payment" and not is_nil(m.supplier_id) and
+            m.inserted_at >= ^start and m.inserted_at <= ^finish,
+        group_by: m.supplier_id,
+        select: {m.supplier_id, coalesce(sum(m.amount), 0)}
+    )
+    |> Map.new(fn {sid, total} -> {sid, to_decimal(total)} end)
+  end
+
+  @doc "Lists the cash movements of a shift (most recent first), preloading supplier."
+  def list_cash_movements(%Shift{} = shift) do
+    Repo.all(
+      from m in CashMovement,
+        where: m.shift_id == ^shift.id,
+        order_by: [desc: m.inserted_at],
+        preload: [:supplier]
+    )
+  end
+
+  @doc """
+  Expected cash in the drawer for a shift:
+
+      opening float + completed cash sales + cash-in movements − cash-out movements
+
+  Non-cash sales (QRIS/card/transfer) never enter the drawer, so they are
+  excluded. Cash movements (setoran, pengeluaran, bayar konsinyasi) adjust the
+  expected amount. (Returned sales are excluded; cross-shift refunds are a future
+  refinement — see docs/CONCEPT-cashier-shift.md.)
   """
   def expected_cash(%Shift{} = shift) do
-    cash_total =
-      Repo.one(
-        from s in Sale,
-          where:
-            s.shift_id == ^shift.id and s.status == "completed" and
-              s.payment_method == "cash",
-          select: coalesce(sum(s.total), 0)
-      )
+    %{cash_in: cash_in, cash_out: cash_out} = movement_totals(shift.id)
 
-    Decimal.add(to_decimal(shift.opening_cash), to_decimal(cash_total))
+    to_decimal(shift.opening_cash)
+    |> Decimal.add(cash_sales_total(shift.id))
+    |> Decimal.add(cash_in)
+    |> Decimal.sub(cash_out)
   end
 
   @doc """
   Summary for the close/detail screen: opening float, transaction count, cash vs
-  non-cash sales totals, and the expected drawer cash (opening + cash sales).
+  non-cash sales totals, cash-in/out movements, and the expected drawer cash
+  (opening + cash sales + cash-in − cash-out).
   """
   def shift_summary(%Shift{} = shift) do
     row =
@@ -104,6 +150,7 @@ defmodule Zahlungs.Shifts do
     cash_total = to_decimal(row.cash_total)
     noncash_total = Decimal.sub(sales_total, cash_total)
     opening = to_decimal(shift.opening_cash)
+    %{cash_in: cash_in, cash_out: cash_out} = movement_totals(shift.id)
 
     %{
       opening_cash: opening,
@@ -111,8 +158,39 @@ defmodule Zahlungs.Shifts do
       sales_total: sales_total,
       cash_total: cash_total,
       noncash_total: noncash_total,
-      expected_cash: Decimal.add(opening, cash_total)
+      cash_in: cash_in,
+      cash_out: cash_out,
+      expected_cash:
+        opening |> Decimal.add(cash_total) |> Decimal.add(cash_in) |> Decimal.sub(cash_out)
     }
+  end
+
+  # Total of completed cash sales tagged to the shift.
+  defp cash_sales_total(shift_id) do
+    Repo.one(
+      from s in Sale,
+        where:
+          s.shift_id == ^shift_id and s.status == "completed" and s.payment_method == "cash",
+        select: coalesce(sum(s.total), 0)
+    )
+    |> to_decimal()
+  end
+
+  # Cash-in and cash-out movement totals for the shift.
+  defp movement_totals(shift_id) do
+    row =
+      Repo.one(
+        from m in CashMovement,
+          where: m.shift_id == ^shift_id,
+          select: %{
+            cash_in:
+              coalesce(sum(fragment("CASE WHEN ? = 'in' THEN ? ELSE 0 END", m.direction, m.amount)), 0),
+            cash_out:
+              coalesce(sum(fragment("CASE WHEN ? = 'out' THEN ? ELSE 0 END", m.direction, m.amount)), 0)
+          }
+      )
+
+    %{cash_in: to_decimal(row.cash_in), cash_out: to_decimal(row.cash_out)}
   end
 
   @doc """

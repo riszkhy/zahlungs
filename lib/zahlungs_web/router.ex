@@ -71,6 +71,7 @@ defmodule ZahlungsWeb.Router do
       live "/sales/:id", SalesLive.Index, :show
       live "/shifts", ShiftLive.Index, :index
       live "/shifts/:id", ShiftLive.Index, :show
+      live "/reports/consignment", ReportLive.Consignment, :index
     end
 
     get "/sales/:id/receipt", ReceiptController, :show
@@ -104,7 +105,6 @@ defmodule ZahlungsWeb.Router do
 
       live "/reports/sales", ReportLive.Index, :index
       live "/reports/stock", ReportLive.Stock, :index
-      live "/reports/consignment", ReportLive.Consignment, :index
     end
   end
 

@@ -14,6 +14,7 @@ defmodule Zahlungs.Shifts.Shift do
 
     belongs_to :user, Zahlungs.Accounts.User
     has_many :sales, Zahlungs.Sales.Sale
+    has_many :cash_movements, Zahlungs.Shifts.CashMovement
 
     timestamps()
   end

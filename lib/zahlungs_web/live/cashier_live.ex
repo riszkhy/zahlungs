@@ -13,15 +13,30 @@ defmodule ZahlungsWeb.CashierLive do
      socket
      |> assign(page_title: "Cashier", last_sale: nil, scanning: false)
      |> assign(opening_cash: "", closing: false, counted_cash: "", close_note: "", summary: nil)
+     |> assign(
+       movement_open: false,
+       mv_category: "expense",
+       mv_amount: "",
+       mv_note: "",
+       mv_supplier_id: "",
+       movements: [],
+       supplier_options: Zahlungs.Catalog.supplier_options()
+     )
      |> assign(:shift, Shifts.current_shift(socket.assigns.current_user))
+     |> load_movements()
      |> reset_cart()}
+  end
+
+  defp load_movements(socket) do
+    movements = if socket.assigns.shift, do: Shifts.list_cash_movements(socket.assigns.shift), else: []
+    assign(socket, :movements, movements)
   end
 
   @impl true
   def handle_event("open_shift", %{"opening_cash" => opening_cash}, socket) do
     case Shifts.open_shift(socket.assigns.current_user, strip_money(opening_cash)) do
       {:ok, shift} ->
-        {:noreply, socket |> assign(:shift, shift) |> put_flash(:info, "Shift opened.")}
+        {:noreply, socket |> assign(:shift, shift) |> load_movements() |> put_flash(:info, "Shift opened.")}
 
       {:error, :already_open} ->
         {:noreply,
@@ -52,11 +67,52 @@ defmodule ZahlungsWeb.CashierLive do
       {:ok, closed} ->
         {:noreply,
          socket
-         |> assign(shift: nil, closing: false)
+         |> assign(shift: nil, closing: false, movements: [])
          |> put_flash(:info, "Shift closed. Variance: #{format_money(closed.variance)}.")}
 
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Could not close the shift.")}
+    end
+  end
+
+  def handle_event("toggle_movement", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:movement_open, not socket.assigns.movement_open)
+     |> assign(mv_category: "expense", mv_amount: "", mv_note: "", mv_supplier_id: "")}
+  end
+
+  def handle_event("movement_change", params, socket) do
+    {:noreply,
+     assign(socket,
+       mv_category: params["category"] || socket.assigns.mv_category,
+       mv_amount: params["amount"] || "",
+       mv_note: params["note"] || "",
+       mv_supplier_id: params["supplier_id"] || ""
+     )}
+  end
+
+  def handle_event("save_movement", params, socket) do
+    attrs = %{
+      "category" => params["category"],
+      "amount" => strip_money(params["amount"] || ""),
+      "note" => params["note"],
+      "supplier_id" => blank_to_nil(params["supplier_id"])
+    }
+
+    case Shifts.add_cash_movement(socket.assigns.shift, attrs) do
+      {:ok, _movement} ->
+        {:noreply,
+         socket
+         |> assign(movement_open: false)
+         |> load_movements()
+         |> put_flash(:info, "Gerakan kas dicatat.")}
+
+      {:error, %Ecto.Changeset{}} ->
+        {:noreply, put_flash(socket, :error, "Gagal mencatat (cek jumlah & supplier).")}
+
+      {:error, :not_open} ->
+        {:noreply, put_flash(socket, :error, "Shift belum dibuka.")}
     end
   end
 
@@ -302,6 +358,28 @@ defmodule ZahlungsWeb.CashierLive do
   defp strip_money(value) when is_binary(value), do: String.replace(value, ~r/\D/, "")
   defp strip_money(value), do: value
 
+  defp blank_to_nil(nil), do: nil
+  defp blank_to_nil(value) when is_binary(value), do: if(String.trim(value) == "", do: nil, else: value)
+
+  defp movement_category_options do
+    [
+      {"expense", "Pengeluaran (beli keperluan)"},
+      {"cash_drop", "Setor ke brankas"},
+      {"cash_in", "Uang masuk / tambah modal"},
+      {"consignment_payment", "Bayar konsinyasi"}
+    ]
+  end
+
+  defp movement_label(category) do
+    movement_category_options() |> List.keyfind(category, 0) |> case do
+      {_value, label} -> label
+      nil -> category
+    end
+  end
+
+  defp movement_sign("in"), do: "+"
+  defp movement_sign(_), do: "−"
+
   defp payment_method_options do
     [{"cash", "Tunai"}, {"qris", "QRIS"}, {"card", "Kartu"}, {"transfer", "Transfer"}]
   end
@@ -352,9 +430,30 @@ defmodule ZahlungsWeb.CashierLive do
       <span class="text-gray-700">
         Shift #{@shift.id} · opened {Calendar.strftime(@shift.opened_at, "%d %b %Y %H:%M")} · float {format_money(@shift.opening_cash)}
       </span>
-      <button type="button" phx-click="toggle_close" class="font-medium text-red-600 hover:underline">
-        Close shift
-      </button>
+      <div class="flex items-center gap-4">
+        <button type="button" phx-click="toggle_movement" class="font-medium text-green-700 hover:underline">
+          Catat kas
+        </button>
+        <button type="button" phx-click="toggle_close" class="font-medium text-red-600 hover:underline">
+          Close shift
+        </button>
+      </div>
+    </div>
+
+    <div :if={@shift && @movements != []} class="mt-2 rounded-lg border border-gray-200 p-3 text-sm">
+      <p class="font-medium text-gray-700">Gerakan kas shift ini</p>
+      <ul class="mt-1 divide-y divide-gray-100">
+        <li :for={m <- @movements} class="flex justify-between py-1">
+          <span class="text-gray-600">
+            {movement_label(m.category)}
+            <span :if={m.supplier} class="text-gray-400">· {m.supplier.name}</span>
+            <span :if={m.note not in [nil, ""]} class="text-gray-400">· {m.note}</span>
+          </span>
+          <span class={if m.direction == "in", do: "text-green-700", else: "text-red-600"}>
+            {movement_sign(m.direction)}{format_money(m.amount)}
+          </span>
+        </li>
+      </ul>
     </div>
 
     <div :if={@shift} class="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -519,6 +618,12 @@ defmodule ZahlungsWeb.CashierLive do
         <div class="flex justify-between text-gray-500">
           <dt>Non-cash sales (QRIS/kartu/transfer)</dt><dd>{format_money(@summary.noncash_total)}</dd>
         </div>
+        <div :if={not Decimal.equal?(@summary.cash_in, Decimal.new(0))} class="flex justify-between text-green-700">
+          <dt>Cash in (setoran/tambah modal)</dt><dd>+{format_money(@summary.cash_in)}</dd>
+        </div>
+        <div :if={not Decimal.equal?(@summary.cash_out, Decimal.new(0))} class="flex justify-between text-red-600">
+          <dt>Cash out (pengeluaran/bayar konsinyasi)</dt><dd>−{format_money(@summary.cash_out)}</dd>
+        </div>
         <div class="flex justify-between font-semibold border-t border-gray-200 pt-1">
           <dt>Expected cash</dt>
           <dd>{format_money(@summary.expected_cash)}</dd>
@@ -544,6 +649,57 @@ defmodule ZahlungsWeb.CashierLive do
         </label>
 
         <.button class="w-full !bg-red-600">Close shift</.button>
+      </form>
+    </.modal>
+
+    <.modal :if={@movement_open and @shift} id="movement-modal" show on_cancel={JS.push("toggle_movement")}>
+      <h3 class="text-lg font-semibold">Catat kas laci</h3>
+      <p class="mt-1 text-sm text-gray-500">
+        Uang masuk/keluar laci di tengah shift (setoran, pengeluaran, bayar konsinyasi).
+      </p>
+
+      <form phx-change="movement_change" phx-submit="save_movement" class="mt-4 space-y-3">
+        <label class="block text-sm">
+          Tipe
+          <select name="category" class="form-control">
+            <option :for={{value, label} <- movement_category_options()} value={value} selected={@mv_category == value}>
+              {label}
+            </option>
+          </select>
+        </label>
+
+        <label :if={@mv_category == "consignment_payment"} class="block text-sm">
+          Supplier
+          <select name="supplier_id" class="form-control">
+            <option value="">— pilih supplier —</option>
+            <option :for={{name, id} <- @supplier_options} value={id} selected={to_string(id) == @mv_supplier_id}>
+              {name}
+            </option>
+          </select>
+        </label>
+
+        <label class="block text-sm">
+          Jumlah
+          <input
+            type="text"
+            id="movement-amount-input"
+            name="amount"
+            value={@mv_amount}
+            phx-hook="MoneyInput"
+            phx-update="ignore"
+            inputmode="numeric"
+            placeholder="0"
+            required
+            class="form-control"
+          />
+        </label>
+
+        <label class="block text-sm">
+          Catatan (opsional)
+          <input type="text" name="note" value={@mv_note} class="form-control" />
+        </label>
+
+        <.button class="w-full">Simpan</.button>
       </form>
     </.modal>
     """

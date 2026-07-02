@@ -77,6 +77,67 @@ defmodule Zahlungs.ShiftsTest do
     assert Decimal.equal?(summary.expected_cash, Decimal.new("101000"))
   end
 
+  test "cash movements adjust expected cash (in adds, out subtracts)" do
+    user = user_fixture()
+    {:ok, shift} = Shifts.open_shift(user, "100000")
+
+    {:ok, _} = Shifts.add_cash_movement(shift, %{"category" => "cash_in", "amount" => "20000"})
+    {:ok, _} = Shifts.add_cash_movement(shift, %{"category" => "expense", "amount" => "5000"})
+
+    # 100000 + 20000 - 5000 = 115000
+    assert Decimal.equal?(Shifts.expected_cash(shift), Decimal.new("115000"))
+
+    summary = Shifts.shift_summary(shift)
+    assert Decimal.equal?(summary.cash_in, Decimal.new("20000"))
+    assert Decimal.equal?(summary.cash_out, Decimal.new("5000"))
+    assert Decimal.equal?(summary.expected_cash, Decimal.new("115000"))
+  end
+
+  test "consignment payment requires a supplier and cannot be recorded on a closed shift" do
+    user = user_fixture()
+    supplier = supplier_fixture()
+    {:ok, shift} = Shifts.open_shift(user, 0)
+
+    assert {:error, changeset} =
+             Shifts.add_cash_movement(shift, %{"category" => "consignment_payment", "amount" => "1000"})
+
+    assert %{supplier_id: [_ | _]} = errors_on(changeset)
+
+    assert {:ok, _} =
+             Shifts.add_cash_movement(shift, %{
+               "category" => "consignment_payment",
+               "amount" => "1000",
+               "supplier_id" => supplier.id
+             })
+
+    {:ok, closed} = Shifts.close_shift(shift, 0)
+    assert {:error, :not_open} = Shifts.add_cash_movement(closed, %{"category" => "expense", "amount" => "1"})
+  end
+
+  test "consignment_payments_by_supplier/2 sums payments per supplier in range" do
+    user = user_fixture()
+    supplier = supplier_fixture()
+    {:ok, shift} = Shifts.open_shift(user, 0)
+
+    {:ok, _} =
+      Shifts.add_cash_movement(shift, %{
+        "category" => "consignment_payment",
+        "amount" => "3000",
+        "supplier_id" => supplier.id
+      })
+
+    {:ok, _} =
+      Shifts.add_cash_movement(shift, %{
+        "category" => "consignment_payment",
+        "amount" => "2000",
+        "supplier_id" => supplier.id
+      })
+
+    today = Date.utc_today()
+    paid = Shifts.consignment_payments_by_supplier(today, today)
+    assert Decimal.equal?(Map.fetch!(paid, supplier.id), Decimal.new("5000"))
+  end
+
   test "list_shifts/1 can filter by user, and shift_sales/1 lists a shift's sales" do
     user = user_fixture()
     other = user_fixture()

@@ -75,7 +75,8 @@ defmodule Zahlungs.ConsignmentTest do
         })
 
       today = Date.utc_today()
-      assert [row] = Sales.consignment_settlement(today, today)
+      # dev/test share one DB, so scope assertions to this test's supplier.
+      row = Enum.find(Sales.consignment_settlement(today, today), &(&1.supplier_id == ctx.supplier.id))
 
       assert row.supplier == ctx.supplier.name
       assert row.qty_sold == 3
@@ -95,7 +96,7 @@ defmodule Zahlungs.ConsignmentTest do
       {:ok, _} = Sales.return_sale(sale)
 
       today = Date.utc_today()
-      assert Sales.consignment_settlement(today, today) == []
+      refute Enum.any?(Sales.consignment_settlement(today, today), &(&1.supplier_id == ctx.supplier.id))
     end
 
     test "reports on-hand consignment stock per supplier", ctx do
@@ -104,7 +105,7 @@ defmodule Zahlungs.ConsignmentTest do
           amount_paid: "3000"
         })
 
-      assert [row] = Catalog.consignment_stock_on_hand()
+      row = Enum.find(Catalog.consignment_stock_on_hand(), &(&1.supplier_id == ctx.supplier.id))
       assert row.supplier == ctx.supplier.name
       # 10 - 3 sold = 7 units left; value at 700 = 4900
       assert row.units == 7
