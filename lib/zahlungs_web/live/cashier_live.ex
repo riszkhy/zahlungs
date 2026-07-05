@@ -28,7 +28,9 @@ defmodule ZahlungsWeb.CashierLive do
   end
 
   defp load_movements(socket) do
-    movements = if socket.assigns.shift, do: Shifts.list_cash_movements(socket.assigns.shift), else: []
+    movements =
+      if socket.assigns.shift, do: Shifts.list_cash_movements(socket.assigns.shift), else: []
+
     assign(socket, :movements, movements)
   end
 
@@ -36,7 +38,8 @@ defmodule ZahlungsWeb.CashierLive do
   def handle_event("open_shift", %{"opening_cash" => opening_cash}, socket) do
     case Shifts.open_shift(socket.assigns.current_user, strip_money(opening_cash)) do
       {:ok, shift} ->
-        {:noreply, socket |> assign(:shift, shift) |> load_movements() |> put_flash(:info, "Shift opened.")}
+        {:noreply,
+         socket |> assign(:shift, shift) |> load_movements() |> put_flash(:info, "Shift opened.")}
 
       {:error, :already_open} ->
         {:noreply,
@@ -165,7 +168,10 @@ defmodule ZahlungsWeb.CashierLive do
     {:noreply,
      socket
      |> assign(:scanning, false)
-     |> put_flash(:error, "Camera scanning isn't supported on this browser. Use a USB scanner or type the code.")}
+     |> put_flash(
+       :error,
+       "Camera scanning isn't supported on this browser. Use a USB scanner or type the code."
+     )}
   end
 
   def handle_event("camera_error", %{"message" => message}, socket) do
@@ -258,7 +264,8 @@ defmodule ZahlungsWeb.CashierLive do
   end
 
   def handle_event("new_sale", _params, socket) do
-    {:noreply, socket |> assign(:last_sale, nil) |> reset_cart() |> push_event("reset_amount_paid", %{})}
+    {:noreply,
+     socket |> assign(:last_sale, nil) |> reset_cart() |> push_event("reset_amount_paid", %{})}
   end
 
   ## Cart helpers
@@ -299,7 +306,15 @@ defmodule ZahlungsWeb.CashierLive do
 
   defp reset_cart(socket) do
     socket
-    |> assign(cart: [], discount: "", tax: "", amount_paid: "", payment_method: "cash", search: "", results: [])
+    |> assign(
+      cart: [],
+      discount: "",
+      tax: "",
+      amount_paid: "",
+      payment_method: "cash",
+      search: "",
+      results: []
+    )
     |> assign_totals()
   end
 
@@ -320,7 +335,8 @@ defmodule ZahlungsWeb.CashierLive do
       subtotal: subtotal,
       total: total,
       change_due: change,
-      can_checkout: socket.assigns[:shift] != nil and socket.assigns.cart != [] and total_ok and paid_ok
+      can_checkout:
+        socket.assigns[:shift] != nil and socket.assigns.cart != [] and total_ok and paid_ok
     )
   end
 
@@ -347,7 +363,6 @@ defmodule ZahlungsWeb.CashierLive do
 
   defp to_dec(_), do: Decimal.new(0)
 
-
   defp error_message(:empty_cart), do: "Cart is empty."
   defp error_message(:insufficient_payment), do: "Amount paid is less than the total."
   defp error_message({:insufficient_stock, name}), do: "Insufficient stock for #{name}."
@@ -359,7 +374,9 @@ defmodule ZahlungsWeb.CashierLive do
   defp strip_money(value), do: value
 
   defp blank_to_nil(nil), do: nil
-  defp blank_to_nil(value) when is_binary(value), do: if(String.trim(value) == "", do: nil, else: value)
+
+  defp blank_to_nil(value) when is_binary(value),
+    do: if(String.trim(value) == "", do: nil, else: value)
 
   defp movement_category_options do
     [
@@ -371,7 +388,9 @@ defmodule ZahlungsWeb.CashierLive do
   end
 
   defp movement_label(category) do
-    movement_category_options() |> List.keyfind(category, 0) |> case do
+    movement_category_options()
+    |> List.keyfind(category, 0)
+    |> case do
       {_value, label} -> label
       nil -> category
     end
@@ -385,7 +404,9 @@ defmodule ZahlungsWeb.CashierLive do
   end
 
   defp payment_method_label(method) do
-    payment_method_options() |> List.keyfind(method, 0) |> case do
+    payment_method_options()
+    |> List.keyfind(method, 0)
+    |> case do
       {_value, label} -> label
       nil -> method
     end

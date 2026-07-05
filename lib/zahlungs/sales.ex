@@ -54,7 +54,10 @@ defmodule Zahlungs.Sales do
         # so there is no tendered amount to validate and no change to give. Only
         # cash payments must cover the total and can produce change.
         cash? = payment_method == "cash"
-        amount_paid = if cash?, do: to_decimal(payment[:amount_paid] || payment["amount_paid"]), else: total
+
+        amount_paid =
+          if cash?, do: to_decimal(payment[:amount_paid] || payment["amount_paid"]), else: total
+
         change_due = if cash?, do: Decimal.sub(amount_paid, total), else: Decimal.new(0)
 
         if cash? and Decimal.lt?(amount_paid, total) do

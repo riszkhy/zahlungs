@@ -66,9 +66,7 @@ defmodule Zahlungs.Catalog.Product do
   # (the consignor). Non-consignment products may leave supplier_id blank.
   defp validate_consignment_supplier(changeset) do
     if get_field(changeset, :consignment) do
-      validate_required(changeset, [:supplier_id],
-        message: "wajib diisi untuk produk konsinyasi"
-      )
+      validate_required(changeset, [:supplier_id], message: "wajib diisi untuk produk konsinyasi")
     else
       changeset
     end

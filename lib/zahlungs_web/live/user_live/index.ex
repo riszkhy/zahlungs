@@ -48,7 +48,8 @@ defmodule ZahlungsWeb.UserLive.Index do
     id = to_int(id)
 
     if id == socket.assigns.current_user.id do
-      {:noreply, put_flash(socket, :error, "Gunakan halaman Profile untuk mengubah password sendiri.")}
+      {:noreply,
+       put_flash(socket, :error, "Gunakan halaman Profile untuk mengubah password sendiri.")}
     else
       user = Accounts.get_user!(id)
 

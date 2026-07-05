@@ -9,7 +9,9 @@ defmodule Zahlungs.SalesTest do
   describe "create_sale/3" do
     test "records a sale with items (incl. purchase price snapshot) and decrements stock" do
       user = user_fixture()
-      product = product_fixture(price: Decimal.new("1000"), purchase_price: Decimal.new("700"), stock: 10)
+
+      product =
+        product_fixture(price: Decimal.new("1000"), purchase_price: Decimal.new("700"), stock: 10)
 
       assert {:ok, sale} =
                Sales.create_sale(user, [%{product_id: product.id, quantity: 3}], %{
@@ -66,7 +68,9 @@ defmodule Zahlungs.SalesTest do
       product = product_fixture(price: Decimal.new("1000"), stock: 5)
 
       assert {:ok, sale} =
-               Sales.create_sale(user, [%{product_id: product.id, quantity: 1}], %{amount_paid: "1000"})
+               Sales.create_sale(user, [%{product_id: product.id, quantity: 1}], %{
+                 amount_paid: "1000"
+               })
 
       assert sale.payment_method == "cash"
     end

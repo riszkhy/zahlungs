@@ -99,7 +99,10 @@ defmodule Zahlungs.ShiftsTest do
     {:ok, shift} = Shifts.open_shift(user, 0)
 
     assert {:error, changeset} =
-             Shifts.add_cash_movement(shift, %{"category" => "consignment_payment", "amount" => "1000"})
+             Shifts.add_cash_movement(shift, %{
+               "category" => "consignment_payment",
+               "amount" => "1000"
+             })
 
     assert %{supplier_id: [_ | _]} = errors_on(changeset)
 
@@ -111,7 +114,9 @@ defmodule Zahlungs.ShiftsTest do
              })
 
     {:ok, closed} = Shifts.close_shift(shift, 0)
-    assert {:error, :not_open} = Shifts.add_cash_movement(closed, %{"category" => "expense", "amount" => "1"})
+
+    assert {:error, :not_open} =
+             Shifts.add_cash_movement(closed, %{"category" => "expense", "amount" => "1"})
   end
 
   test "consignment_payments_by_supplier/2 sums payments per supplier in range" do

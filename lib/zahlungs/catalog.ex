@@ -188,6 +188,7 @@ defmodule Zahlungs.Catalog do
   defp maybe_put_sku(attrs) do
     if blank?(attrs[:sku] || attrs["sku"]) do
       sku = generate_sku(attrs[:category_id] || attrs["category_id"])
+
       if Enum.any?(Map.keys(attrs), &is_atom/1) or attrs == %{},
         do: Map.put(attrs, :sku, sku),
         else: Map.put(attrs, "sku", sku)

@@ -210,7 +210,9 @@ defmodule Zahlungs.CatalogTest do
 
   describe "stock_report/1" do
     test "summarizes value and lists low / out-of-stock products" do
-      low = product_fixture(stock: 2, price: Decimal.new("1000"), purchase_price: Decimal.new("600"))
+      low =
+        product_fixture(stock: 2, price: Decimal.new("1000"), purchase_price: Decimal.new("600"))
+
       out = product_fixture(stock: 0, price: Decimal.new("5000"))
 
       report = Catalog.stock_report(5)
@@ -230,7 +232,10 @@ defmodule Zahlungs.CatalogTest do
     end
 
     test "zero margin returns the purchase price" do
-      assert Decimal.equal?(Catalog.compute_price(Decimal.new("1500"), Decimal.new("0")), Decimal.new("1500.00"))
+      assert Decimal.equal?(
+               Catalog.compute_price(Decimal.new("1500"), Decimal.new("0")),
+               Decimal.new("1500.00")
+             )
     end
 
     test "blank inputs yield zero" do

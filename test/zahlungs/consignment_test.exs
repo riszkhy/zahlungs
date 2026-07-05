@@ -29,7 +29,12 @@ defmodule Zahlungs.ConsignmentTest do
   describe "consignment product" do
     test "requires a supplier when marked as consignment" do
       assert {:error, changeset} =
-               Catalog.create_product(%{name: "Titip A", price: "1000", stock: 5, consignment: true})
+               Catalog.create_product(%{
+                 name: "Titip A",
+                 price: "1000",
+                 stock: 5,
+                 consignment: true
+               })
 
       assert %{supplier_id: [_ | _]} = errors_on(changeset)
     end
@@ -76,7 +81,11 @@ defmodule Zahlungs.ConsignmentTest do
 
       today = Date.utc_today()
       # dev/test share one DB, so scope assertions to this test's supplier.
-      row = Enum.find(Sales.consignment_settlement(today, today), &(&1.supplier_id == ctx.supplier.id))
+      row =
+        Enum.find(
+          Sales.consignment_settlement(today, today),
+          &(&1.supplier_id == ctx.supplier.id)
+        )
 
       assert row.supplier == ctx.supplier.name
       assert row.qty_sold == 3
@@ -96,7 +105,11 @@ defmodule Zahlungs.ConsignmentTest do
       {:ok, _} = Sales.return_sale(sale)
 
       today = Date.utc_today()
-      refute Enum.any?(Sales.consignment_settlement(today, today), &(&1.supplier_id == ctx.supplier.id))
+
+      refute Enum.any?(
+               Sales.consignment_settlement(today, today),
+               &(&1.supplier_id == ctx.supplier.id)
+             )
     end
 
     test "reports on-hand consignment stock per supplier", ctx do

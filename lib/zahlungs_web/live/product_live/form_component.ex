@@ -191,8 +191,11 @@ defmodule ZahlungsWeb.ProductLive.FormComponent do
 
   defp strip_separators(params, key) do
     case params do
-      %{^key => value} when is_binary(value) -> Map.put(params, key, String.replace(value, ".", ""))
-      _ -> params
+      %{^key => value} when is_binary(value) ->
+        Map.put(params, key, String.replace(value, ".", ""))
+
+      _ ->
+        params
     end
   end
 
@@ -200,7 +203,10 @@ defmodule ZahlungsWeb.ProductLive.FormComponent do
   # push the new value to the (hook-managed) selling-price input.
   defp maybe_push_price(socket, target, params)
        when target in [["product", "purchase_price"], ["product", "margin_percent"]] do
-    push_event(socket, "money_set", %{id: "selling-price-input", value: money_str(params["price"])})
+    push_event(socket, "money_set", %{
+      id: "selling-price-input",
+      value: money_str(params["price"])
+    })
   end
 
   defp maybe_push_price(socket, _target, _params), do: socket

@@ -16,9 +16,7 @@ defmodule Zahlungs.Shifts do
 
   @doc "Returns the user's currently open shift, or nil."
   def current_shift(%User{} = user) do
-    Repo.one(
-      from s in Shift, where: s.user_id == ^user.id and s.status == "open", limit: 1
-    )
+    Repo.one(from s in Shift, where: s.user_id == ^user.id and s.status == "open", limit: 1)
   end
 
   @doc """
@@ -142,7 +140,12 @@ defmodule Zahlungs.Shifts do
             transactions: count(s.id),
             sales_total: coalesce(sum(s.total), 0),
             cash_total:
-              coalesce(sum(fragment("CASE WHEN ? = 'cash' THEN ? ELSE 0 END", s.payment_method, s.total)), 0)
+              coalesce(
+                sum(
+                  fragment("CASE WHEN ? = 'cash' THEN ? ELSE 0 END", s.payment_method, s.total)
+                ),
+                0
+              )
           }
       )
 
@@ -169,8 +172,7 @@ defmodule Zahlungs.Shifts do
   defp cash_sales_total(shift_id) do
     Repo.one(
       from s in Sale,
-        where:
-          s.shift_id == ^shift_id and s.status == "completed" and s.payment_method == "cash",
+        where: s.shift_id == ^shift_id and s.status == "completed" and s.payment_method == "cash",
         select: coalesce(sum(s.total), 0)
     )
     |> to_decimal()
@@ -184,9 +186,15 @@ defmodule Zahlungs.Shifts do
           where: m.shift_id == ^shift_id,
           select: %{
             cash_in:
-              coalesce(sum(fragment("CASE WHEN ? = 'in' THEN ? ELSE 0 END", m.direction, m.amount)), 0),
+              coalesce(
+                sum(fragment("CASE WHEN ? = 'in' THEN ? ELSE 0 END", m.direction, m.amount)),
+                0
+              ),
             cash_out:
-              coalesce(sum(fragment("CASE WHEN ? = 'out' THEN ? ELSE 0 END", m.direction, m.amount)), 0)
+              coalesce(
+                sum(fragment("CASE WHEN ? = 'out' THEN ? ELSE 0 END", m.direction, m.amount)),
+                0
+              )
           }
       )
 

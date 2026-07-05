@@ -16,7 +16,11 @@ defmodule Zahlungs.AccountsTest do
       email = unique_user_email()
 
       assert {:ok, user} =
-               Accounts.create_user(%{email: email, password: valid_user_password(), role: "admin"})
+               Accounts.create_user(%{
+                 email: email,
+                 password: valid_user_password(),
+                 role: "admin"
+               })
 
       assert user.email == email
       assert user.role == "admin"

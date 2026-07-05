@@ -130,7 +130,6 @@ defmodule ZahlungsWeb.SalesLive.Index do
     end
   end
 
-
   @impl true
   def render(assigns) do
     ~H"""
