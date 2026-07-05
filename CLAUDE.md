@@ -26,7 +26,7 @@ JS/CSS assets live in `assets/` and are built by the `esbuild`/`tailwind` mix wr
 
 ## Database
 
-- Dev/test use **MySQL** via `myxql` (`config/dev.exs` connects as `root` to db `zahlungs` on localhost). This is the source of truth — note the `.github/workflows/ci.yml` still spins up a Postgres service and is stale/inconsistent with the actual adapter.
+- Dev/test use **MySQL/MariaDB** via `myxql`. Credentials come from env vars (`DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD`, `DB_NAME`/`DB_TEST_NAME`, with localhost defaults) and/or the gitignored `config/local.secret.exs`. CI (`.github/workflows/ci.yml`) runs the suite against a MySQL 8 service container.
 - Migrations live in `priv/repo/migrations/`. The only schema so far is the auth tables (`users`, `users_tokens`).
 
 ## Production / releases
