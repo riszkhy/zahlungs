@@ -21,12 +21,15 @@ defmodule ZahlungsWeb.UserLiveTest do
       assert redirected_to(conn) == "/"
     end
 
-    test "renders the user list for admins", %{conn: conn} do
+    test "renders the user list with a reset-password action for admins", %{conn: conn} do
       admin = admin_fixture()
+      other = user_fixture()
       conn = conn |> log_in_user(admin) |> get("/admin/users")
       response = html_response(conn, 200)
       assert response =~ "Users"
       assert response =~ admin.email
+      assert response =~ other.email
+      assert response =~ "Reset password"
     end
   end
 end

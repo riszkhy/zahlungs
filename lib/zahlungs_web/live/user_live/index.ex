@@ -10,7 +10,7 @@ defmodule ZahlungsWeb.UserLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, load_users(socket)}
+    {:ok, socket |> assign(reset_user: nil, reset_form: nil) |> load_users()}
   end
 
   @impl true
@@ -41,6 +41,44 @@ defmodule ZahlungsWeb.UserLive.Index do
          socket
          |> put_flash(:info, "Role updated.")
          |> load_users()}
+    end
+  end
+
+  def handle_event("prompt_reset", %{"id" => id}, socket) do
+    id = to_int(id)
+
+    if id == socket.assigns.current_user.id do
+      {:noreply, put_flash(socket, :error, "Gunakan halaman Profile untuk mengubah password sendiri.")}
+    else
+      user = Accounts.get_user!(id)
+
+      {:noreply,
+       assign(socket,
+         reset_user: user,
+         reset_form: to_form(Accounts.change_user_password(user))
+       )}
+    end
+  end
+
+  def handle_event("cancel_reset", _params, socket) do
+    {:noreply, assign(socket, reset_user: nil, reset_form: nil)}
+  end
+
+  def handle_event("validate_reset", %{"user" => params}, socket) do
+    changeset = Accounts.change_user_password(socket.assigns.reset_user, params)
+    {:noreply, assign(socket, :reset_form, to_form(changeset, action: :validate))}
+  end
+
+  def handle_event("do_reset", %{"user" => params}, socket) do
+    case Accounts.reset_user_password(socket.assigns.reset_user, params) do
+      {:ok, user} ->
+        {:noreply,
+         socket
+         |> assign(reset_user: nil, reset_form: nil)
+         |> put_flash(:info, "Password #{user.email} berhasil direset (sesi lamanya diakhiri).")}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, :reset_form, to_form(changeset))}
     end
   end
 
@@ -102,6 +140,12 @@ defmodule ZahlungsWeb.UserLive.Index do
         >
           Make cashier
         </.link>
+        <.link
+          :if={user.id != @current_user.id}
+          phx-click={JS.push("prompt_reset", value: %{id: user.id})}
+        >
+          Reset password
+        </.link>
       </:action>
     </.table>
 
@@ -114,6 +158,23 @@ defmodule ZahlungsWeb.UserLive.Index do
         user={@user}
         patch={~p"/admin/users"}
       />
+    </.modal>
+
+    <.modal :if={@reset_user} id="reset-password-modal" show on_cancel={JS.push("cancel_reset")}>
+      <.header>Reset password</.header>
+      <p class="mt-1 text-sm text-gray-500">
+        Setel password baru untuk <strong>{@reset_user.email}</strong>. Semua sesi login user itu akan diakhiri.
+      </p>
+
+      <.form for={@reset_form} id="reset-password-form" phx-change="validate_reset" phx-submit="do_reset">
+        <.input field={@reset_form[:password]} type="password" label="New password" required />
+        <.input field={@reset_form[:password_confirmation]} type="password" label="Confirm new password" required />
+
+        <div class="mt-6 flex justify-end gap-2">
+          <button type="button" phx-click="cancel_reset" class="btn btn-sm">Batal</button>
+          <.button phx-disable-with="Saving...">Reset password</.button>
+        </div>
+      </.form>
     </.modal>
     """
   end
