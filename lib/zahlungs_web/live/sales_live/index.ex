@@ -12,6 +12,8 @@ defmodule ZahlungsWeb.SalesLive.Index do
     {:ok,
      socket
      |> assign(:date, "")
+     |> assign(:voiding, nil)
+     |> assign(:void_reason, "")
      |> load_sales()}
   end
 
@@ -60,6 +62,60 @@ defmodule ZahlungsWeb.SalesLive.Index do
     end
   end
 
+  def handle_event("prompt_void", %{"id" => id}, socket) do
+    {:noreply, assign(socket, voiding: Sales.get_sale!(id), void_reason: "")}
+  end
+
+  def handle_event("cancel_void", _params, socket) do
+    {:noreply, assign(socket, voiding: nil, void_reason: "")}
+  end
+
+  def handle_event("void_change", %{"reason" => reason}, socket) do
+    {:noreply, assign(socket, :void_reason, reason)}
+  end
+
+  def handle_event("do_void", %{"reason" => reason}, socket) do
+    user = socket.assigns.current_user
+    sale = socket.assigns.voiding
+
+    cond do
+      is_nil(sale) ->
+        {:noreply, socket}
+
+      user.role != "admin" and sale.user_id != user.id ->
+        {:noreply,
+         socket
+         |> assign(voiding: nil)
+         |> put_flash(:error, "Anda hanya bisa membatalkan penjualan sendiri.")}
+
+      true ->
+        case Sales.void_sale(sale, user, reason) do
+          {:ok, _voided} ->
+            {:noreply,
+             socket
+             |> assign(voiding: nil, void_reason: "")
+             |> put_flash(:info, "Penjualan #{sale.code} dibatalkan; stok dikembalikan.")
+             |> load_sales()
+             |> push_patch(to: ~p"/sales")}
+
+          {:error, :shift_closed} ->
+            {:noreply,
+             socket
+             |> assign(voiding: nil)
+             |> put_flash(:error, "Shift sudah ditutup — pembatalan butuh admin.")}
+
+          {:error, :not_voidable} ->
+            {:noreply,
+             socket
+             |> assign(voiding: nil)
+             |> put_flash(:error, "Penjualan ini tidak bisa dibatalkan.")}
+
+          {:error, _} ->
+            {:noreply, put_flash(socket, :error, "Gagal membatalkan (cek alasan).")}
+        end
+    end
+  end
+
   defp load_sales(socket) do
     assign(socket, :sales, Sales.list_sales(date: parse_date(socket.assigns.date)))
   end
@@ -97,10 +153,7 @@ defmodule ZahlungsWeb.SalesLive.Index do
       <:col :let={sale} label="Items">{length(sale.items)}</:col>
       <:col :let={sale} label="Total">{format_money(sale.total)}</:col>
       <:col :let={sale} label="Status">
-        <span class={[
-          "text-xs px-2 py-0.5 rounded-full",
-          (sale.status == "returned" && "bg-red-100 text-red-700") || "bg-green-100 text-green-700"
-        ]}>
+        <span class={["text-xs px-2 py-0.5 rounded-full", status_badge_class(sale.status)]}>
           {sale.status}
         </span>
       </:col>
@@ -116,9 +169,11 @@ defmodule ZahlungsWeb.SalesLive.Index do
 
       <div class="mt-2 flex justify-between text-sm">
         <dt>Status</dt>
-        <dd class={(@sale.status == "returned" && "text-red-600") || "text-green-600"}>
-          {@sale.status}
-        </dd>
+        <dd class={status_text_class(@sale.status)}>{@sale.status}</dd>
+      </div>
+      <div :if={@sale.status == "void" and @sale.void_reason} class="mt-1 flex justify-between text-sm">
+        <dt>Alasan batal</dt>
+        <dd class="text-gray-600">{@sale.void_reason}</dd>
       </div>
 
       <div class="mt-6 flex items-center justify-between gap-3">
@@ -129,16 +184,52 @@ defmodule ZahlungsWeb.SalesLive.Index do
         >
           Print receipt
         </.link>
-        <.button
-          :if={@current_user.role == "admin" and @sale.status == "completed"}
-          phx-click={JS.push("return", value: %{id: @sale.id})}
-          data-confirm="Return this sale and restore stock? This cannot be undone."
-          class="!bg-red-600"
-        >
-          Return / Refund
-        </.button>
+        <div class="flex items-center gap-2">
+          <.button
+            :if={@sale.status == "completed" and (@current_user.role == "admin" or @sale.user_id == @current_user.id)}
+            phx-click={JS.push("prompt_void", value: %{id: @sale.id})}
+            class="!bg-amber-600"
+          >
+            Batalkan (koreksi)
+          </.button>
+          <.button
+            :if={@current_user.role == "admin" and @sale.status == "completed"}
+            phx-click={JS.push("return", value: %{id: @sale.id})}
+            data-confirm="Return this sale and restore stock? This cannot be undone."
+            class="!bg-red-600"
+          >
+            Return / Refund
+          </.button>
+        </div>
       </div>
+    </.modal>
+
+    <.modal :if={@voiding} id="void-modal" show on_cancel={JS.push("cancel_void")}>
+      <h3 class="text-lg font-semibold">Batalkan penjualan {@voiding.code}</h3>
+      <p class="mt-1 text-sm text-gray-500">
+        Invoice akan ditandai <strong>void</strong> dan stok dikembalikan. Setelah ini,
+        input ulang transaksi yang benar di halaman Cashier.
+      </p>
+
+      <form phx-change="void_change" phx-submit="do_void" class="mt-4 space-y-3">
+        <label class="block text-sm">
+          Alasan koreksi
+          <input type="text" name="reason" value={@void_reason} required class="form-control" placeholder="mis. salah qty / salah produk" />
+        </label>
+        <div class="flex justify-end gap-2">
+          <button type="button" phx-click="cancel_void" class="btn btn-sm">Batal</button>
+          <.button class="!bg-amber-600">Konfirmasi batalkan</.button>
+        </div>
+      </form>
     </.modal>
     """
   end
+
+  defp status_badge_class("returned"), do: "bg-red-100 text-red-700"
+  defp status_badge_class("void"), do: "bg-gray-200 text-gray-700"
+  defp status_badge_class(_), do: "bg-green-100 text-green-700"
+
+  defp status_text_class("returned"), do: "text-red-600"
+  defp status_text_class("void"), do: "text-gray-600"
+  defp status_text_class(_), do: "text-green-600"
 end

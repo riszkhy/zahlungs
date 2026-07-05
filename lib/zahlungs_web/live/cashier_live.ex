@@ -606,7 +606,12 @@ defmodule ZahlungsWeb.CashierLive do
         <.link href={~p"/sales/#{@last_sale.id}/receipt"} target="_blank" class="btn btn-sm btn-link">
           Print receipt
         </.link>
-        <.button phx-click="new_sale">New Transaction</.button>
+        <div class="flex items-center gap-2">
+          <.link navigate={~p"/sales/#{@last_sale.id}"} class="btn btn-sm btn-link text-amber-700">
+            Koreksi / batalkan
+          </.link>
+          <.button phx-click="new_sale">New Transaction</.button>
+        </div>
       </div>
     </.modal>
 

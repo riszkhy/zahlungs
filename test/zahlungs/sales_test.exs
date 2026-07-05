@@ -178,6 +178,67 @@ defmodule Zahlungs.SalesTest do
     end
   end
 
+  describe "void_sale/3" do
+    test "restores stock and marks the sale void with a reason and actor" do
+      user = user_fixture()
+      product = product_fixture(price: Decimal.new("1000"), stock: 10)
+
+      {:ok, sale} =
+        Sales.create_sale(user, [%{product_id: product.id, quantity: 3}], %{amount_paid: "3000"})
+
+      assert Catalog.get_product!(product.id).stock == 7
+
+      assert {:ok, voided} = Sales.void_sale(sale, user, "salah qty")
+      assert voided.status == "void"
+      assert voided.void_reason == "salah qty"
+      assert voided.voided_by_id == user.id
+      assert voided.voided_at
+      assert Catalog.get_product!(product.id).stock == 10
+    end
+
+    test "cannot void a non-completed sale" do
+      user = user_fixture()
+      product = product_fixture(price: Decimal.new("1000"), stock: 10)
+
+      {:ok, sale} =
+        Sales.create_sale(user, [%{product_id: product.id, quantity: 1}], %{amount_paid: "1000"})
+
+      {:ok, voided} = Sales.void_sale(sale, user, "x")
+      assert {:error, :not_voidable} = Sales.void_sale(voided, user, "again")
+    end
+
+    test "voided sales drop out of today's summary" do
+      user = user_fixture()
+      product = product_fixture(price: Decimal.new("1000"), stock: 10)
+
+      {:ok, sale} =
+        Sales.create_sale(user, [%{product_id: product.id, quantity: 1}], %{amount_paid: "1000"})
+
+      before = Sales.sales_summary_today()
+      {:ok, _} = Sales.void_sale(sale, user, "koreksi")
+      assert Sales.sales_summary_today().count == before.count - 1
+    end
+
+    test "a cashier cannot void a sale from a closed shift, but an admin can" do
+      cashier = user_fixture()
+      {:ok, admin} = Zahlungs.Accounts.set_user_role(user_fixture(), "admin")
+      product = product_fixture(price: Decimal.new("1000"), stock: 10)
+      {:ok, shift} = Zahlungs.Shifts.open_shift(cashier, 0)
+
+      {:ok, sale} =
+        Sales.create_sale(cashier, [%{product_id: product.id, quantity: 1}], %{
+          amount_paid: "1000",
+          shift_id: shift.id
+        })
+
+      {:ok, _} = Zahlungs.Shifts.close_shift(shift, 1000)
+
+      assert {:error, :shift_closed} = Sales.void_sale(sale, cashier, "telat")
+      assert {:ok, voided} = Sales.void_sale(sale, admin, "koreksi admin")
+      assert voided.status == "void"
+    end
+  end
+
   describe "list_sales/1" do
     test "filters by date" do
       user = user_fixture()

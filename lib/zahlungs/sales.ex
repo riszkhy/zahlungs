@@ -11,6 +11,7 @@ defmodule Zahlungs.Sales do
   alias Ecto.Multi
   alias Zahlungs.Repo
 
+  alias Zahlungs.Accounts.User
   alias Zahlungs.Catalog.Product
   alias Zahlungs.Sales.{Sale, SaleItem}
 
@@ -170,6 +171,35 @@ defmodule Zahlungs.Sales do
   end
 
   def return_sale(%Sale{}), do: {:error, :already_returned}
+
+  @doc """
+  Voids a completed sale to correct a cashier input error: restores stock and
+  marks the sale `void` with a reason and the acting user, atomically.
+
+  A cashier may only void a sale whose shift is still open; once the shift is
+  closed, voiding requires an admin. Returns:
+
+    * `{:error, :not_voidable}` - the sale is not in `completed` status
+    * `{:error, :shift_closed}` - shift already closed and the user isn't admin
+  """
+  def void_sale(%Sale{status: "completed"} = sale, %User{} = user, reason) do
+    sale = Repo.preload(sale, [:items, :shift])
+
+    if sale.shift && sale.shift.status == "closed" && user.role != "admin" do
+      {:error, :shift_closed}
+    else
+      Multi.new()
+      |> Multi.update(:sale, Sale.void_changeset(sale, user.id, reason))
+      |> restore_stock(sale.items)
+      |> Repo.transaction()
+      |> case do
+        {:ok, %{sale: voided}} -> {:ok, voided}
+        {:error, _step, err, _changes} -> {:error, err}
+      end
+    end
+  end
+
+  def void_sale(%Sale{}, %User{}, _reason), do: {:error, :not_voidable}
 
   defp restore_stock(multi, items) do
     Enum.reduce(items, multi, fn item, multi ->

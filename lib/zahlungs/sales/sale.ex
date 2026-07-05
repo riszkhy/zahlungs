@@ -15,9 +15,12 @@ defmodule Zahlungs.Sales.Sale do
     field :change_due, :decimal, default: Decimal.new(0)
     field :status, :string, default: "completed"
     field :returned_at, :naive_datetime
+    field :voided_at, :naive_datetime
+    field :void_reason, :string
 
     belongs_to :user, Zahlungs.Accounts.User
     belongs_to :shift, Zahlungs.Shifts.Shift
+    belongs_to :voided_by, Zahlungs.Accounts.User
     has_many :items, Zahlungs.Sales.SaleItem
 
     timestamps()
@@ -65,4 +68,21 @@ defmodule Zahlungs.Sales.Sale do
   @doc "Returns true if the sale has been returned/refunded."
   def returned?(%__MODULE__{status: "returned"}), do: true
   def returned?(%__MODULE__{}), do: false
+
+  @doc "Marks a sale as voided (koreksi kesalahan input), recording who and why."
+  def void_changeset(sale, user_id, reason) do
+    now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+
+    sale
+    |> cast(%{void_reason: reason}, [:void_reason])
+    |> validate_required([:void_reason], message: "alasan wajib diisi")
+    |> validate_length(:void_reason, max: 255)
+    |> put_change(:status, "void")
+    |> put_change(:voided_at, now)
+    |> put_change(:voided_by_id, user_id)
+  end
+
+  @doc "Returns true if the sale has been voided."
+  def voided?(%__MODULE__{status: "void"}), do: true
+  def voided?(%__MODULE__{}), do: false
 end
