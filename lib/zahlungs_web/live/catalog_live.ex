@@ -14,6 +14,7 @@ defmodule ZahlungsWeb.CatalogLive do
     {:ok,
      socket
      |> assign(page_title: "Catalog", search: "", category_id: "", in_stock: false, page: 1)
+     |> assign(:scanning, false)
      |> assign(:category_options, Catalog.category_options())
      |> load_products()}
   end
@@ -34,6 +35,49 @@ defmodule ZahlungsWeb.CatalogLive do
   def handle_event("page", %{"to" => to}, socket) do
     page = max(1, min(socket.assigns.total_pages, String.to_integer(to)))
     {:noreply, socket |> assign(:page, page) |> load_products()}
+  end
+
+  # Enter on the search field (hardware barcode scanners send the code + Enter)
+  # submits the form — route it through the scan flow for beep/not-found UX.
+  def handle_event("scan", %{"search" => code}, socket) do
+    handle_event("scan", %{"q" => code}, socket)
+  end
+
+  # A scanned barcode (camera hook pushes `%{"q" => code}`) becomes the search
+  # term — `list_products(search: ...)` already matches barcode alongside
+  # name/SKU. Beep feedback mirrors the cashier screen.
+  def handle_event("scan", %{"q" => code}, socket) do
+    socket = socket |> assign(search: String.trim(code), page: 1) |> load_products()
+
+    if socket.assigns.total > 0 do
+      {:noreply, push_event(socket, "beep", %{type: "ok"})}
+    else
+      {:noreply,
+       socket
+       |> push_event("beep", %{type: "error"})
+       |> put_flash(:error, "Produk dengan barcode \"#{code}\" tidak ditemukan.")}
+    end
+  end
+
+  def handle_event("toggle_scan", _params, socket) do
+    {:noreply, assign(socket, :scanning, not socket.assigns.scanning)}
+  end
+
+  def handle_event("camera_unsupported", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:scanning, false)
+     |> put_flash(
+       :error,
+       "Camera scanning isn't supported on this browser. Use a USB scanner or type the code."
+     )}
+  end
+
+  def handle_event("camera_error", %{"message" => message}, socket) do
+    {:noreply,
+     socket
+     |> assign(:scanning, false)
+     |> put_flash(:error, "Could not start the camera: #{message}")}
   end
 
   defp load_products(socket) do
@@ -66,18 +110,21 @@ defmodule ZahlungsWeb.CatalogLive do
   @impl true
   def render(assigns) do
     ~H"""
+    <div id="catalog-beeper" phx-hook="Beeper" class="hidden"></div>
+
     <.header>
       Catalog
       <:subtitle>Telusuri produk yang tersedia</:subtitle>
     </.header>
 
-    <form phx-change="filter" phx-submit="filter" class="mt-6 flex flex-wrap gap-3 items-center">
+    <form phx-change="filter" phx-submit="scan" class="mt-6 flex flex-wrap gap-3 items-center">
       <input
         type="text"
         name="search"
         value={@search}
-        placeholder="Search name / SKU..."
+        placeholder="Search name / SKU / barcode..."
         phx-debounce="300"
+        autocomplete="off"
         class="form-control max-w-xs"
       />
       <select name="category_id" class="form-control max-w-xs">
@@ -91,7 +138,30 @@ defmodule ZahlungsWeb.CatalogLive do
         <input type="checkbox" name="in_stock" value="true" checked={@in_stock} class="form-checkbox" />
         In stock only
       </label>
+      <button
+        type="button"
+        phx-click="toggle_scan"
+        class="text-sm text-blue-600 hover:underline"
+      >
+        {if @scanning, do: "■ Stop camera", else: "📷 Scan barcode"}
+      </button>
     </form>
+    <p class="mt-1 text-xs text-gray-400">
+      Scan barcode dengan scanner (kode + Enter) atau kamera HP.
+    </p>
+
+    <div :if={@scanning} class="mt-2">
+      <video
+        id="catalog-scanner"
+        phx-hook="BarcodeScanner"
+        phx-update="ignore"
+        autoplay
+        muted
+        class="w-full max-w-xs rounded border border-gray-300 bg-black aspect-video"
+      >
+      </video>
+      <p data-scan-status class="mt-1 text-xs text-gray-400">Point the camera at a barcode.</p>
+    </div>
 
     <p class="mt-4 text-sm text-gray-500">{@total} product(s) found</p>
 
@@ -112,6 +182,7 @@ defmodule ZahlungsWeb.CatalogLive do
           </span>
         </div>
         <p class="mt-1 text-xs text-gray-400">SKU: {product.sku}</p>
+        <p :if={product.barcode} class="text-xs text-gray-400">Barcode: {product.barcode}</p>
         <p class="mt-1 text-xs text-gray-500">
           {(product.category && product.category.name) || "Uncategorized"}
         </p>

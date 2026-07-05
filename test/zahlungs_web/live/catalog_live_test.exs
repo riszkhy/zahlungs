@@ -20,6 +20,9 @@ defmodule ZahlungsWeb.CatalogLiveTest do
       response = html_response(conn, 200)
       assert response =~ "Catalog"
       assert response =~ "Visible Widget"
+      # Barcode search affordances: camera scan button + barcode in placeholder.
+      assert response =~ "Scan barcode"
+      assert response =~ "Search name / SKU / barcode"
     end
 
     test "does not list inactive products", %{conn: conn} do
