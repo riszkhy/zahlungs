@@ -552,11 +552,13 @@ defmodule ZahlungsWeb.CashierLive do
             <button
               :for={{value, label} <- payment_method_options()}
               type="button"
-              phx-click={JS.push("set_payment_method", value: %{method: value})}
+              disabled={value != "cash"}
+              phx-click={value == "cash" && JS.push("set_payment_method", value: %{method: value})}
               class={[
                 "text-sm py-1.5 rounded border",
                 (@payment_method == value && "bg-green-700 text-white border-green-700") ||
-                  "bg-white text-gray-700 border-gray-300 hover:border-green-500"
+                  "bg-white text-gray-700 border-gray-300 hover:border-green-500",
+                value != "cash" && "opacity-40 cursor-not-allowed hover:border-gray-300"
               ]}
             >
               {label}
