@@ -15,9 +15,9 @@ if config_env() == :prod do
       """
 
   config :zahlungs, Zahlungs.Repo,
-    # ssl: true,
     # socket_options: [:inet6],
     url: database_url,
+    ssl: System.get_env("DATABASE_SSL") in ~w(true 1),
     pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10")
 
   # The secret key base is used to sign/encrypt cookies and other secrets.
@@ -32,26 +32,35 @@ if config_env() == :prod do
       You can generate one by calling: mix phx.gen.secret
       """
 
+  # Public host used for generated URLs (links in emails, redirects, ~p URLs).
+  host = System.get_env("PHX_HOST") || "localhost"
+  port = String.to_integer(System.get_env("PORT") || "4000")
+
+  # When FORCE_SSL is on, the app assumes it sits behind a TLS-terminating
+  # reverse proxy (nginx/caddy/traefik): generated URLs use https and plain
+  # HTTP requests are redirected (trusting the x-forwarded-proto header).
+  force_ssl? = System.get_env("FORCE_SSL") in ~w(true 1)
+
+  url_config =
+    if force_ssl?, do: [host: host, port: 443, scheme: "https"], else: [host: host, port: port]
+
   config :zahlungs, ZahlungsWeb.Endpoint,
+    url: url_config,
     http: [
       # Enable IPv6 and bind on all interfaces.
       # Set it to  {0, 0, 0, 0, 0, 0, 0, 1} for local network only access.
       # See the documentation on https://hexdocs.pm/plug_cowboy/Plug.Cowboy.html
       # for details about using IPv6 vs IPv4 and loopback vs public addresses.
       ip: {0, 0, 0, 0, 0, 0, 0, 0},
-      port: String.to_integer(System.get_env("PORT") || "4000")
+      port: port
     ],
-    secret_key_base: secret_key_base
+    secret_key_base: secret_key_base,
+    server: true
 
-  # ## Using releases
-  #
-  # If you are doing OTP releases, you need to instruct Phoenix
-  # to start each relevant endpoint:
-  #
-  config :zahlungs, ZahlungsWeb.Endpoint, server: true
-  #
-  # Then you can assemble a release by calling `mix release`.
-  # See `mix help release` for more information.
+  if force_ssl? do
+    config :zahlungs, ZahlungsWeb.Endpoint,
+      force_ssl: [rewrite_on: [:x_forwarded_proto], hsts: true]
+  end
 
   # ## Configuring the mailer
   #

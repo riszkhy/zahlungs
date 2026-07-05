@@ -31,8 +31,8 @@ JS/CSS assets live in `assets/` and are built by the `esbuild`/`tailwind` mix wr
 
 ## Production / releases
 
-- Built as an OTP release via `build.sh`: `mix release` then runs migrations through `Release.migrate` (`lib/release.ex`), which is the release-safe migration entry point (`bin/zahlungs eval "Release.migrate"`).
-- Prod config is runtime-driven (`config/runtime.exs`, only active when `config_env() == :prod`): requires `DATABASE_URL` and `SECRET_KEY_BASE` env vars; optional `POOL_SIZE`, `PORT`.
+- Built as an OTP release via `build.sh` (bare metal) or the multi-stage `Dockerfile`. Release-safe entry points in `lib/release.ex`: `Release.migrate`, `Release.seed`, `Release.rollback/2` — exposed as `bin/migrate`, `bin/seed`, `bin/server` overlays (`rel/overlays/bin/`).
+- Prod config is runtime-driven (`config/runtime.exs`, only active when `config_env() == :prod`): requires `DATABASE_URL` and `SECRET_KEY_BASE`; optional `PHX_HOST`, `PORT`, `POOL_SIZE`, `FORCE_SSL` (behind a TLS proxy), `DATABASE_SSL`, and `SEED_*` vars for first accounts. Seeds never insert dev passwords or sample catalog in prod. Full guide: `docs/DEPLOYMENT.md`.
 
 ## Architecture
 
