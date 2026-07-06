@@ -62,6 +62,29 @@ if config_env() == :prod do
       force_ssl: [rewrite_on: [:x_forwarded_proto], hsts: true]
   end
 
+  # Optional HTTPS listener served by the app itself (no reverse proxy). This is
+  # what a LAN POS deployment needs: the phone-camera barcode scanner uses
+  # getUserMedia/BarcodeDetector, which browsers only allow in a secure context
+  # (HTTPS or localhost) — over plain HTTP to a LAN IP the camera stays off.
+  #
+  # Set HTTPS_PORT + SSL_CERT_PATH + SSL_KEY_PATH (absolute paths to a cert and
+  # key; a self-signed pair from `mix phx.gen.cert` works on a private LAN).
+  # Leave these unset when TLS is terminated by a reverse proxy (use FORCE_SSL).
+  https_port = System.get_env("HTTPS_PORT")
+  ssl_certfile = System.get_env("SSL_CERT_PATH")
+  ssl_keyfile = System.get_env("SSL_KEY_PATH")
+
+  if https_port && ssl_certfile && ssl_keyfile do
+    config :zahlungs, ZahlungsWeb.Endpoint,
+      https: [
+        ip: {0, 0, 0, 0, 0, 0, 0, 0},
+        port: String.to_integer(https_port),
+        cipher_suite: :strong,
+        certfile: ssl_certfile,
+        keyfile: ssl_keyfile
+      ]
+  end
+
   # ## Configuring the mailer
   #
   # In production you need to configure the mailer to use a different adapter.

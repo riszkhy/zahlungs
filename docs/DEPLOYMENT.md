@@ -15,6 +15,9 @@ sepenuhnya lewat **environment variables** (`config/runtime.exs`).
 | `POOL_SIZE`            |       | `10`                                      | Ukuran pool koneksi DB                                  |
 | `FORCE_SSL`            |       | `true` / `1` (default off)                | Redirect HTTP→HTTPS + HSTS; **hanya** jika di belakang reverse proxy TLS (trust `x-forwarded-proto`) |
 | `DATABASE_SSL`         |       | `true` / `1` (default off)                | TLS ke database (managed MariaDB)                       |
+| `HTTPS_PORT`           |       | `4001`                                    | Aktifkan listener HTTPS di app sendiri (LAN tanpa proxy) — perlu cert + key |
+| `SSL_CERT_PATH`        |       | `/app/priv/cert/selfsigned.pem`           | Path absolut sertifikat (wajib bila `HTTPS_PORT` diset) |
+| `SSL_KEY_PATH`         |       | `/app/priv/cert/selfsigned_key.pem`       | Path absolut private key                                |
 | `SEED_ADMIN_EMAIL`     |       | `owner@tokosaya.id`                       | Dipakai `Release.seed` — tanpa ini admin TIDAK dibuat   |
 | `SEED_ADMIN_PASSWORD`  |       | (min 12 karakter)                         | Password admin awal                                     |
 | `SEED_ADMIN_NAME`      |       | `Administrator`                           | Nama tampilan admin                                     |
@@ -76,17 +79,39 @@ aplikasi. Set `FORCE_SSL=true` agar HTTP diredirect dan HSTS aktif — aplikasi
 mempercayai header `x-forwarded-proto` dari proxy.
 
 **Penting untuk POS ini:** fitur **scan barcode via kamera HP** membutuhkan
-*secure context* — di production artinya **wajib HTTPS** (di dev dipakai
-sertifikat self-signed di port 4001). Tanpa HTTPS, kamera tidak akan menyala di
-browser HP; scanner fisik (keyboard wedge) tetap jalan.
+*secure context* — browser hanya mengizinkan `getUserMedia`/`BarcodeDetector`
+lewat **HTTPS** (atau `localhost`). Lewat HTTP biasa ke IP LAN, kamera **tidak
+akan menyala** (scanner fisik/keyboard-wedge tetap jalan). Jadi di production
+kamera hanya berfungsi jika app diakses via HTTPS. Ada dua cara:
 
-Contoh Caddy (otomatis Let's Encrypt):
+**Cara 1 — Reverse proxy TLS (deploy internet, domain publik).**
+Terminasi TLS di proxy, set `FORCE_SSL=true`. Contoh Caddy (auto Let's Encrypt):
 
 ```
 pos.tokosaya.id {
     reverse_proxy localhost:4000
 }
 ```
+
+**Cara 2 — HTTPS langsung dari app (LAN, tanpa proxy — kasus umum warung).**
+Release bisa menyajikan HTTPS sendiri. Buat sertifikat self-signed lalu set env
+`HTTPS_PORT` + `SSL_CERT_PATH` + `SSL_KEY_PATH`:
+
+```bash
+# hasilkan priv/cert/selfsigned.pem & selfsigned_key.pem
+mix phx.gen.cert
+
+docker run -d --name zahlungs -p 4000:4000 -p 4001:4001 \
+  -e DATABASE_URL=... -e SECRET_KEY_BASE=... -e PHX_HOST=192.168.1.10 \
+  -e HTTPS_PORT=4001 \
+  -e SSL_CERT_PATH=/certs/selfsigned.pem \
+  -e SSL_KEY_PATH=/certs/selfsigned_key.pem \
+  -v /path/to/certs:/certs:ro \
+  zahlungs
+```
+
+Buka `https://<IP-LAN>:4001` di HP → terima peringatan sertifikat self-signed
+sekali → kamera aktif. Jangan set `FORCE_SSL` untuk mode ini (itu untuk proxy).
 
 ## 5. Checklist go-live
 
