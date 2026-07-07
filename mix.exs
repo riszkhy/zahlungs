@@ -54,7 +54,9 @@ defmodule Zahlungs.MixProject do
 
       {:pbkdf2_elixir, "~> 2.0"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
-      {:sobelow, "~> 0.13", only: :dev}
+      {:sobelow, "~> 0.13", only: :dev},
+      # Scans deps against the Elixir security advisory DB: `mix deps.audit`.
+      {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false}
     ]
   end
 
