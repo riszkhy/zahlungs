@@ -41,7 +41,8 @@ defmodule Zahlungs.Accounts do
   def get_user_by_email_and_password(email, password)
       when is_binary(email) and is_binary(password) do
     user = Repo.get_by(User, email: email)
-    if User.valid_password?(user, password), do: user
+    # A deactivated user cannot authenticate even with the correct password.
+    if User.valid_password?(user, password) and user.active, do: user
   end
 
   @doc """
@@ -93,6 +94,39 @@ defmodule Zahlungs.Accounts do
     user
     |> User.role_changeset(%{role: role})
     |> Repo.update()
+  end
+
+  @doc """
+  Sets or clears a user's confirmation (admin-only): `true` stamps `confirmed_at`
+  with the current time, `false` clears it back to unconfirmed.
+  """
+  def set_user_confirmed(%User{} = user, confirmed?) when is_boolean(confirmed?) do
+    confirmed_at =
+      if confirmed?, do: NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second), else: nil
+
+    user
+    |> Ecto.Changeset.change(confirmed_at: confirmed_at)
+    |> Repo.update()
+  end
+
+  @doc """
+  Activates or deactivates a user (admin-only). Deactivating also deletes all of
+  the user's tokens so any live session is terminated immediately; a deactivated
+  user can no longer log in (see `get_user_by_email_and_password/2` and
+  `get_user_by_session_token/1`).
+  """
+  def set_user_active(%User{} = user, active) when is_boolean(active) do
+    multi = Ecto.Multi.update(Ecto.Multi.new(), :user, User.active_changeset(user, active))
+
+    multi =
+      if active,
+        do: multi,
+        else: Ecto.Multi.delete_all(multi, :tokens, UserToken.user_and_contexts_query(user, :all))
+
+    case Repo.transaction(multi) do
+      {:ok, %{user: user}} -> {:ok, user}
+      {:error, :user, changeset, _} -> {:error, changeset}
+    end
   end
 
   ## Admin user management
@@ -303,7 +337,12 @@ defmodule Zahlungs.Accounts do
   """
   def get_user_by_session_token(token) do
     {:ok, query} = UserToken.verify_session_token_query(token)
-    Repo.one(query)
+    # Reject sessions belonging to a deactivated user (belt-and-suspenders: their
+    # tokens are already deleted on deactivation).
+    case Repo.one(query) do
+      %User{active: true} = user -> user
+      _ -> nil
+    end
   end
 
   @doc """

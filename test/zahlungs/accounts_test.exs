@@ -72,6 +72,38 @@ defmodule Zahlungs.AccountsTest do
     end
   end
 
+  describe "set_user_confirmed/2" do
+    test "stamps and clears confirmed_at" do
+      user = user_fixture()
+
+      assert {:ok, confirmed} = Accounts.set_user_confirmed(user, true)
+      assert confirmed.confirmed_at
+
+      assert {:ok, unconfirmed} = Accounts.set_user_confirmed(confirmed, false)
+      assert is_nil(unconfirmed.confirmed_at)
+    end
+  end
+
+  describe "set_user_active/2" do
+    test "deactivating blocks login and kills sessions; reactivating restores login" do
+      user = user_fixture()
+      token = Accounts.generate_user_session_token(user)
+
+      assert Accounts.get_user_by_session_token(token)
+      assert Accounts.get_user_by_email_and_password(user.email, valid_user_password())
+
+      assert {:ok, user} = Accounts.set_user_active(user, false)
+      refute user.active
+      # existing session invalidated + password login blocked
+      refute Accounts.get_user_by_session_token(token)
+      refute Accounts.get_user_by_email_and_password(user.email, valid_user_password())
+
+      assert {:ok, user} = Accounts.set_user_active(user, true)
+      assert user.active
+      assert Accounts.get_user_by_email_and_password(user.email, valid_user_password())
+    end
+  end
+
   describe "get_user!/1" do
     test "raises if id is invalid" do
       assert_raise Ecto.NoResultsError, fn ->

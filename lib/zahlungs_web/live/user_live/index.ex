@@ -44,6 +44,34 @@ defmodule ZahlungsWeb.UserLive.Index do
     end
   end
 
+  def handle_event("toggle_confirmed", %{"id" => id}, socket) do
+    user = Accounts.get_user!(to_int(id))
+    {:ok, updated} = Accounts.set_user_confirmed(user, is_nil(user.confirmed_at))
+
+    msg =
+      if updated.confirmed_at, do: "User ditandai confirmed.", else: "User ditandai unconfirmed."
+
+    {:noreply, socket |> put_flash(:info, msg) |> load_users()}
+  end
+
+  def handle_event("toggle_active", %{"id" => id}, socket) do
+    id = to_int(id)
+
+    if id == socket.assigns.current_user.id do
+      {:noreply, put_flash(socket, :error, "Anda tidak bisa menonaktifkan akun sendiri.")}
+    else
+      user = Accounts.get_user!(id)
+      {:ok, updated} = Accounts.set_user_active(user, !user.active)
+
+      msg =
+        if updated.active,
+          do: "User diaktifkan.",
+          else: "User dinonaktifkan (sesi login-nya diakhiri)."
+
+      {:noreply, socket |> put_flash(:info, msg) |> load_users()}
+    end
+  end
+
   def handle_event("prompt_reset", %{"id" => id}, socket) do
     id = to_int(id)
 
@@ -88,6 +116,28 @@ defmodule ZahlungsWeb.UserLive.Index do
     {:noreply, load_users(socket)}
   end
 
+  # A single menu row inside the row "Actions" dropdown.
+  attr :event, :string, required: true
+  attr :value, :map, required: true
+  attr :confirm, :string, default: nil
+  attr :danger, :boolean, default: false
+  slot :inner_block, required: true
+
+  defp menu_link(assigns) do
+    ~H"""
+    <.link
+      phx-click={JS.push(@event, value: @value)}
+      data-confirm={@confirm}
+      class={[
+        "block px-3 py-1.5 text-sm hover:bg-gray-50",
+        (@danger && "text-red-600") || "text-gray-700"
+      ]}
+    >
+      {render_slot(@inner_block)}
+    </.link>
+    """
+  end
+
   defp load_users(socket), do: assign(socket, :users, Accounts.list_users())
 
   defp to_int(id) when is_integer(id), do: id
@@ -123,30 +173,88 @@ defmodule ZahlungsWeb.UserLive.Index do
         </span>
       </:col>
       <:col :let={user} label="Status">
-        {if user.confirmed_at, do: "Confirmed", else: "Unconfirmed"}
+        <span class={[
+          "text-xs px-2 py-0.5 rounded-full",
+          (user.confirmed_at && "bg-green-100 text-green-700") || "bg-yellow-100 text-yellow-700"
+        ]}>
+          {if user.confirmed_at, do: "Confirmed", else: "Unconfirmed"}
+        </span>
+      </:col>
+      <:col :let={user} label="Active">
+        <span class={[
+          "text-xs px-2 py-0.5 rounded-full",
+          (user.active && "bg-green-100 text-green-700") || "bg-red-100 text-red-700"
+        ]}>
+          {if user.active, do: "Active", else: "Inactive"}
+        </span>
       </:col>
       <:col :let={user} label="Joined">{Calendar.strftime(user.inserted_at, "%d %b %Y")}</:col>
       <:action :let={user}>
-        <.link
-          :if={user.id != @current_user.id and user.role != "admin"}
-          phx-click={JS.push("set_role", value: %{id: user.id, role: "admin"})}
-          data-confirm="Make this user an admin?"
-        >
-          Make admin
-        </.link>
-        <.link
-          :if={user.id != @current_user.id and user.role == "admin"}
-          phx-click={JS.push("set_role", value: %{id: user.id, role: "cashier"})}
-          data-confirm="Demote this admin to cashier?"
-        >
-          Make cashier
-        </.link>
-        <.link
-          :if={user.id != @current_user.id}
-          phx-click={JS.push("prompt_reset", value: %{id: user.id})}
-        >
-          Reset password
-        </.link>
+        <div class="relative" x-data="{ open: false }">
+          <button
+            type="button"
+            @click="open = !open"
+            class="rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-100"
+          >
+            Actions ▾
+          </button>
+          <div
+            x-show="open"
+            @click.outside="open = false"
+            x-transition
+            style="display: none;"
+            class="absolute right-0 z-20 mt-1 w-52 rounded-md border border-gray-200 bg-white py-1 text-left shadow-lg"
+          >
+            <.menu_link
+              :if={user.id != @current_user.id and user.role != "admin"}
+              event="set_role"
+              value={%{id: user.id, role: "admin"}}
+              confirm="Make this user an admin?"
+            >
+              Make admin
+            </.menu_link>
+            <.menu_link
+              :if={user.id != @current_user.id and user.role == "admin"}
+              event="set_role"
+              value={%{id: user.id, role: "cashier"}}
+              confirm="Demote this admin to cashier?"
+            >
+              Make cashier
+            </.menu_link>
+            <.menu_link
+              event="toggle_confirmed"
+              value={%{id: user.id}}
+              confirm={
+                if user.confirmed_at,
+                  do: "Tandai user ini sebagai unconfirmed?",
+                  else: "Tandai user ini sebagai confirmed?"
+              }
+            >
+              {if user.confirmed_at, do: "Mark unconfirmed", else: "Mark confirmed"}
+            </.menu_link>
+            <.menu_link
+              :if={user.id != @current_user.id}
+              event="prompt_reset"
+              value={%{id: user.id}}
+            >
+              Reset password
+            </.menu_link>
+            <div :if={user.id != @current_user.id} class="my-1 border-t border-gray-100"></div>
+            <.menu_link
+              :if={user.id != @current_user.id}
+              event="toggle_active"
+              value={%{id: user.id}}
+              danger={user.active}
+              confirm={
+                if user.active,
+                  do: "Nonaktifkan user ini? Sesi login aktifnya akan diakhiri.",
+                  else: "Aktifkan kembali user ini?"
+              }
+            >
+              {if user.active, do: "Deactivate", else: "Activate"}
+            </.menu_link>
+          </div>
+        </div>
       </:action>
     </.table>
 

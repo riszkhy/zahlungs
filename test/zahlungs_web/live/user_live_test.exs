@@ -30,6 +30,7 @@ defmodule ZahlungsWeb.UserLiveTest do
       assert response =~ admin.email
       assert response =~ other.email
       assert response =~ "Reset password"
+      assert response =~ "Deactivate"
     end
   end
 end

@@ -11,6 +11,7 @@ defmodule Zahlungs.Accounts.User do
     field :hashed_password, :string, redact: true
     field :confirmed_at, :naive_datetime
     field :role, :string, default: "cashier"
+    field :active, :boolean, default: true
 
     timestamps()
   end
@@ -148,6 +149,15 @@ defmodule Zahlungs.Accounts.User do
     |> cast(attrs, [:role])
     |> validate_required([:role])
     |> validate_inclusion(:role, @roles)
+  end
+
+  @doc """
+  A changeset to activate/deactivate a user (admin-only). A deactivated user
+  cannot log in and any existing session is invalidated (see
+  `Accounts.set_user_active/2`).
+  """
+  def active_changeset(user, active) when is_boolean(active) do
+    change(user, active: active)
   end
 
   @doc """
