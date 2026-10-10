@@ -47,6 +47,43 @@ defmodule Zahlungs.Stores do
     |> Repo.insert()
   end
 
+  @doc """
+  Registers a new branch: the store and, unless `cashier_attrs` is `nil`, its
+  first cashier account — both or neither.
+
+  The cashier is created from `name`, `email` and `password` only (string or
+  atom keys). Its role is always `"cashier"` and its store always the new one,
+  whatever the caller passes. `nil` means "no cashier"; any map, even an empty
+  one, is an attempt to create one and fails validation if incomplete.
+
+  Returns `{:ok, %{store: store, cashier: user_or_nil}}`,
+  `{:error, :store, changeset}` or `{:error, :cashier, changeset}`.
+  """
+  def register_branch(store_attrs, cashier_attrs \\ nil) do
+    Ecto.Multi.new()
+    |> Ecto.Multi.insert(:store, Store.changeset(%Store{}, store_attrs))
+    |> Ecto.Multi.run(:cashier, fn _repo, %{store: store} ->
+      create_first_cashier(store, cashier_attrs)
+    end)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{store: store, cashier: cashier}} -> {:ok, %{store: store, cashier: cashier}}
+      {:error, step, changeset, _changes} -> {:error, step, changeset}
+    end
+  end
+
+  defp create_first_cashier(_store, nil), do: {:ok, nil}
+
+  defp create_first_cashier(store, attrs) do
+    Zahlungs.Accounts.create_user(%{
+      "name" => attrs["name"] || attrs[:name],
+      "email" => attrs["email"] || attrs[:email],
+      "password" => attrs["password"] || attrs[:password],
+      "role" => "cashier",
+      "store_id" => store.id
+    })
+  end
+
   def update_store(%Store{} = store, attrs) do
     store
     |> Store.changeset(attrs)

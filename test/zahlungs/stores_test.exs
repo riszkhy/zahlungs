@@ -110,4 +110,98 @@ defmodule Zahlungs.StoresTest do
       refute Scope.usable?(nil)
     end
   end
+
+  defp code, do: "W" <> Integer.to_string(System.unique_integer([:positive]), 36)
+
+  describe "store code uniqueness" do
+    test "a taken code is an error on the changeset, ignoring case and spaces" do
+      existing = store_fixture()
+      attrs = %{name: "Dup", code: " " <> String.downcase(existing.code) <> " "}
+
+      changeset = Stores.change_store(%Zahlungs.Stores.Store{}, attrs)
+
+      refute changeset.valid?
+      assert %{code: ["has already been taken"]} = errors_on(changeset)
+    end
+
+    test "a store keeps its own code when edited" do
+      store = store_fixture()
+
+      assert Stores.change_store(store, %{name: "Renamed", code: store.code}).valid?
+    end
+  end
+
+  describe "register_branch/2" do
+    test "registers a store without a cashier" do
+      code = code()
+
+      assert {:ok, %{store: store, cashier: nil}} =
+               Stores.register_branch(%{"name" => "Cabang A", "code" => code})
+
+      assert Stores.get_active_store(store.id).code == code
+    end
+
+    test "registers the store and its first cashier together" do
+      email = unique_user_email()
+
+      assert {:ok, %{store: store, cashier: cashier}} =
+               Stores.register_branch(
+                 %{"name" => "Cabang B", "code" => code()},
+                 %{"name" => "Kasir B", "email" => email, "password" => valid_user_password()}
+               )
+
+      assert {cashier.role, cashier.store_id} == {"cashier", store.id}
+      assert cashier.confirmed_at
+      assert Zahlungs.Accounts.get_user_by_email_and_password(email, valid_user_password())
+      assert Scope.usable?(Scope.for_user(cashier))
+    end
+
+    test "accepts atom keys and ignores role and store_id from the caller" do
+      other = store_fixture()
+
+      assert {:ok, %{store: store, cashier: cashier}} =
+               Stores.register_branch(
+                 %{name: "Cabang C", code: code()},
+                 %{
+                   email: unique_user_email(),
+                   password: valid_user_password(),
+                   role: "admin",
+                   store_id: other.id
+                 }
+               )
+
+      assert {cashier.role, cashier.store_id} == {"cashier", store.id}
+    end
+
+    test "an invalid cashier saves nothing" do
+      code = code()
+      taken = user_fixture().email
+
+      for cashier <- [
+            %{"email" => unique_user_email(), "password" => "short"},
+            %{"email" => taken, "password" => valid_user_password()},
+            %{"name" => "", "email" => "", "password" => ""},
+            %{}
+          ] do
+        assert {:error, :cashier, %Ecto.Changeset{}} =
+                 Stores.register_branch(%{"name" => "Cabang D", "code" => code}, cashier)
+      end
+
+      refute Enum.any?(Stores.list_stores(), &(&1.code == code))
+    end
+
+    test "an invalid store saves nothing, cashier included" do
+      existing = store_fixture()
+      email = unique_user_email()
+
+      assert {:error, :store, changeset} =
+               Stores.register_branch(
+                 %{"name" => "Cabang E", "code" => existing.code},
+                 %{"email" => email, "password" => valid_user_password()}
+               )
+
+      assert %{code: [_ | _]} = errors_on(changeset)
+      refute Zahlungs.Accounts.get_user_by_email(email)
+    end
+  end
 end

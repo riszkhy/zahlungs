@@ -42,6 +42,9 @@ defmodule Zahlungs.Stores.Store do
     |> validate_number(:latitude, greater_than_or_equal_to: -90, less_than_or_equal_to: 90)
     |> validate_number(:longitude, greater_than_or_equal_to: -180, less_than_or_equal_to: 180)
     |> validate_coordinates_together()
+    # Checked here too, so a form can say "taken" before anything is saved; the
+    # constraint below still guards against two saves racing each other.
+    |> unsafe_validate_unique(:code, Zahlungs.Repo)
     |> unique_constraint(:code)
   end
 
