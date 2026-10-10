@@ -43,7 +43,7 @@ defmodule ZahlungsWeb.StoreRegisterLiveTest do
 
   defp store_with(code), do: Enum.find(Stores.list_stores(), &(&1.code == code))
 
-  defp on_step_two(store \\ store_params()) do
+  defp on_step_two(store) do
     StoreLive.Register
     |> mount_live(admin_fixture(), action: :new)
     |> event("next", %{"store" => store})
