@@ -1,4 +1,8 @@
 defmodule Zahlungs.Accounts.UserNotifier do
+  @moduledoc """
+  Builds and delivers the account emails (confirmation, password reset, email
+  change). The sender comes from `config :zahlungs, :mail_from`.
+  """
   import Swoosh.Email
 
   alias Zahlungs.Mailer
@@ -8,7 +12,7 @@ defmodule Zahlungs.Accounts.UserNotifier do
     email =
       new()
       |> to(recipient)
-      |> from({"MyApp", "contact@example.com"})
+      |> from(Application.fetch_env!(:zahlungs, :mail_from))
       |> subject(subject)
       |> text_body(body)
 

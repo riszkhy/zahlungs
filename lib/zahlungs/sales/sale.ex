@@ -17,6 +17,9 @@ defmodule Zahlungs.Sales.Sale do
     field :returned_at, :naive_datetime
     field :voided_at, :naive_datetime
     field :void_reason, :string
+    # Returned or voided after its shift was closed: still counts toward that
+    # shift's (already reconciled) figures.
+    field :adjusted_after_shift_close, :boolean, default: false
 
     belongs_to :user, Zahlungs.Accounts.User
     belongs_to :shift, Zahlungs.Shifts.Shift
@@ -47,6 +50,8 @@ defmodule Zahlungs.Sales.Sale do
     ])
     |> validate_required([:subtotal, :total, :amount_paid, :change_due, :status, :payment_method])
     |> validate_inclusion(:payment_method, @payment_methods)
+    |> validate_number(:discount, greater_than_or_equal_to: 0)
+    |> validate_number(:tax, greater_than_or_equal_to: 0)
     |> validate_number(:total, greater_than_or_equal_to: 0)
     |> unique_constraint(:code)
   end
@@ -60,9 +65,14 @@ defmodule Zahlungs.Sales.Sale do
   end
 
   @doc "Marks a sale as returned/refunded."
-  def return_changeset(sale) do
+  def return_changeset(sale, after_shift_close? \\ false) do
     now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
-    change(sale, status: "returned", returned_at: now)
+
+    change(sale,
+      status: "returned",
+      returned_at: now,
+      adjusted_after_shift_close: after_shift_close?
+    )
   end
 
   @doc "Returns true if the sale has been returned/refunded."
@@ -70,7 +80,7 @@ defmodule Zahlungs.Sales.Sale do
   def returned?(%__MODULE__{}), do: false
 
   @doc "Marks a sale as voided (koreksi kesalahan input), recording who and why."
-  def void_changeset(sale, user_id, reason) do
+  def void_changeset(sale, user_id, reason, after_shift_close? \\ false) do
     now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
 
     sale
@@ -80,6 +90,7 @@ defmodule Zahlungs.Sales.Sale do
     |> put_change(:status, "void")
     |> put_change(:voided_at, now)
     |> put_change(:voided_by_id, user_id)
+    |> put_change(:adjusted_after_shift_close, after_shift_close?)
   end
 
   @doc "Returns true if the sale has been voided."

@@ -18,7 +18,7 @@
   <div>
     <dt class="text-xs text-gray-500">Member since</dt>
     <dd class="text-sm font-medium text-black">
-      {Calendar.strftime(@current_user.inserted_at, "%d %b %Y")}
+      {Calendar.strftime(Zahlungs.LocalTime.to_local(@current_user.inserted_at), "%d %b %Y")}
     </dd>
   </div>
 </dl>

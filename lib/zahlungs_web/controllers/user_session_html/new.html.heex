@@ -11,11 +11,15 @@
     <div class="flex justify-between">
       <span class="block text-gray-600 dark:text-gray-200 text-sm font-medium mb-2">Password</span>
       <.link
+        :if={Zahlungs.Mailer.delivers?()}
         href={~p"/users/reset_password"}
         class="text-xs text-gray-500 dark:text-gray-300 hover:underline"
       >
         Forgot password?
       </.link>
+      <span :if={not Zahlungs.Mailer.delivers?()} class="text-xs text-gray-500 dark:text-gray-300">
+        Lupa password? Hubungi admin.
+      </span>
     </div>
     <.password_field id={f[:password].id} name={f[:password].name} required />
   </div>
@@ -26,16 +30,3 @@
     <.button class="w-full">Log in</.button>
   </div>
 </.form>
-
-<div class="flex items-center justify-between mt-6">
-  <span class="w-1/5 border-b dark:border-gray-600 md:w-1/4"></span>
-
-  <.link
-    href={~p"/users/register"}
-    class="text-xs text-gray-500 dark:text-gray-400 uppercase hover:underline"
-  >
-    Or Register
-  </.link>
-
-  <span class="w-1/5 border-b dark:border-gray-600 md:w-1/4"></span>
-</div>

@@ -1,17 +1,19 @@
 defmodule ZahlungsWeb.SalesLive.Index do
   @moduledoc """
-  Sales / transaction history: list recent sales with an optional date filter and
-  a detail modal. Available to any authenticated user.
+  Sales / transaction history: paged list of sales (most recent first) with an
+  optional date filter and a detail modal. Available to any authenticated user.
   """
   use ZahlungsWeb, :live_view
 
   alias Zahlungs.Sales
 
+  @per_page 25
+
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
      socket
-     |> assign(:date, "")
+     |> assign(date: "", page: 1)
      |> assign(:voiding, nil)
      |> assign(:void_reason, "")
      |> load_sales()}
@@ -36,14 +38,18 @@ defmodule ZahlungsWeb.SalesLive.Index do
 
   @impl true
   def handle_event("filter", %{"date" => date}, socket) do
-    {:noreply, socket |> assign(:date, date) |> load_sales()}
+    {:noreply, socket |> assign(date: date, page: 1) |> load_sales()}
+  end
+
+  def handle_event("page", %{"to" => to}, socket) do
+    {:noreply, socket |> assign(:page, max(1, to_int(to))) |> load_sales()}
   end
 
   def handle_event("return", %{"id" => id}, socket) do
     if socket.assigns.current_user.role == "admin" do
       sale = Sales.get_sale!(id)
 
-      case Sales.return_sale(sale) do
+      case Sales.return_sale(sale, socket.assigns.current_user) do
         {:ok, _returned} ->
           {:noreply,
            socket
@@ -117,8 +123,19 @@ defmodule ZahlungsWeb.SalesLive.Index do
   end
 
   defp load_sales(socket) do
-    assign(socket, :sales, Sales.list_sales(date: parse_date(socket.assigns.date)))
+    date = parse_date(socket.assigns.date)
+    total = Sales.count_sales(date: date)
+    total_pages = max(1, ceil(total / @per_page))
+    page = min(socket.assigns.page, total_pages)
+
+    sales = Sales.list_sales(date: date, limit: @per_page, offset: (page - 1) * @per_page)
+
+    assign(socket, sales: sales, total: total, total_pages: total_pages, page: page)
   end
+
+  # JS.push sends numbers as JSON numbers; a form would send strings.
+  defp to_int(n) when is_integer(n), do: n
+  defp to_int(n) when is_binary(n), do: String.to_integer(n)
 
   defp parse_date(""), do: nil
   defp parse_date(nil), do: nil
@@ -147,7 +164,7 @@ defmodule ZahlungsWeb.SalesLive.Index do
 
     <.table id="sales" rows={@sales}>
       <:col :let={sale} label="Code">{sale.code}</:col>
-      <:col :let={sale} label="Date">{Calendar.strftime(sale.inserted_at, "%d %b %Y %H:%M")}</:col>
+      <:col :let={sale} label="Date">{Calendar.strftime(Zahlungs.LocalTime.to_local(sale.inserted_at), "%d %b %Y %H:%M")}</:col>
       <:col :let={sale} label="Cashier">{sale.user && sale.user.email}</:col>
       <:col :let={sale} label="Items">{length(sale.items)}</:col>
       <:col :let={sale} label="Total">{format_money(sale.total)}</:col>
@@ -160,6 +177,24 @@ defmodule ZahlungsWeb.SalesLive.Index do
         <.link patch={~p"/sales/#{sale}"}>View</.link>
       </:action>
     </.table>
+
+    <div :if={@total_pages > 1} class="mt-6 flex items-center justify-center gap-4">
+      <.button
+        phx-click={JS.push("page", value: %{to: @page - 1})}
+        disabled={@page <= 1}
+        class="!bg-gray-200 !text-gray-700"
+      >
+        Prev
+      </.button>
+      <span class="text-sm text-gray-600">Page {@page} of {@total_pages} · {@total} sales</span>
+      <.button
+        phx-click={JS.push("page", value: %{to: @page + 1})}
+        disabled={@page >= @total_pages}
+        class="!bg-gray-200 !text-gray-700"
+      >
+        Next
+      </.button>
+    </div>
 
     <.modal :if={@live_action == :show and @sale} id="sale-modal" show on_cancel={JS.patch(~p"/sales")}>
       <h3 class="text-lg font-semibold">Sale {@sale.code}</h3>

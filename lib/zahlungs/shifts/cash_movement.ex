@@ -8,7 +8,10 @@ defmodule Zahlungs.Shifts.CashMovement do
     "cash_in" => "in",
     "cash_drop" => "out",
     "expense" => "out",
-    "consignment_payment" => "out"
+    "consignment_payment" => "out",
+    # Cash handed back for a sale from an already-closed shift; recorded by
+    # Zahlungs.Sales.return_sale/2, not entered by hand.
+    "refund" => "out"
   }
 
   schema "cash_movements" do

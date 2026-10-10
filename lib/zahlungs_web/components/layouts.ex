@@ -44,7 +44,7 @@ defmodule ZahlungsWeb.Layouts do
         <.link :if={@current_user.role == "admin"} href={~p"/reports/stock"} class="text-white/90 hover:text-white hover:underline">
           Stock
         </.link>
-        <.link href={~p"/reports/consignment"} class="text-white/90 hover:text-white hover:underline">
+        <.link :if={@current_user.role == "admin"} href={~p"/reports/consignment"} class="text-white/90 hover:text-white hover:underline">
           Consignment
         </.link>
         <.link href={~p"/users/settings"} class="text-white/90 hover:text-white hover:underline">Profile</.link>
@@ -53,7 +53,6 @@ defmodule ZahlungsWeb.Layouts do
           <button type="submit" class="text-white/90 hover:text-white hover:underline">Log out</button>
         </.form>
       <% else %>
-        <.link href={~p"/users/register"} class="text-white/90 hover:text-white hover:underline">Register</.link>
         <.link href={~p"/users/log_in"} class="text-white/90 hover:text-white hover:underline">Log in</.link>
       <% end %>
     </div>

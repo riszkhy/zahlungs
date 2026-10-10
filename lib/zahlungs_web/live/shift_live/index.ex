@@ -46,7 +46,9 @@ defmodule ZahlungsWeb.ShiftLive.Index do
   end
 
   defp fmt(nil), do: "—"
-  defp fmt(%NaiveDateTime{} = dt), do: Calendar.strftime(dt, "%d %b %Y %H:%M")
+
+  defp fmt(%NaiveDateTime{} = dt),
+    do: Calendar.strftime(Zahlungs.LocalTime.to_local(dt), "%d %b %Y %H:%M")
 
   defp cashier_name(nil), do: "—"
   defp cashier_name(%{name: name}) when name not in [nil, ""], do: name
@@ -62,6 +64,7 @@ defmodule ZahlungsWeb.ShiftLive.Index do
   defp movement_label("cash_drop"), do: "Setor brankas"
   defp movement_label("cash_in"), do: "Uang masuk"
   defp movement_label("consignment_payment"), do: "Bayar konsinyasi"
+  defp movement_label("refund"), do: "Refund retur"
   defp movement_label(other), do: other
 
   @impl true
@@ -137,7 +140,7 @@ defmodule ZahlungsWeb.ShiftLive.Index do
       <h4 class="mt-6 font-semibold text-gray-700">Transactions</h4>
       <.table id="shift-sales" rows={@sales}>
         <:col :let={sale} label="Code">{sale.code}</:col>
-        <:col :let={sale} label="Time">{Calendar.strftime(sale.inserted_at, "%H:%M")}</:col>
+        <:col :let={sale} label="Time">{Calendar.strftime(Zahlungs.LocalTime.to_local(sale.inserted_at), "%H:%M")}</:col>
         <:col :let={sale} label="Items">{length(sale.items)}</:col>
         <:col :let={sale} label="Method">{payment_label(sale.payment_method)}</:col>
         <:col :let={sale} label="Total">{format_money(sale.total)}</:col>
@@ -146,7 +149,7 @@ defmodule ZahlungsWeb.ShiftLive.Index do
 
       <h4 :if={@movements != []} class="mt-6 font-semibold text-gray-700">Gerakan kas</h4>
       <.table :if={@movements != []} id="shift-movements" rows={@movements}>
-        <:col :let={m} label="Time">{Calendar.strftime(m.inserted_at, "%H:%M")}</:col>
+        <:col :let={m} label="Time">{Calendar.strftime(Zahlungs.LocalTime.to_local(m.inserted_at), "%H:%M")}</:col>
         <:col :let={m} label="Tipe">{movement_label(m.category)}</:col>
         <:col :let={m} label="Supplier">{m.supplier && m.supplier.name}</:col>
         <:col :let={m} label="Catatan">{m.note}</:col>

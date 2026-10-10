@@ -1,17 +1,18 @@
 defmodule ZahlungsWeb.ReportLive.Consignment do
   @moduledoc """
   Consignment settlement report (admin only): per-supplier amount payable for
-  consignment products sold in the date range (Model A — fixed supplier price,
-  taken from each sale item's purchase-price snapshot), plus the on-hand
-  consignment stock still returnable to each supplier.
+  consignment items sold in the date range (Model A — fixed supplier price,
+  taken from each sale item's snapshot), what was paid in the range, the balance
+  still owed as of the end date, plus the on-hand consignment stock still
+  returnable to each supplier.
   """
   use ZahlungsWeb, :live_view
 
-  alias Zahlungs.{Catalog, Sales, Shifts}
+  alias Zahlungs.{Catalog, Sales}
 
   @impl true
   def mount(_params, _session, socket) do
-    today = Date.utc_today()
+    today = Zahlungs.LocalTime.today()
     from = Date.beginning_of_month(today)
 
     {:ok,
@@ -30,16 +31,7 @@ defmodule ZahlungsWeb.ReportLive.Consignment do
   defp load_report(socket) do
     with {:ok, from} <- Date.from_iso8601(socket.assigns.from),
          {:ok, to} <- Date.from_iso8601(socket.assigns.to) do
-      paid = Shifts.consignment_payments_by_supplier(from, to)
-
-      rows =
-        from
-        |> Sales.consignment_settlement(to)
-        |> Enum.map(fn r ->
-          paid_amount = Map.get(paid, r.supplier_id, Decimal.new(0))
-          Map.merge(r, %{paid: paid_amount, outstanding: Decimal.sub(r.payable, paid_amount)})
-        end)
-
+      rows = Sales.consignment_statement(from, to)
       assign(socket, settlement: rows, totals: totals(rows))
     else
       _ -> assign(socket, settlement: [], totals: zero_totals())
@@ -77,7 +69,7 @@ defmodule ZahlungsWeb.ReportLive.Consignment do
       Consignment Settlement
       <:subtitle>Yang harus dibayar ke supplier titipan (khusus admin)</:subtitle>
       <:actions>
-        <.link :if={@current_user.role == "admin"} patch={~p"/admin/suppliers"} class="btn btn-sm btn-link">
+        <.link navigate={~p"/admin/suppliers"} class="btn btn-sm btn-link">
           Suppliers
         </.link>
       </:actions>
@@ -96,28 +88,32 @@ defmodule ZahlungsWeb.ReportLive.Consignment do
 
     <div class="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
       <.stat label="Omzet titipan" value={format_money(@totals.revenue)} accent="text-green-600" />
-      <.stat label="Harus dibayar ke supplier" value={format_money(@totals.payable)} accent="text-gray-700" />
-      <.stat label="Sudah dibayar" value={format_money(@totals.paid)} accent="text-blue-600" />
-      <.stat label="Sisa (outstanding)" value={format_money(@totals.outstanding)} accent="text-red-600" />
+      <.stat label="Harus dibayar (rentang ini)" value={format_money(@totals.payable)} accent="text-gray-700" />
+      <.stat label="Dibayar (rentang ini)" value={format_money(@totals.paid)} accent="text-blue-600" />
+      <.stat label="Sisa utang s.d. tanggal akhir" value={format_money(@totals.outstanding)} accent="text-red-600" />
     </div>
 
     <p class="mt-3 text-sm text-gray-500">Margin toko: <strong>{format_money(@totals.margin)}</strong></p>
 
-    <h3 class="mt-10 font-semibold text-gray-700">Per supplier (terjual pada rentang tanggal)</h3>
+    <h3 class="mt-10 font-semibold text-gray-700">Per supplier</h3>
+    <p class="mt-1 text-sm text-gray-500">
+      Sisa utang dihitung kumulatif: semua yang harus dibayar dikurangi semua pembayaran sampai tanggal akhir,
+      termasuk dari rentang sebelumnya.
+    </p>
     <.table id="settlement" rows={@settlement}>
       <:col :let={r} label="Supplier">{r.supplier}</:col>
       <:col :let={r} label="Qty terjual">{r.qty_sold}</:col>
       <:col :let={r} label="Omzet">{format_money(r.revenue)}</:col>
       <:col :let={r} label="Harus dibayar">{format_money(r.payable)}</:col>
-      <:col :let={r} label="Sudah dibayar">{format_money(r.paid)}</:col>
-      <:col :let={r} label="Sisa">
+      <:col :let={r} label="Dibayar">{format_money(r.paid)}</:col>
+      <:col :let={r} label="Sisa utang">
         <span class={if Decimal.gt?(r.outstanding, Decimal.new(0)), do: "text-red-600", else: "text-green-600"}>
           {format_money(r.outstanding)}
         </span>
       </:col>
     </.table>
     <p :if={@settlement == []} class="mt-2 text-sm text-gray-500">
-      Belum ada penjualan barang titipan pada rentang ini.
+      Tidak ada penjualan atau pembayaran titipan pada rentang ini, dan tidak ada sisa utang.
     </p>
 
     <h3 class="mt-10 font-semibold text-amber-700">Sisa stok titipan (bisa dikembalikan)</h3>

@@ -33,7 +33,7 @@ defmodule ZahlungsWeb.CatalogLive do
   end
 
   def handle_event("page", %{"to" => to}, socket) do
-    page = max(1, min(socket.assigns.total_pages, String.to_integer(to)))
+    page = max(1, min(socket.assigns.total_pages, to_int(to)))
     {:noreply, socket |> assign(:page, page) |> load_products()}
   end
 
@@ -106,6 +106,10 @@ defmodule ZahlungsWeb.CatalogLive do
   end
 
   defp parse_category(_), do: nil
+
+  # The Prev/Next buttons use JS.push, which sends the page as a JSON number.
+  defp to_int(n) when is_integer(n), do: n
+  defp to_int(n) when is_binary(n), do: String.to_integer(n)
 
   @impl true
   def render(assigns) do

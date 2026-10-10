@@ -22,60 +22,109 @@ defmodule Zahlungs.Shifts do
   @doc """
   Opens a shift for the user with the given opening cash float.
   Returns `{:error, :already_open}` if the user already has an open shift.
+
+  The user row is locked for the duration, so two concurrent calls for the same
+  user can't both pass the "no open shift" check.
   """
   def open_shift(%User{} = user, opening_cash) do
-    if current_shift(user) do
-      {:error, :already_open}
-    else
-      %Shift{}
-      |> Shift.open_changeset(%{
-        user_id: user.id,
-        opening_cash: to_decimal(opening_cash),
-        opened_at: now(),
-        status: "open"
-      })
-      |> Repo.insert()
-    end
+    Repo.transaction(fn ->
+      Repo.one!(from u in User, where: u.id == ^user.id, select: u.id, lock: "FOR UPDATE")
+
+      if current_shift(user) do
+        Repo.rollback(:already_open)
+      else
+        %Shift{}
+        |> Shift.open_changeset(%{
+          user_id: user.id,
+          opening_cash: to_decimal(opening_cash),
+          opened_at: now(),
+          status: "open"
+        })
+        |> Repo.insert()
+        |> unwrap_or_rollback()
+      end
+    end)
   end
 
   @doc """
   Closes an open shift: computes expected cash and variance vs the counted cash.
   Returns `{:error, :not_open}` if the shift is already closed.
+
+  The shift row is locked first, so the expected cash includes every sale and
+  cash movement recorded on the shift and none can be added afterwards.
   """
-  def close_shift(shift, counted_cash, note \\ nil)
+  def close_shift(%Shift{} = shift, counted_cash, note \\ nil) do
+    Repo.transaction(fn ->
+      with_open_shift(shift, fn ->
+        expected = expected_cash(shift)
+        counted = to_decimal(counted_cash)
 
-  def close_shift(%Shift{status: "open"} = shift, counted_cash, note) do
-    expected = expected_cash(shift)
-    counted = to_decimal(counted_cash)
-
-    shift
-    |> Shift.close_changeset(%{
-      status: "closed",
-      closed_at: now(),
-      expected_cash: expected,
-      counted_cash: counted,
-      variance: Decimal.sub(counted, expected),
-      note: note
-    })
-    |> Repo.update()
+        shift
+        |> Shift.close_changeset(%{
+          status: "closed",
+          closed_at: now(),
+          expected_cash: expected,
+          counted_cash: counted,
+          variance: Decimal.sub(counted, expected),
+          note: note
+        })
+        |> Repo.update()
+        |> unwrap_or_rollback()
+      end)
+    end)
   end
-
-  def close_shift(%Shift{}, _counted_cash, _note), do: {:error, :not_open}
 
   @doc """
   Records a cash movement (drawer in/out) against an open shift. The shift and
   user are taken from the shift itself (never from `attrs`, so they can't be
   spoofed). Returns `{:error, :not_open}` for a closed shift.
   """
-  def add_cash_movement(shift, attrs \\ %{})
-
-  def add_cash_movement(%Shift{status: "open"} = shift, attrs) do
-    %CashMovement{shift_id: shift.id, user_id: shift.user_id}
-    |> CashMovement.changeset(attrs)
-    |> Repo.insert()
+  def add_cash_movement(%Shift{} = shift, attrs \\ %{}) do
+    Repo.transaction(fn ->
+      with_open_shift(shift, fn ->
+        %CashMovement{shift_id: shift.id, user_id: shift.user_id}
+        |> CashMovement.changeset(attrs)
+        |> Repo.insert()
+        |> unwrap_or_rollback()
+      end)
+    end)
   end
 
-  def add_cash_movement(%Shift{}, _attrs), do: {:error, :not_open}
+  @doc """
+  Fetches a shift by id with a row lock (`FOR UPDATE`), or nil. Must be called
+  inside a transaction; the lock is held until it ends. The returned struct
+  reflects the committed state, so its `status` can be trusted — unlike a struct
+  loaded earlier (e.g. held in a LiveView's assigns).
+  """
+  def lock_shift(id) do
+    Repo.one(from s in Shift, where: s.id == ^id, lock: "FOR UPDATE")
+  end
+
+  @doc """
+  Locks and returns the user's open shift, for recording a sale on it. Must be
+  called inside a transaction. Returns `{:ok, shift}` or
+  `{:error, :no_open_shift}`.
+  """
+  def lock_current_shift(%User{} = user) do
+    with %Shift{id: id} <- current_shift(user),
+         %Shift{status: "open"} = shift <- lock_shift(id) do
+      {:ok, shift}
+    else
+      _ -> {:error, :no_open_shift}
+    end
+  end
+
+  # Runs `fun` only if the shift is still open in the database (not just in the
+  # possibly stale struct), holding its row lock.
+  defp with_open_shift(%Shift{id: id}, fun) do
+    case lock_shift(id) do
+      %Shift{status: "open"} -> fun.()
+      _ -> Repo.rollback(:not_open)
+    end
+  end
+
+  defp unwrap_or_rollback({:ok, value}), do: value
+  defp unwrap_or_rollback({:error, reason}), do: Repo.rollback(reason)
 
   @doc """
   Total consignment payments (cash-out) per supplier within the date range,
@@ -83,8 +132,7 @@ defmodule Zahlungs.Shifts do
   how much has already been paid vs the payable amount.
   """
   def consignment_payments_by_supplier(%Date{} = date_from, %Date{} = date_to) do
-    start = NaiveDateTime.new!(date_from, ~T[00:00:00])
-    finish = NaiveDateTime.new!(date_to, ~T[23:59:59])
+    {start, finish} = Zahlungs.LocalTime.day_range(date_from, date_to)
 
     Repo.all(
       from m in CashMovement,
@@ -95,6 +143,24 @@ defmodule Zahlungs.Shifts do
         select: {m.supplier_id, coalesce(sum(m.amount), 0)}
     )
     |> Map.new(fn {sid, total} -> {sid, to_decimal(total)} end)
+  end
+
+  @doc """
+  Everything paid to each supplier up to (and including) `date_to`, as
+  `%{supplier_id => %{supplier: name, paid: Decimal}}`. Used for the balance
+  still owed to a supplier as of a date.
+  """
+  def consignment_payments_to_date(%Date{} = date_to) do
+    {_start, finish} = Zahlungs.LocalTime.day_range(date_to, date_to)
+
+    Repo.all(
+      from m in CashMovement,
+        join: sup in assoc(m, :supplier),
+        where: m.category == "consignment_payment" and m.inserted_at <= ^finish,
+        group_by: [sup.id, sup.name],
+        select: {sup.id, %{supplier: sup.name, paid: coalesce(sum(m.amount), 0)}}
+    )
+    |> Map.new(fn {id, row} -> {id, %{row | paid: to_decimal(row.paid)}} end)
   end
 
   @doc "Lists the cash movements of a shift (most recent first), preloading supplier."
@@ -113,9 +179,13 @@ defmodule Zahlungs.Shifts do
       opening float + completed cash sales + cash-in movements − cash-out movements
 
   Non-cash sales (QRIS/card/transfer) never enter the drawer, so they are
-  excluded. Cash movements (setoran, pengeluaran, bayar konsinyasi) adjust the
-  expected amount. (Returned sales are excluded; cross-shift refunds are a future
-  refinement — see docs/CONCEPT-cashier-shift.md.)
+  excluded. Cash movements (setoran, pengeluaran, bayar konsinyasi, refund)
+  adjust the expected amount.
+
+  A sale returned or voided while the shift is open stops counting. One
+  returned or voided after the shift was closed keeps counting here — the
+  closed shift's figures are final — and a refund is booked on the shift that
+  actually pays it out (see `Zahlungs.Sales.return_sale/2`).
   """
   def expected_cash(%Shift{} = shift) do
     %{cash_in: cash_in, cash_out: cash_out} = movement_totals(shift.id)
@@ -134,8 +204,7 @@ defmodule Zahlungs.Shifts do
   def shift_summary(%Shift{} = shift) do
     row =
       Repo.one(
-        from s in Sale,
-          where: s.shift_id == ^shift.id and s.status == "completed",
+        from s in counted_sales(shift.id),
           select: %{
             transactions: count(s.id),
             sales_total: coalesce(sum(s.total), 0),
@@ -168,11 +237,20 @@ defmodule Zahlungs.Shifts do
     }
   end
 
-  # Total of completed cash sales tagged to the shift.
+  # The sales that count toward a shift's figures: completed ones, plus those
+  # returned or voided only after the shift had been closed.
+  defp counted_sales(shift_id) do
+    from s in Sale,
+      where:
+        s.shift_id == ^shift_id and
+          (s.status == "completed" or s.adjusted_after_shift_close == true)
+  end
+
+  # Total of the cash sales that count toward the shift.
   defp cash_sales_total(shift_id) do
     Repo.one(
-      from s in Sale,
-        where: s.shift_id == ^shift_id and s.status == "completed" and s.payment_method == "cash",
+      from s in counted_sales(shift_id),
+        where: s.payment_method == "cash",
         select: coalesce(sum(s.total), 0)
     )
     |> to_decimal()

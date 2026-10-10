@@ -1,9 +1,22 @@
 defmodule ZahlungsWeb.ShiftLiveTest do
-  @moduledoc "Shift history tested via get/2 (no lazy_html)."
+  @moduledoc """
+  Shift history tests: access and render via `get/2`, and who may see which
+  shift by driving the LiveView's callbacks (see `ZahlungsWeb.LiveDriver`).
+  """
   use ZahlungsWeb.ConnCase, async: true
 
   import Zahlungs.AccountsFixtures
-  alias Zahlungs.Shifts
+  import Zahlungs.CatalogFixtures
+  import Zahlungs.ShiftsFixtures
+  import ZahlungsWeb.LiveDriver
+
+  alias Zahlungs.{Sales, Shifts}
+  alias ZahlungsWeb.ShiftLive
+
+  defp admin_fixture do
+    {:ok, admin} = Zahlungs.Accounts.set_user_role(user_fixture(), "admin")
+    admin
+  end
 
   describe "/shifts" do
     test "redirects guests to the log in page", %{conn: conn} do
@@ -21,6 +34,75 @@ defmodule ZahlungsWeb.ShiftLiveTest do
       assert response =~ "Shifts"
       assert response =~ "Budi Kasir"
       assert response =~ Integer.to_string(shift.id)
+    end
+  end
+
+  describe "shift list" do
+    test "a cashier sees only their own shifts, an admin sees everyone's" do
+      cashier = user_fixture()
+      mine = shift_fixture(cashier)
+      theirs = shift_fixture(user_fixture())
+
+      as_cashier = mount_live(ShiftLive.Index, cashier)
+      assert Enum.map(as_cashier.assigns.shifts, & &1.id) == [mine.id]
+
+      # The admin list is capped at the 50 most recent, which these two are.
+      as_admin = mount_live(ShiftLive.Index, admin_fixture())
+      admin_ids = Enum.map(as_admin.assigns.shifts, & &1.id)
+      assert mine.id in admin_ids
+      assert theirs.id in admin_ids
+    end
+  end
+
+  describe "shift detail" do
+    setup do
+      cashier = user_fixture()
+      shift = shift_fixture(cashier, "100000")
+      product = product_fixture(price: Decimal.new("1000"), stock: 10)
+
+      {:ok, sale} =
+        Sales.create_sale(cashier, [%{product_id: product.id, quantity: 2}], %{
+          amount_paid: "2000"
+        })
+
+      {:ok, _} = Shifts.add_cash_movement(shift, %{"category" => "expense", "amount" => "500"})
+
+      %{cashier: cashier, shift: shift, sale: sale}
+    end
+
+    test "shows the owner the reconciliation, sales and cash movements",
+         %{cashier: cashier, shift: shift, sale: sale} do
+      socket =
+        mount_live(ShiftLive.Index, cashier, action: :show, params: %{"id" => "#{shift.id}"})
+
+      assert socket.assigns.shift.id == shift.id
+      assert Enum.map(socket.assigns.sales, & &1.id) == [sale.id]
+      assert [%{category: "expense"}] = socket.assigns.movements
+      assert Decimal.equal?(socket.assigns.summary.expected_cash, Decimal.new("101500"))
+      assert html(socket) =~ sale.code
+    end
+
+    test "an admin can open any cashier's shift", %{shift: shift} do
+      socket =
+        mount_live(ShiftLive.Index, admin_fixture(),
+          action: :show,
+          params: %{"id" => "#{shift.id}"}
+        )
+
+      assert socket.assigns.shift.id == shift.id
+      assert is_nil(flash(socket, :error))
+    end
+
+    test "another cashier is sent back to the list without seeing it", %{shift: shift} do
+      socket =
+        mount_live(ShiftLive.Index, user_fixture(),
+          action: :show,
+          params: %{"id" => "#{shift.id}"}
+        )
+
+      assert flash(socket, :error) == "You can only view your own shifts."
+      assert live_redirect(socket) == "/shifts"
+      assert is_nil(socket.assigns[:summary])
     end
   end
 end

@@ -507,7 +507,7 @@ defmodule ZahlungsWeb.CoreComponents do
   def sale_receipt(assigns) do
     ~H"""
     <p class="text-xs text-gray-400">
-      {Calendar.strftime(@sale.inserted_at, "%d %b %Y %H:%M")} · {@sale.user && @sale.user.email}
+      {Calendar.strftime(Zahlungs.LocalTime.to_local(@sale.inserted_at), "%d %b %Y %H:%M")} · {@sale.user && @sale.user.email}
     </p>
 
     <table class="w-full mt-4 text-sm">

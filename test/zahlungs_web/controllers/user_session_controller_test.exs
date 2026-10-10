@@ -12,13 +12,19 @@ defmodule ZahlungsWeb.UserSessionControllerTest do
       conn = get(conn, Routes.user_session_path(conn, :new))
       response = html_response(conn, 200)
       assert response =~ "Log in</h3>"
-      assert response =~ "Or Register"
+      refute response =~ "Register"
       assert response =~ "Forgot password?"
     end
 
     test "redirects if already logged in", %{conn: conn, user: user} do
       conn = conn |> log_in_user(user) |> get(Routes.user_session_path(conn, :new))
       assert redirected_to(conn) == "/home"
+    end
+  end
+
+  describe "GET /users/register" do
+    test "self-registration is not available (accounts are created by an admin)", %{conn: conn} do
+      assert conn |> get("/users/register") |> response(404)
     end
   end
 

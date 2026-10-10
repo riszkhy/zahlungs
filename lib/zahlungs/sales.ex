@@ -9,11 +9,13 @@ defmodule Zahlungs.Sales do
 
   import Ecto.Query, warn: false
   alias Ecto.Multi
+  alias Zahlungs.LocalTime
   alias Zahlungs.Repo
 
   alias Zahlungs.Accounts.User
   alias Zahlungs.Catalog.Product
   alias Zahlungs.Sales.{Sale, SaleItem}
+  alias Zahlungs.Shifts
 
   @doc """
   Records a sale from a cart.
@@ -23,8 +25,13 @@ defmodule Zahlungs.Sales do
     * `payment` - map with `:amount_paid`, `:discount`, `:tax` (strings/numbers/Decimal)
 
   Returns `{:ok, sale}` (preloaded with items + products) or one of:
-  `{:error, :empty_cart}`, `{:error, :insufficient_payment}`,
-  `{:error, {:insufficient_stock, product_name}}`.
+  `{:error, :empty_cart}`, `{:error, :invalid_discount}` (negative or above
+  the subtotal), `{:error, :invalid_tax}` (negative),
+  `{:error, :insufficient_payment}`, `{:error, :no_open_shift}`, `{:error, {:insufficient_stock, product_name}}`.
+
+  The sale is recorded on the cashier's open shift, which is looked up and
+  locked here (never taken from the caller), so a sale can't land on a closed
+  shift or on none at all.
 
   Stock is decremented with a guarded `UPDATE ... WHERE stock >= qty`, so the
   whole transaction rolls back (no sale, no stock change) if any item would
@@ -35,45 +42,56 @@ defmodule Zahlungs.Sales do
   def create_sale(_user, [], _payment), do: {:error, :empty_cart}
 
   def create_sale(user, cart, payment) do
+    with [_ | _] = items <- build_items(cart),
+         {:ok, totals} <- compute_totals(items, payment) do
+      do_create_sale(user, items, totals)
+    else
+      [] -> {:error, :empty_cart}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # Works out the money side of a sale and rejects amounts that make no sense:
+  # a discount must be between 0 and the subtotal (a negative one would silently
+  # raise the price), and tax can't be negative.
+  defp compute_totals(items, payment) do
     discount = to_decimal(payment[:discount] || payment["discount"])
     tax = to_decimal(payment[:tax] || payment["tax"])
-    shift_id = payment[:shift_id] || payment["shift_id"]
-    payment_method = payment[:payment_method] || payment["payment_method"] || "cash"
-
-    items = build_items(cart)
+    subtotal = Enum.reduce(items, Decimal.new(0), &Decimal.add(&2, &1.line_total))
 
     cond do
-      items == [] ->
-        {:error, :empty_cart}
+      Decimal.negative?(discount) or Decimal.gt?(discount, subtotal) ->
+        {:error, :invalid_discount}
+
+      Decimal.negative?(tax) ->
+        {:error, :invalid_tax}
 
       true ->
-        subtotal = Enum.reduce(items, Decimal.new(0), &Decimal.add(&2, &1.line_total))
         total = subtotal |> Decimal.sub(discount) |> Decimal.add(tax)
+        settle(payment, %{subtotal: subtotal, discount: discount, tax: tax, total: total})
+    end
+  end
 
-        # Non-cash payments (QRIS/card/transfer) are settled for the exact total,
-        # so there is no tendered amount to validate and no change to give. Only
-        # cash payments must cover the total and can produce change.
-        cash? = payment_method == "cash"
+  # Non-cash payments (QRIS/card/transfer) are settled for the exact total, so
+  # there is no tendered amount to validate and no change to give. Only cash
+  # payments must cover the total and can produce change.
+  defp settle(payment, %{total: total} = totals) do
+    payment_method = payment[:payment_method] || payment["payment_method"] || "cash"
+    totals = Map.put(totals, :payment_method, payment_method)
 
-        amount_paid =
-          if cash?, do: to_decimal(payment[:amount_paid] || payment["amount_paid"]), else: total
+    if payment_method == "cash" do
+      amount_paid = to_decimal(payment[:amount_paid] || payment["amount_paid"])
 
-        change_due = if cash?, do: Decimal.sub(amount_paid, total), else: Decimal.new(0)
-
-        if cash? and Decimal.lt?(amount_paid, total) do
-          {:error, :insufficient_payment}
-        else
-          do_create_sale(user, items, %{
-            subtotal: subtotal,
-            discount: discount,
-            tax: tax,
-            total: total,
-            amount_paid: amount_paid,
-            change_due: change_due,
-            shift_id: shift_id,
-            payment_method: payment_method
-          })
-        end
+      if Decimal.lt?(amount_paid, total),
+        do: {:error, :insufficient_payment},
+        else:
+          {:ok,
+           Map.merge(totals, %{
+             amount_paid: amount_paid,
+             change_due: Decimal.sub(amount_paid, total)
+           })}
+    else
+      {:ok, Map.merge(totals, %{amount_paid: total, change_due: Decimal.new(0)})}
     end
   end
 
@@ -82,7 +100,10 @@ defmodule Zahlungs.Sales do
       Map.merge(totals, %{user_id: user.id, status: "completed", code: generate_code()})
 
     Multi.new()
-    |> Multi.insert(:sale, Sale.changeset(%Sale{}, sale_attrs))
+    |> Multi.run(:shift, fn _repo, _changes -> Shifts.lock_current_shift(user) end)
+    |> Multi.insert(:sale, fn %{shift: shift} ->
+      Sale.changeset(%Sale{}, Map.put(sale_attrs, :shift_id, shift.id))
+    end)
     |> insert_items_and_decrement_stock(items)
     |> Repo.transaction()
     |> case do
@@ -93,7 +114,7 @@ defmodule Zahlungs.Sales do
 
   # Human-readable, collision-resistant invoice code: INV + timestamp + random hex.
   defp generate_code do
-    ts = Calendar.strftime(DateTime.utc_now(), "%y%m%d%H%M%S")
+    ts = Calendar.strftime(LocalTime.now(), "%y%m%d%H%M%S")
     suffix = :crypto.strong_rand_bytes(2) |> Base.encode16()
     "INV#{ts}#{suffix}"
   end
@@ -108,23 +129,29 @@ defmodule Zahlungs.Sales do
           quantity: item.quantity,
           unit_price: item.unit_price,
           purchase_price: item.purchase_price,
-          line_total: item.line_total
+          line_total: item.line_total,
+          consignment: item.consignment,
+          supplier_id: item.supplier_id
         })
       end)
-      |> Multi.run({:stock, item.product_id}, fn repo, _changes ->
-        {count, _} =
-          repo.update_all(
-            from(p in Product, where: p.id == ^item.product_id and p.stock >= ^item.quantity),
-            inc: [stock: -item.quantity]
-          )
-
-        if count == 1, do: {:ok, count}, else: {:error, {:insufficient_stock, item.name}}
-      end)
+      |> Multi.run({:stock, item.product_id}, fn repo, _changes -> decrement_stock(repo, item) end)
     end)
   end
 
-  # Aggregates duplicate product lines and snapshots current price; drops lines
-  # whose product no longer exists or whose quantity is not positive.
+  # Guarded decrement: only succeeds while enough stock is left.
+  defp decrement_stock(repo, item) do
+    {count, _} =
+      repo.update_all(
+        from(p in Product, where: p.id == ^item.product_id and p.stock >= ^item.quantity),
+        inc: [stock: -item.quantity]
+      )
+
+    if count == 1, do: {:ok, count}, else: {:error, {:insufficient_stock, item.name}}
+  end
+
+  # Aggregates duplicate product lines and snapshots the product as it is now
+  # (prices, and whether it is a consignment item and whose); drops lines whose
+  # product no longer exists or whose quantity is not positive.
   defp build_items(cart) do
     aggregated =
       Enum.reduce(cart, %{}, fn %{product_id: pid, quantity: qty}, acc ->
@@ -145,7 +172,9 @@ defmodule Zahlungs.Sales do
               quantity: qty,
               unit_price: product.price,
               purchase_price: product.purchase_price,
-              line_total: Decimal.mult(product.price, qty)
+              line_total: Decimal.mult(product.price, qty),
+              consignment: product.consignment,
+              supplier_id: if(product.consignment, do: product.supplier_id)
             }
           ]
 
@@ -158,13 +187,31 @@ defmodule Zahlungs.Sales do
   @doc """
   Returns/refunds a completed sale: restores stock for each item and marks the
   sale as `returned`, atomically. Returns `{:error, :already_returned}` if the
-  sale was already returned.
+  sale is no longer `completed` (already returned or voided).
+
+  The status is re-checked under a row lock, not read from the given struct, so
+  two concurrent requests can't both restore the stock.
+
+  ## Where the refunded cash comes from
+
+  While the sale's shift is still open, the sale simply stops counting toward
+  that shift's expected cash. Once that shift is closed its figures are final,
+  so the refund is recorded instead as a `refund` cash-out on the open shift of
+  `refunded_by` (the user handing the money back), if they have one. Non-cash
+  sales never touch a drawer.
   """
-  def return_sale(%Sale{status: "completed"} = sale) do
+  def return_sale(%Sale{} = sale, refunded_by \\ nil) do
     sale = Repo.preload(sale, :items)
 
     Multi.new()
-    |> Multi.update(:sale, Sale.return_changeset(sale))
+    |> Multi.run(:locked, fn _repo, _changes -> lock_completed(sale, :already_returned) end)
+    |> Multi.run(:shift, fn _repo, %{locked: locked} -> {:ok, lock_sale_shift(locked)} end)
+    |> Multi.run(:refund, fn _repo, %{locked: locked, shift: shift} ->
+      record_refund(locked, shift, refunded_by)
+    end)
+    |> Multi.update(:sale, fn %{shift: shift} ->
+      Sale.return_changeset(sale, shift_closed?(shift))
+    end)
     |> restore_stock(sale.items)
     |> Repo.transaction()
     |> case do
@@ -172,8 +219,6 @@ defmodule Zahlungs.Sales do
       {:error, _step, reason, _changes} -> {:error, reason}
     end
   end
-
-  def return_sale(%Sale{}), do: {:error, :already_returned}
 
   @doc """
   Voids a completed sale to correct a cashier input error: restores stock and
@@ -185,24 +230,65 @@ defmodule Zahlungs.Sales do
     * `{:error, :not_voidable}` - the sale is not in `completed` status
     * `{:error, :shift_closed}` - shift already closed and the user isn't admin
   """
-  def void_sale(%Sale{status: "completed"} = sale, %User{} = user, reason) do
-    sale = Repo.preload(sale, [:items, :shift])
+  def void_sale(%Sale{} = sale, %User{} = user, reason) do
+    sale = Repo.preload(sale, :items)
 
-    if sale.shift && sale.shift.status == "closed" && user.role != "admin" do
-      {:error, :shift_closed}
-    else
-      Multi.new()
-      |> Multi.update(:sale, Sale.void_changeset(sale, user.id, reason))
-      |> restore_stock(sale.items)
-      |> Repo.transaction()
-      |> case do
-        {:ok, %{sale: voided}} -> {:ok, voided}
-        {:error, _step, err, _changes} -> {:error, err}
-      end
+    Multi.new()
+    |> Multi.run(:locked, fn _repo, _changes -> lock_completed(sale, :not_voidable) end)
+    |> Multi.run(:shift, fn _repo, %{locked: locked} -> check_shift_allows_void(locked, user) end)
+    |> Multi.update(:sale, fn %{shift: shift} ->
+      Sale.void_changeset(sale, user.id, reason, shift_closed?(shift))
+    end)
+    |> restore_stock(sale.items)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{sale: voided}} -> {:ok, voided}
+      {:error, _step, err, _changes} -> {:error, err}
     end
   end
 
-  def void_sale(%Sale{}, %User{}, _reason), do: {:error, :not_voidable}
+  # Locks the sale row and confirms it is still `completed` in the database. The
+  # struct a caller holds may be stale (another tab, a double click), and acting
+  # on it would restore the stock twice.
+  defp lock_completed(%Sale{id: id}, error) do
+    case Repo.one(from s in Sale, where: s.id == ^id, lock: "FOR UPDATE") do
+      %Sale{status: "completed"} = locked -> {:ok, locked}
+      _ -> {:error, error}
+    end
+  end
+
+  # The sale's shift is locked too, so a return or void can't slip in while the
+  # shift is being closed and leave its expected cash out of date.
+  defp lock_sale_shift(%Sale{shift_id: nil}), do: nil
+  defp lock_sale_shift(%Sale{shift_id: shift_id}), do: Shifts.lock_shift(shift_id)
+
+  defp shift_closed?(shift), do: not is_nil(shift) and shift.status == "closed"
+
+  defp check_shift_allows_void(%Sale{} = sale, %User{} = user) do
+    shift = lock_sale_shift(sale)
+
+    if shift_closed?(shift) and user.role != "admin",
+      do: {:error, :shift_closed},
+      else: {:ok, shift}
+  end
+
+  # Cash handed back for a sale whose shift is no longer open (closed, or a sale
+  # from before shifts existed) leaves the drawer of whoever processes the
+  # return, so it is booked there as a cash-out.
+  defp record_refund(%Sale{payment_method: "cash"} = sale, shift, %User{} = refunded_by) do
+    with true <- (is_nil(shift) or shift_closed?(shift)) and Decimal.gt?(sale.total, 0),
+         {:ok, drawer} <- Shifts.lock_current_shift(refunded_by) do
+      Shifts.add_cash_movement(drawer, %{
+        "category" => "refund",
+        "amount" => sale.total,
+        "note" => "Refund #{sale.code}"
+      })
+    else
+      _ -> {:ok, nil}
+    end
+  end
+
+  defp record_refund(%Sale{}, _shift, _refunded_by), do: {:ok, nil}
 
   defp restore_stock(multi, items) do
     Enum.reduce(items, multi, fn item, multi ->
@@ -226,24 +312,33 @@ defmodule Zahlungs.Sales do
 
   ## Options
     * `:limit` - max rows (default 50)
-    * `:date` - a `%Date{}` to restrict to sales recorded on that day
+    * `:offset` - rows to skip, for paging (default 0)
+    * `:date` - a `%Date{}` to restrict to sales recorded on that (shop-local) day
   """
   def list_sales(opts \\ []) do
     limit = opts[:limit] || 50
+    offset = opts[:offset] || 0
 
     Sale
     |> filter_on_date(opts[:date])
-    |> order_by(desc: :inserted_at)
+    |> order_by(desc: :inserted_at, desc: :id)
     |> limit(^limit)
+    |> offset(^offset)
     |> preload([:user, :items])
     |> Repo.all()
+  end
+
+  @doc "Counts sales matching the same `:date` filter as `list_sales/1`."
+  def count_sales(opts \\ []) do
+    Sale
+    |> filter_on_date(opts[:date])
+    |> Repo.aggregate(:count)
   end
 
   defp filter_on_date(query, nil), do: query
 
   defp filter_on_date(query, %Date{} = date) do
-    start = NaiveDateTime.new!(date, ~T[00:00:00])
-    finish = NaiveDateTime.new!(date, ~T[23:59:59])
+    {start, finish} = day_range(date, date)
     where(query, [s], s.inserted_at >= ^start and s.inserted_at <= ^finish)
   end
 
@@ -254,9 +349,10 @@ defmodule Zahlungs.Sales do
     |> Repo.preload([:user, items: :product])
   end
 
-  @doc "Returns `%{count: integer, total: Decimal}` for sales recorded today (UTC)."
+  @doc "Returns `%{count: integer, total: Decimal}` for sales recorded today (shop-local)."
   def sales_summary_today do
-    start = NaiveDateTime.new!(Date.utc_today(), ~T[00:00:00])
+    today = LocalTime.today()
+    {start, _finish} = day_range(today, today)
 
     query = from s in Sale, where: s.inserted_at >= ^start and s.status == "completed"
 
@@ -359,9 +455,13 @@ defmodule Zahlungs.Sales do
 
   @doc """
   Consignment settlement per supplier for the date range (completed sales only,
-  consignment products only). For each supplier returns the quantity sold, the
+  consignment items only). For each supplier returns the quantity sold, the
   revenue, the amount payable to the supplier (Σ snapshot purchase_price × qty),
   and the shop's margin (revenue − payable).
+
+  Whether an item is consignment, and for which supplier, comes from the
+  snapshot taken when it was sold, so later changes to the product don't alter
+  past periods.
   """
   def consignment_settlement(%Date{} = date_from, %Date{} = date_to) do
     {start, finish} = day_range(date_from, date_to)
@@ -369,10 +469,9 @@ defmodule Zahlungs.Sales do
     Repo.all(
       from i in SaleItem,
         join: s in assoc(i, :sale),
-        join: p in assoc(i, :product),
-        join: sup in assoc(p, :supplier),
+        join: sup in assoc(i, :supplier),
         where:
-          s.status == "completed" and p.consignment == true and
+          s.status == "completed" and i.consignment == true and
             s.inserted_at >= ^start and s.inserted_at <= ^finish,
         group_by: [sup.id, sup.name],
         order_by: [desc: sum(i.line_total)],
@@ -393,20 +492,90 @@ defmodule Zahlungs.Sales do
     end)
   end
 
+  @doc """
+  Consignment statement per supplier: what was sold and paid within the date
+  range, plus the balance still owed as of `date_to`.
+
+  Each row has the period figures of `consignment_settlement/2` (`:qty_sold`,
+  `:revenue`, `:payable`, `:margin`), `:paid` (payments made in the range) and
+  `:outstanding`. The outstanding balance is cumulative — everything payable up
+  to `date_to` minus everything paid up to `date_to` — because a payment rarely
+  falls in the same period as the sales it settles. Suppliers with no activity
+  in the range are still listed while a balance remains.
+  """
+  def consignment_statement(%Date{} = date_from, %Date{} = date_to) do
+    period = Map.new(consignment_settlement(date_from, date_to), &{&1.supplier_id, &1})
+    paid_in_period = Shifts.consignment_payments_by_supplier(date_from, date_to)
+    payable_to_date = consignment_payable_to_date(date_to)
+    paid_to_date = Shifts.consignment_payments_to_date(date_to)
+
+    zero = Decimal.new(0)
+
+    payable_to_date
+    |> Map.merge(paid_to_date, fn _id, payable, paid -> Map.merge(paid, payable) end)
+    |> Enum.map(fn {supplier_id, to_date} ->
+      sold =
+        Map.get(period, supplier_id, %{qty_sold: 0, revenue: zero, payable: zero, margin: zero})
+
+      %{
+        supplier_id: supplier_id,
+        supplier: to_date.supplier,
+        qty_sold: sold.qty_sold,
+        revenue: sold.revenue,
+        payable: sold.payable,
+        margin: sold.margin,
+        paid: Map.get(paid_in_period, supplier_id, zero),
+        outstanding: Decimal.sub(Map.get(to_date, :payable, zero), Map.get(to_date, :paid, zero))
+      }
+    end)
+    |> Enum.filter(fn row ->
+      row.qty_sold > 0 or not Decimal.equal?(row.paid, zero) or
+        not Decimal.equal?(row.outstanding, zero)
+    end)
+    |> Enum.sort_by(&{Decimal.to_float(Decimal.negate(&1.outstanding)), &1.supplier})
+  end
+
+  # Everything payable to each supplier for consignment items sold up to (and
+  # including) `date_to`, as `%{supplier_id => %{supplier: name, payable: Decimal}}`.
+  defp consignment_payable_to_date(%Date{} = date_to) do
+    {_start, finish} = day_range(date_to, date_to)
+
+    Repo.all(
+      from i in SaleItem,
+        join: s in assoc(i, :sale),
+        join: sup in assoc(i, :supplier),
+        where: s.status == "completed" and i.consignment == true and s.inserted_at <= ^finish,
+        group_by: [sup.id, sup.name],
+        select:
+          {sup.id,
+           %{
+             supplier: sup.name,
+             payable: coalesce(sum(fragment("? * ?", i.purchase_price, i.quantity)), 0)
+           }}
+    )
+    |> Map.new(fn {id, row} -> {id, %{row | payable: to_decimal(row.payable)}} end)
+  end
+
   defp to_int(%Decimal{} = d), do: Decimal.to_integer(d)
   defp to_int(n) when is_integer(n), do: n
 
   @doc "Daily breakdown (completed sales) for the date range: date, transactions, revenue."
   def sales_by_day(%Date{} = date_from, %Date{} = date_to) do
     {start, finish} = day_range(date_from, date_to)
+    offset = LocalTime.offset_seconds()
 
+    # Group on the shop-local calendar day, not the UTC one.
     Repo.all(
       from s in Sale,
         where: s.status == "completed" and s.inserted_at >= ^start and s.inserted_at <= ^finish,
-        group_by: fragment("DATE(?)", s.inserted_at),
-        order_by: fragment("DATE(?)", s.inserted_at),
+        group_by: selected_as(:day),
+        order_by: selected_as(:day),
         select: %{
-          date: fragment("DATE(?)", s.inserted_at),
+          date:
+            selected_as(
+              fragment("DATE(DATE_ADD(?, INTERVAL ? SECOND))", s.inserted_at, ^offset),
+              :day
+            ),
           transactions: count(s.id),
           revenue: coalesce(sum(s.total), 0)
         }
@@ -431,9 +600,7 @@ defmodule Zahlungs.Sales do
     )
   end
 
-  defp day_range(date_from, date_to) do
-    {NaiveDateTime.new!(date_from, ~T[00:00:00]), NaiveDateTime.new!(date_to, ~T[23:59:59])}
-  end
+  defp day_range(date_from, date_to), do: LocalTime.day_range(date_from, date_to)
 
   ## Helpers
 
@@ -442,10 +609,11 @@ defmodule Zahlungs.Sales do
   defp to_decimal(n) when is_integer(n), do: Decimal.new(n)
   defp to_decimal(n) when is_float(n), do: Decimal.from_float(n)
 
+  # Anything that isn't a finite number ("abc", "NaN", "Infinity") counts as 0.
   defp to_decimal(s) when is_binary(s) do
     case s |> String.trim() |> Decimal.parse() do
-      {d, _} -> d
-      :error -> Decimal.new(0)
+      {%Decimal{coef: coef} = d, _} when is_integer(coef) -> d
+      _ -> Decimal.new(0)
     end
   end
 end

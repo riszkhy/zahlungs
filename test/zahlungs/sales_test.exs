@@ -5,10 +5,11 @@ defmodule Zahlungs.SalesTest do
 
   import Zahlungs.AccountsFixtures
   import Zahlungs.CatalogFixtures
+  import Zahlungs.ShiftsFixtures
 
   describe "create_sale/3" do
     test "records a sale with items (incl. purchase price snapshot) and decrements stock" do
-      user = user_fixture()
+      user = user_on_shift_fixture()
 
       product =
         product_fixture(price: Decimal.new("1000"), purchase_price: Decimal.new("700"), stock: 10)
@@ -34,7 +35,7 @@ defmodule Zahlungs.SalesTest do
     end
 
     test "applies discount and tax to the total" do
-      user = user_fixture()
+      user = user_on_shift_fixture()
       product = product_fixture(price: Decimal.new("1000"), stock: 10)
 
       assert {:ok, sale} =
@@ -49,22 +50,82 @@ defmodule Zahlungs.SalesTest do
       assert Decimal.equal?(sale.change_due, Decimal.new("400"))
     end
 
-    test "tags the sale with the given shift_id" do
+    test "rejects a negative discount, a discount above the subtotal, and a negative tax" do
+      user = user_on_shift_fixture()
+      product = product_fixture(price: Decimal.new("1000"), stock: 10)
+      cart = [%{product_id: product.id, quantity: 2}]
+
+      for {payment, error} <- [
+            {%{discount: "-500"}, :invalid_discount},
+            {%{discount: "2001"}, :invalid_discount},
+            {%{"discount" => "-0.01"}, :invalid_discount},
+            {%{tax: "-1"}, :invalid_tax}
+          ] do
+        payment = Map.put(payment, :amount_paid, "100000")
+        assert {:error, ^error} = Sales.create_sale(user, cart, payment)
+      end
+
+      assert Catalog.get_product!(product.id).stock == 10
+    end
+
+    test "accepts a discount equal to the subtotal (a free sale)" do
+      user = user_on_shift_fixture()
+      product = product_fixture(price: Decimal.new("1000"), stock: 10)
+
+      assert {:ok, sale} =
+               Sales.create_sale(user, [%{product_id: product.id, quantity: 2}], %{
+                 discount: "2000",
+                 amount_paid: "0"
+               })
+
+      assert Decimal.equal?(sale.total, Decimal.new("0"))
+    end
+
+    test "treats amounts that aren't finite numbers as zero" do
+      user = user_on_shift_fixture()
+      product = product_fixture(price: Decimal.new("1000"), stock: 10)
+
+      assert {:ok, sale} =
+               Sales.create_sale(user, [%{product_id: product.id, quantity: 1}], %{
+                 discount: "NaN",
+                 tax: "Infinity",
+                 amount_paid: "1000"
+               })
+
+      assert Decimal.equal?(sale.total, Decimal.new("1000"))
+    end
+
+    test "records the sale on the cashier's open shift, ignoring a shift_id from the caller" do
       user = user_fixture()
+      other_shift = shift_fixture(user_fixture())
       product = product_fixture(price: Decimal.new("1000"), stock: 5)
-      {:ok, shift} = Zahlungs.Shifts.open_shift(user, 0)
+      shift = shift_fixture(user)
 
       assert {:ok, sale} =
                Sales.create_sale(user, [%{product_id: product.id, quantity: 1}], %{
                  amount_paid: "1000",
-                 shift_id: shift.id
+                 shift_id: other_shift.id
                })
 
       assert sale.shift_id == shift.id
     end
 
-    test "defaults to cash payment method" do
+    test "refuses a sale when the cashier has no open shift (stock unchanged)" do
       user = user_fixture()
+      product = product_fixture(price: Decimal.new("1000"), stock: 5)
+      cart = [%{product_id: product.id, quantity: 1}]
+
+      assert {:error, :no_open_shift} = Sales.create_sale(user, cart, %{amount_paid: "1000"})
+
+      shift = shift_fixture(user)
+      {:ok, _} = Zahlungs.Shifts.close_shift(shift, 0)
+
+      assert {:error, :no_open_shift} = Sales.create_sale(user, cart, %{amount_paid: "1000"})
+      assert Catalog.get_product!(product.id).stock == 5
+    end
+
+    test "defaults to cash payment method" do
+      user = user_on_shift_fixture()
       product = product_fixture(price: Decimal.new("1000"), stock: 5)
 
       assert {:ok, sale} =
@@ -76,7 +137,7 @@ defmodule Zahlungs.SalesTest do
     end
 
     test "non-cash payment settles the exact total and ignores amount_paid" do
-      user = user_fixture()
+      user = user_on_shift_fixture()
       product = product_fixture(price: Decimal.new("5000"), stock: 5)
 
       assert {:ok, sale} =
@@ -90,7 +151,7 @@ defmodule Zahlungs.SalesTest do
     end
 
     test "cash payment below total is rejected, but non-cash is not" do
-      user = user_fixture()
+      user = user_on_shift_fixture()
       product = product_fixture(price: Decimal.new("5000"), stock: 5)
       cart = [%{product_id: product.id, quantity: 1}]
 
@@ -101,7 +162,7 @@ defmodule Zahlungs.SalesTest do
     end
 
     test "aggregates duplicate product lines" do
-      user = user_fixture()
+      user = user_on_shift_fixture()
       product = product_fixture(price: Decimal.new("1000"), stock: 10)
 
       cart = [%{product_id: product.id, quantity: 1}, %{product_id: product.id, quantity: 2}]
@@ -117,7 +178,7 @@ defmodule Zahlungs.SalesTest do
     end
 
     test "rejects insufficient payment" do
-      user = user_fixture()
+      user = user_on_shift_fixture()
       product = product_fixture(price: Decimal.new("1000"), stock: 10)
 
       assert {:error, :insufficient_payment} =
@@ -127,7 +188,7 @@ defmodule Zahlungs.SalesTest do
     end
 
     test "refuses to oversell and rolls back (stock unchanged)" do
-      user = user_fixture()
+      user = user_on_shift_fixture()
       product = product_fixture(price: Decimal.new("1000"), stock: 2)
 
       assert {:error, {:insufficient_stock, _name}} =
@@ -142,7 +203,7 @@ defmodule Zahlungs.SalesTest do
 
   describe "return_sale/1" do
     test "restores stock and marks the sale returned" do
-      user = user_fixture()
+      user = user_on_shift_fixture()
       product = product_fixture(price: Decimal.new("1000"), stock: 10)
 
       {:ok, sale} =
@@ -157,7 +218,7 @@ defmodule Zahlungs.SalesTest do
     end
 
     test "cannot return a sale twice" do
-      user = user_fixture()
+      user = user_on_shift_fixture()
       product = product_fixture(price: Decimal.new("1000"), stock: 10)
 
       {:ok, sale} =
@@ -167,8 +228,22 @@ defmodule Zahlungs.SalesTest do
       assert {:error, :already_returned} = Sales.return_sale(returned)
     end
 
+    test "a stale `completed` struct cannot return the sale again (stock restored once)" do
+      user = user_on_shift_fixture()
+      product = product_fixture(price: Decimal.new("1000"), stock: 10)
+
+      {:ok, sale} =
+        Sales.create_sale(user, [%{product_id: product.id, quantity: 3}], %{amount_paid: "3000"})
+
+      # `sale` still says "completed", as it would in a second tab or a double click.
+      assert {:ok, _} = Sales.return_sale(sale)
+      assert {:error, :already_returned} = Sales.return_sale(sale)
+      assert {:error, :not_voidable} = Sales.void_sale(sale, user, "dobel")
+      assert Catalog.get_product!(product.id).stock == 10
+    end
+
     test "returned sales drop out of today's summary" do
-      user = user_fixture()
+      user = user_on_shift_fixture()
       product = product_fixture(price: Decimal.new("1000"), stock: 10)
 
       {:ok, sale} =
@@ -184,7 +259,7 @@ defmodule Zahlungs.SalesTest do
 
   describe "void_sale/3" do
     test "restores stock and marks the sale void with a reason and actor" do
-      user = user_fixture()
+      user = user_on_shift_fixture()
       product = product_fixture(price: Decimal.new("1000"), stock: 10)
 
       {:ok, sale} =
@@ -201,7 +276,7 @@ defmodule Zahlungs.SalesTest do
     end
 
     test "cannot void a non-completed sale" do
-      user = user_fixture()
+      user = user_on_shift_fixture()
       product = product_fixture(price: Decimal.new("1000"), stock: 10)
 
       {:ok, sale} =
@@ -211,8 +286,21 @@ defmodule Zahlungs.SalesTest do
       assert {:error, :not_voidable} = Sales.void_sale(voided, user, "again")
     end
 
+    test "a stale `completed` struct cannot void the sale again (stock restored once)" do
+      user = user_on_shift_fixture()
+      product = product_fixture(price: Decimal.new("1000"), stock: 10)
+
+      {:ok, sale} =
+        Sales.create_sale(user, [%{product_id: product.id, quantity: 3}], %{amount_paid: "3000"})
+
+      assert {:ok, _} = Sales.void_sale(sale, user, "salah qty")
+      assert {:error, :not_voidable} = Sales.void_sale(sale, user, "dobel")
+      assert {:error, :already_returned} = Sales.return_sale(sale)
+      assert Catalog.get_product!(product.id).stock == 10
+    end
+
     test "voided sales drop out of today's summary" do
-      user = user_fixture()
+      user = user_on_shift_fixture()
       product = product_fixture(price: Decimal.new("1000"), stock: 10)
 
       {:ok, sale} =
@@ -231,8 +319,7 @@ defmodule Zahlungs.SalesTest do
 
       {:ok, sale} =
         Sales.create_sale(cashier, [%{product_id: product.id, quantity: 1}], %{
-          amount_paid: "1000",
-          shift_id: shift.id
+          amount_paid: "1000"
         })
 
       {:ok, _} = Zahlungs.Shifts.close_shift(shift, 1000)
@@ -245,24 +332,75 @@ defmodule Zahlungs.SalesTest do
 
   describe "list_sales/1" do
     test "filters by date" do
-      user = user_fixture()
+      user = user_on_shift_fixture()
       product = product_fixture(price: Decimal.new("1000"), stock: 10)
 
       {:ok, sale} =
         Sales.create_sale(user, [%{product_id: product.id, quantity: 1}], %{amount_paid: "1000"})
 
-      today = Date.utc_today()
+      today = Zahlungs.LocalTime.today()
       ids_today = Sales.list_sales(date: today) |> Enum.map(& &1.id)
       ids_past = Sales.list_sales(date: ~D[2000-01-01]) |> Enum.map(& &1.id)
 
       assert sale.id in ids_today
       refute sale.id in ids_past
     end
+
+    test "pages with limit/offset, newest first, and count_sales/1 matches the filter" do
+      user = user_on_shift_fixture()
+      product = product_fixture(price: Decimal.new("1000"), stock: 10)
+      day = ~D[2001-05-05]
+      {start, _finish} = Zahlungs.LocalTime.day_range(day, day)
+
+      ids =
+        for minute <- 1..3 do
+          {:ok, sale} =
+            Sales.create_sale(user, [%{product_id: product.id, quantity: 1}], %{
+              amount_paid: "1000"
+            })
+
+          Repo.update_all(from(s in Sales.Sale, where: s.id == ^sale.id),
+            set: [inserted_at: NaiveDateTime.add(start, minute * 60)]
+          )
+
+          sale.id
+        end
+
+      assert Sales.count_sales(date: day) == 3
+      assert Sales.count_sales(date: ~D[2001-05-06]) == 0
+
+      page = fn offset -> Sales.list_sales(date: day, limit: 2, offset: offset) end
+      assert Enum.map(page.(0), & &1.id) == ids |> Enum.reverse() |> Enum.take(2)
+      assert Enum.map(page.(2), & &1.id) == [hd(ids)]
+      assert page.(4) == []
+    end
+
+    test "date filter and daily breakdown use the shop-local day, not the UTC day" do
+      user = user_on_shift_fixture()
+      product = product_fixture(price: Decimal.new("1000"), stock: 10)
+
+      {:ok, sale} =
+        Sales.create_sale(user, [%{product_id: product.id, quantity: 1}], %{amount_paid: "1000"})
+
+      # 00:30 shop-local on the 2nd is still the 1st in UTC (offset +7).
+      day = ~D[2001-03-02]
+      {start, _finish} = Zahlungs.LocalTime.day_range(day, day)
+      early_morning = NaiveDateTime.add(start, 30 * 60)
+
+      Repo.update_all(from(s in Sales.Sale, where: s.id == ^sale.id),
+        set: [inserted_at: early_morning]
+      )
+
+      assert sale.id in (Sales.list_sales(date: day) |> Enum.map(& &1.id))
+      refute sale.id in (Sales.list_sales(date: Date.add(day, -1)) |> Enum.map(& &1.id))
+
+      assert [%{date: ^day, transactions: 1}] = Sales.sales_by_day(Date.add(day, -1), day)
+    end
   end
 
   describe "sales_report/2 and top_products/3" do
     test "aggregates completed sales with gross profit and lists top products" do
-      user = user_fixture()
+      user = user_on_shift_fixture()
 
       product =
         product_fixture(price: Decimal.new("1000"), purchase_price: Decimal.new("600"), stock: 10)
@@ -270,7 +408,7 @@ defmodule Zahlungs.SalesTest do
       {:ok, _} =
         Sales.create_sale(user, [%{product_id: product.id, quantity: 2}], %{amount_paid: "2000"})
 
-      today = Date.utc_today()
+      today = Zahlungs.LocalTime.today()
       report = Sales.sales_report(today, today)
 
       assert report.transactions >= 1
@@ -282,26 +420,26 @@ defmodule Zahlungs.SalesTest do
     end
 
     test "sales_by_category/2 breaks down revenue by category" do
-      user = user_fixture()
+      user = user_on_shift_fixture()
       category = category_fixture()
       product = product_fixture(price: Decimal.new("1000"), stock: 10, category_id: category.id)
 
       {:ok, _} =
         Sales.create_sale(user, [%{product_id: product.id, quantity: 3}], %{amount_paid: "3000"})
 
-      today = Date.utc_today()
+      today = Zahlungs.LocalTime.today()
       rows = Sales.sales_by_category(today, today)
       assert Enum.any?(rows, &(&1.category == category.name and &1.quantity >= 3))
     end
 
     test "sales_by_day/2 and sales_by_cashier/2 break down the period" do
-      user = user_fixture()
+      user = user_on_shift_fixture()
       product = product_fixture(price: Decimal.new("1000"), stock: 10)
 
       {:ok, _} =
         Sales.create_sale(user, [%{product_id: product.id, quantity: 2}], %{amount_paid: "2000"})
 
-      today = Date.utc_today()
+      today = Zahlungs.LocalTime.today()
 
       day_rows = Sales.sales_by_day(today, today)
       assert Enum.any?(day_rows, &(&1.transactions >= 1))
@@ -311,7 +449,7 @@ defmodule Zahlungs.SalesTest do
     end
 
     test "returned sales are excluded from the report" do
-      user = user_fixture()
+      user = user_on_shift_fixture()
 
       product =
         product_fixture(price: Decimal.new("1000"), purchase_price: Decimal.new("600"), stock: 10)
@@ -319,7 +457,7 @@ defmodule Zahlungs.SalesTest do
       {:ok, sale} =
         Sales.create_sale(user, [%{product_id: product.id, quantity: 1}], %{amount_paid: "1000"})
 
-      today = Date.utc_today()
+      today = Zahlungs.LocalTime.today()
       before = Sales.sales_report(today, today)
       {:ok, _} = Sales.return_sale(sale)
       after_return = Sales.sales_report(today, today)
@@ -330,7 +468,7 @@ defmodule Zahlungs.SalesTest do
 
   describe "sales_summary_today/0" do
     test "counts and sums sales recorded today" do
-      user = user_fixture()
+      user = user_on_shift_fixture()
       product = product_fixture(price: Decimal.new("1000"), stock: 10)
 
       {:ok, _} =

@@ -1,13 +1,13 @@
 defmodule ZahlungsWeb.ReceiptControllerTest do
   use ZahlungsWeb.ConnCase, async: true
 
-  import Zahlungs.AccountsFixtures
   import Zahlungs.CatalogFixtures
+  import Zahlungs.ShiftsFixtures
 
   alias Zahlungs.Sales
 
   test "renders a print-friendly receipt for authenticated users", %{conn: conn} do
-    user = user_fixture()
+    user = user_on_shift_fixture()
     product = product_fixture(price: Decimal.new("1000"), stock: 10)
 
     {:ok, sale} =

@@ -8,8 +8,8 @@ navigasi, hierarki halaman, dan alur utama. Sumber kebenaran: `router.ex`,
 
 | Peran       | Deskripsi                                                        |
 | ----------- | ---------------------------------------------------------------- |
-| **Guest**   | Belum login. Hanya bisa register / login / reset password.        |
-| **Cashier** | Operasional harian: transaksi, shift, riwayat, settlement titipan.|
+| **Guest**   | Belum login. Hanya bisa login / reset password (akun dibuat admin).|
+| **Cashier** | Operasional harian: transaksi, shift, riwayat.                    |
 | **Admin**   | Semua akses Cashier + master data, user, supplier, dan laporan.   |
 
 Aturan akses berlapis (router):
@@ -24,7 +24,6 @@ Aturan akses berlapis (router):
 /                               → redirect ke /home (landing)
 │
 ├── Auth (guest only)
-│   ├── /users/register         Registrasi (name, email, password)
 │   ├── /users/log_in           Login
 │   ├── /users/reset_password   Minta reset password (email)
 │   └── /users/reset_password/:token
@@ -38,13 +37,11 @@ Aturan akses berlapis (router):
 │   │     ├─ Keranjang → metode bayar (Tunai; lainnya disabled) → Complete Sale
 │   │     └─ Modal struk: Print receipt · Koreksi/batalkan · New Transaction
 │   ├── /catalog                Katalog produk (browse, cari, filter, paginasi)
-│   ├── /sales                  Riwayat transaksi (filter tanggal)
+│   ├── /sales                  Riwayat transaksi (filter tanggal, paginasi)
 │   │     └── /sales/:id        Detail + struk · Batalkan (koreksi) · Return (admin)
 │   │           └── /sales/:id/receipt   Struk versi cetak
 │   ├── /shifts                 Riwayat shift (cashier: milik sendiri; admin: semua)
 │   │     └── /shifts/:id       Detail: rekonsiliasi, transaksi, gerakan kas
-│   ├── /reports/consignment    Settlement konsinyasi (payable/sudah dibayar/sisa
-│   │                           + sisa stok titipan per produk)
 │   └── /users/settings         Profil: ubah nama, email, password
 │
 └── Back-office (admin only)
@@ -56,6 +53,8 @@ Aturan akses berlapis (router):
     ├── /reports/sales          Laporan penjualan (ringkasan, harian, per kasir,
     │                           per kategori, produk terlaris)
     ├── /reports/stock          Laporan stok (nilai persediaan, stok rendah/habis)
+    ├── /reports/consignment    Settlement konsinyasi (payable/dibayar di rentang, sisa utang s.d. tanggal akhir
+    │                           + sisa stok titipan per produk)
     └── /dashboard              Phoenix LiveDashboard (dev/test saja)
 ```
 
@@ -76,9 +75,8 @@ Urutan link disesuaikan peran:
 | Suppliers   |   –   |    –    |   ✓   | `/admin/suppliers`     |
 | Reports     |   –   |    –    |   ✓   | `/reports/sales`       |
 | Stock       |   –   |    –    |   ✓   | `/reports/stock`       |
-| Consignment |   –   |    ✓    |   ✓   | `/reports/consignment` |
+| Consignment |   –   |    –    |   ✓   | `/reports/consignment` |
 | Profile     |   –   |    ✓    |   ✓   | `/users/settings`      |
-| Register    |   ✓   |    –    |   –   | `/users/register`      |
 | Log in      |   ✓   |    –    |   –   | `/users/log_in`        |
 | Log out     |   –   |    ✓    |   ✓   | DELETE `/users/log_out`|
 
@@ -113,7 +111,7 @@ Urutan link disesuaikan peran:
 
 ### /reports/consignment — Settlement titipan
 1. Filter tanggal
-2. Kartu: omzet titipan · harus dibayar · sudah dibayar · sisa (outstanding)
+2. Kartu: omzet titipan · harus dibayar & dibayar (rentang ini) · sisa utang s.d. tanggal akhir (kumulatif)
 3. Tabel per supplier
 4. Sisa stok titipan per produk (bisa dikembalikan)
 

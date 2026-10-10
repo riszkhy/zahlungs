@@ -5,6 +5,7 @@ defmodule Zahlungs.ShiftsTest do
 
   import Zahlungs.AccountsFixtures
   import Zahlungs.CatalogFixtures
+  import Zahlungs.ShiftsFixtures
 
   test "open_shift/2 opens a shift and current_shift/1 finds it" do
     user = user_fixture()
@@ -29,8 +30,7 @@ defmodule Zahlungs.ShiftsTest do
 
     {:ok, _} =
       Sales.create_sale(user, [%{product_id: product.id, quantity: 2}], %{
-        amount_paid: "2000",
-        shift_id: shift.id
+        amount_paid: "2000"
       })
 
     # expected = opening 100000 + cash sales 2000 = 102000; counted 101500 => -500
@@ -48,6 +48,34 @@ defmodule Zahlungs.ShiftsTest do
     assert {:error, :not_open} = Shifts.close_shift(closed, 0)
   end
 
+  test "a stale `open` struct cannot close the shift again or add cash movements" do
+    user = user_fixture()
+    {:ok, shift} = Shifts.open_shift(user, 0)
+    {:ok, closed} = Shifts.close_shift(shift, "500")
+
+    # `shift` still says "open", as it would in a cashier screen left open elsewhere.
+    assert {:error, :not_open} = Shifts.close_shift(shift, "999")
+
+    assert {:error, :not_open} =
+             Shifts.add_cash_movement(shift, %{"category" => "expense", "amount" => "100"})
+
+    assert Decimal.equal?(Shifts.get_shift!(shift.id).counted_cash, closed.counted_cash)
+    assert Shifts.list_cash_movements(shift) == []
+  end
+
+  test "a user can open a new shift after closing the previous one" do
+    user = user_fixture()
+    {:ok, first} = Shifts.open_shift(user, 0)
+    {:ok, _} = Shifts.close_shift(first, 0)
+
+    assert {:ok, second} = Shifts.open_shift(user, 0)
+    assert Shifts.current_shift(user).id == second.id
+  end
+
+  test "open_shift/2 returns the changeset for an invalid opening cash" do
+    assert {:error, %Ecto.Changeset{}} = Shifts.open_shift(user_fixture(), "-1")
+  end
+
   test "expected_cash and summary count only cash sales" do
     user = user_fixture()
     product = product_fixture(price: Decimal.new("1000"), stock: 10)
@@ -56,13 +84,11 @@ defmodule Zahlungs.ShiftsTest do
     {:ok, _} =
       Sales.create_sale(user, [%{product_id: product.id, quantity: 1}], %{
         amount_paid: "1000",
-        shift_id: shift.id,
         payment_method: "cash"
       })
 
     {:ok, _} =
       Sales.create_sale(user, [%{product_id: product.id, quantity: 2}], %{
-        shift_id: shift.id,
         payment_method: "qris"
       })
 
@@ -138,7 +164,7 @@ defmodule Zahlungs.ShiftsTest do
         "supplier_id" => supplier.id
       })
 
-    today = Date.utc_today()
+    today = Zahlungs.LocalTime.today()
     paid = Shifts.consignment_payments_by_supplier(today, today)
     assert Decimal.equal?(Map.fetch!(paid, supplier.id), Decimal.new("5000"))
   end
@@ -152,8 +178,7 @@ defmodule Zahlungs.ShiftsTest do
 
     {:ok, _} =
       Sales.create_sale(user, [%{product_id: product.id, quantity: 1}], %{
-        amount_paid: "1000",
-        shift_id: shift.id
+        amount_paid: "1000"
       })
 
     mine = Shifts.list_shifts(user_id: user.id)
@@ -161,5 +186,85 @@ defmodule Zahlungs.ShiftsTest do
 
     assert [sale] = Shifts.shift_sales(shift)
     assert sale.shift_id == shift.id
+  end
+
+  describe "returning or voiding a sale" do
+    # A cashier's shift (opening cash 100000) with one sale of 2000.
+    defp shift_with_sale(payment) do
+      cashier = user_fixture()
+      shift = shift_fixture(cashier, "100000")
+      product = product_fixture(price: Decimal.new("1000"), stock: 10)
+
+      {:ok, sale} = Sales.create_sale(cashier, [%{product_id: product.id, quantity: 2}], payment)
+      {:ok, admin} = Zahlungs.Accounts.set_user_role(user_fixture(), "admin")
+
+      %{cashier: cashier, shift: shift, sale: sale, admin: admin}
+    end
+
+    defp assert_cash(shift, amount),
+      do: assert(Decimal.equal?(Shifts.expected_cash(shift), Decimal.new(amount)))
+
+    test "while the shift is open: it stops counting and no cash movement is added" do
+      %{shift: shift, sale: sale, admin: admin} = shift_with_sale(%{amount_paid: "2000"})
+      admin_shift = shift_fixture(admin, "50000")
+      assert_cash(shift, "102000")
+
+      assert {:ok, returned} = Sales.return_sale(sale, admin)
+
+      refute returned.adjusted_after_shift_close
+      assert_cash(shift, "100000")
+      assert Shifts.list_cash_movements(admin_shift) == []
+    end
+
+    test "after the shift is closed: its figures stay, the refund leaves the refunder's drawer" do
+      %{shift: shift, sale: sale, admin: admin} = shift_with_sale(%{amount_paid: "2000"})
+      {:ok, closed} = Shifts.close_shift(shift, "102000")
+      admin_shift = shift_fixture(admin, "50000")
+
+      assert {:ok, returned} = Sales.return_sale(sale, admin)
+      assert returned.adjusted_after_shift_close
+
+      # The closed shift still shows what was reconciled at closing.
+      assert_cash(closed, "102000")
+      assert %{transactions: 1} = Shifts.shift_summary(closed)
+      assert Decimal.equal?(Shifts.get_shift!(shift.id).variance, Decimal.new("0"))
+
+      assert [%{category: "refund", direction: "out"} = refund] =
+               Shifts.list_cash_movements(admin_shift)
+
+      assert Decimal.equal?(refund.amount, Decimal.new("2000"))
+      assert refund.note =~ sale.code
+      assert_cash(admin_shift, "48000")
+    end
+
+    test "after close, without an open shift the return still goes through" do
+      %{shift: shift, sale: sale, admin: admin} = shift_with_sale(%{amount_paid: "2000"})
+      {:ok, closed} = Shifts.close_shift(shift, "102000")
+
+      assert {:ok, %{status: "returned"}} = Sales.return_sale(sale, admin)
+      assert_cash(closed, "102000")
+    end
+
+    test "after close, a non-cash sale is never refunded from a drawer" do
+      %{shift: shift, sale: sale, admin: admin} = shift_with_sale(%{payment_method: "qris"})
+      {:ok, _closed} = Shifts.close_shift(shift, "100000")
+      admin_shift = shift_fixture(admin, "50000")
+
+      assert {:ok, _} = Sales.return_sale(sale, admin)
+      assert Shifts.list_cash_movements(admin_shift) == []
+      assert_cash(admin_shift, "50000")
+    end
+
+    test "after close, an admin's void keeps the closed shift's figures and moves no cash" do
+      %{shift: shift, sale: sale, admin: admin} = shift_with_sale(%{amount_paid: "2000"})
+      {:ok, closed} = Shifts.close_shift(shift, "102000")
+      admin_shift = shift_fixture(admin, "50000")
+
+      assert {:ok, voided} = Sales.void_sale(sale, admin, "salah input")
+      assert voided.adjusted_after_shift_close
+
+      assert_cash(closed, "102000")
+      assert Shifts.list_cash_movements(admin_shift) == []
+    end
   end
 end

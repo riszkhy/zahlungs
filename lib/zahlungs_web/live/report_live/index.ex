@@ -9,7 +9,7 @@ defmodule ZahlungsWeb.ReportLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    today = Date.utc_today()
+    today = Zahlungs.LocalTime.today()
     from = Date.beginning_of_month(today)
 
     {:ok,

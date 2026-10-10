@@ -27,6 +27,14 @@ defmodule ZahlungsWeb.CashierLive do
      |> reset_cart()}
   end
 
+  # Re-reads the user's open shift: the one in assigns can be stale when it was
+  # closed (or a new one opened) from another tab or device.
+  defp refresh_shift(socket) do
+    socket
+    |> assign(:shift, Shifts.current_shift(socket.assigns.current_user))
+    |> load_movements()
+  end
+
   defp load_movements(socket) do
     movements =
       if socket.assigns.shift, do: Shifts.list_cash_movements(socket.assigns.shift), else: []
@@ -73,6 +81,13 @@ defmodule ZahlungsWeb.CashierLive do
          |> assign(shift: nil, closing: false, movements: [])
          |> put_flash(:info, "Shift closed. Variance: #{format_money(closed.variance)}.")}
 
+      {:error, :not_open} ->
+        {:noreply,
+         socket
+         |> assign(closing: false)
+         |> refresh_shift()
+         |> put_flash(:error, "Shift ini sudah ditutup.")}
+
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Could not close the shift.")}
     end
@@ -115,7 +130,11 @@ defmodule ZahlungsWeb.CashierLive do
         {:noreply, put_flash(socket, :error, "Gagal mencatat (cek jumlah & supplier).")}
 
       {:error, :not_open} ->
-        {:noreply, put_flash(socket, :error, "Shift belum dibuka.")}
+        {:noreply,
+         socket
+         |> assign(movement_open: false)
+         |> refresh_shift()
+         |> put_flash(:error, "Shift ini sudah ditutup.")}
     end
   end
 
@@ -245,8 +264,7 @@ defmodule ZahlungsWeb.CashierLive do
       amount_paid: socket.assigns.amount_paid,
       discount: socket.assigns.discount,
       tax: socket.assigns.tax,
-      payment_method: socket.assigns.payment_method,
-      shift_id: socket.assigns.shift && socket.assigns.shift.id
+      payment_method: socket.assigns.payment_method
     }
 
     case Sales.create_sale(socket.assigns.current_user, cart, payment) do
@@ -257,6 +275,10 @@ defmodule ZahlungsWeb.CashierLive do
          |> reset_cart()
          |> push_event("reset_amount_paid", %{})
          |> put_flash(:info, "Sale #{sale.code} completed.")}
+
+      # The shift was closed elsewhere (e.g. another tab): show the real state.
+      {:error, :no_open_shift} ->
+        {:noreply, socket |> refresh_shift() |> put_flash(:error, error_message(:no_open_shift))}
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, error_message(reason))}
@@ -328,16 +350,30 @@ defmodule ZahlungsWeb.CashierLive do
     paid = if cash?, do: to_dec(socket.assigns.amount_paid), else: total
     change = if cash?, do: Decimal.sub(paid, total), else: Decimal.new(0)
 
-    total_ok = not Decimal.lt?(total, Decimal.new(0))
     paid_ok = not cash? or not Decimal.lt?(paid, total)
+
+    amount_error = amount_error(subtotal, discount, tax)
 
     assign(socket,
       subtotal: subtotal,
       total: total,
       change_due: change,
+      amount_error: amount_error,
       can_checkout:
-        socket.assigns[:shift] != nil and socket.assigns.cart != [] and total_ok and paid_ok
+        socket.assigns[:shift] != nil and socket.assigns.cart != [] and is_nil(amount_error) and
+          paid_ok
     )
+  end
+
+  # Same rules Sales.create_sale/3 enforces; shown inline so the cashier knows
+  # why Complete Sale is disabled.
+  defp amount_error(subtotal, discount, tax) do
+    cond do
+      Decimal.negative?(discount) -> "Diskon tidak boleh negatif."
+      Decimal.gt?(discount, subtotal) -> "Diskon tidak boleh melebihi subtotal."
+      Decimal.negative?(tax) -> "Pajak tidak boleh negatif."
+      true -> nil
+    end
   end
 
   defp cart_subtotal(cart) do
@@ -365,6 +401,9 @@ defmodule ZahlungsWeb.CashierLive do
 
   defp error_message(:empty_cart), do: "Cart is empty."
   defp error_message(:insufficient_payment), do: "Amount paid is less than the total."
+  defp error_message(:invalid_discount), do: "Diskon harus antara 0 dan subtotal."
+  defp error_message(:invalid_tax), do: "Pajak tidak boleh negatif."
+  defp error_message(:no_open_shift), do: "Shift belum dibuka atau sudah ditutup."
   defp error_message({:insufficient_stock, name}), do: "Insufficient stock for #{name}."
   defp error_message(_), do: "Could not complete the sale."
 
@@ -386,6 +425,9 @@ defmodule ZahlungsWeb.CashierLive do
       {"consignment_payment", "Bayar konsinyasi"}
     ]
   end
+
+  # Refunds are booked by Sales.return_sale/2, so they are not in the options above.
+  defp movement_label("refund"), do: "Refund retur"
 
   defp movement_label(category) do
     movement_category_options()
@@ -449,7 +491,7 @@ defmodule ZahlungsWeb.CashierLive do
 
     <div :if={@shift} class="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-green-200 bg-green-50 p-3 text-sm">
       <span class="text-gray-700">
-        Shift #{@shift.id} · opened {Calendar.strftime(@shift.opened_at, "%d %b %Y %H:%M")} · float {format_money(@shift.opening_cash)}
+        Shift #{@shift.id} · opened {Calendar.strftime(Zahlungs.LocalTime.to_local(@shift.opened_at), "%d %b %Y %H:%M")} · float {format_money(@shift.opening_cash)}
       </span>
       <div class="flex items-center gap-4">
         <button type="button" phx-click="toggle_movement" class="font-medium text-green-700 hover:underline">
@@ -565,6 +607,7 @@ defmodule ZahlungsWeb.CashierLive do
               <input type="number" name="tax" value={@tax} min="0" step="0.01" class="form-control" />
             </label>
           </div>
+          <p :if={@amount_error && @cart != []} class="text-sm text-red-600">{@amount_error}</p>
         </form>
 
         <div class="mt-3">

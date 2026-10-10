@@ -10,6 +10,11 @@ import Config
 config :zahlungs,
   ecto_repos: [Zahlungs.Repo]
 
+# Shop time zone as a fixed UTC offset in hours (7 = WIB, 8 = WITA, 9 = WIT).
+# Timestamps are stored in UTC; this decides where "today" starts and how
+# times are shown. See Zahlungs.LocalTime.
+config :zahlungs, :utc_offset_hours, 7
+
 # Configures the endpoint
 config :zahlungs, ZahlungsWeb.Endpoint,
   url: [host: "localhost"],
@@ -28,6 +33,9 @@ config :zahlungs, ZahlungsWeb.Endpoint,
 # For production it's recommended to configure a different adapter
 # at the `config/runtime.exs`.
 config :zahlungs, Zahlungs.Mailer, adapter: Swoosh.Adapters.Local
+
+# Sender of the account emails ({name, address}).
+config :zahlungs, :mail_from, {"Zahlungs", "no-reply@example.com"}
 
 # Swoosh API client is needed for adapters other than SMTP.
 config :swoosh, :api_client, false

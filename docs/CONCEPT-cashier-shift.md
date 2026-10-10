@@ -111,6 +111,10 @@ variance       = counted_cash - expected_cash
 ### 5.2 Selama shift
 - Semua transaksi (`Sales.create_sale`) otomatis `shift_id` = shift open kasir.
 - Return/refund pada transaksi shift ini memengaruhi `expected_cash`.
+- Return/void **setelah shift ditutup** tidak mengubah angka shift itu (sudah
+  direkonsiliasi; transaksi ditandai `adjusted_after_shift_close`). Uang refund
+  tunai dicatat sebagai gerakan kas keluar `refund` pada shift terbuka milik
+  user yang memproses return (bila ada). Void tidak memindahkan kas.
 
 ### 5.3 Tutup shift
 1. Kasir klik **Tutup Shift** → sistem tampilkan **ringkasan**: modal, penjualan tunai,

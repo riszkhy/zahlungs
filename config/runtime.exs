@@ -32,6 +32,16 @@ if config_env() == :prod do
       You can generate one by calling: mix phx.gen.secret
       """
 
+  # Shop time zone as a fixed UTC offset in hours (default 7 = WIB).
+  if utc_offset = System.get_env("UTC_OFFSET_HOURS") do
+    config :zahlungs, :utc_offset_hours, String.to_integer(utc_offset)
+  end
+
+  # Sender of the account emails, e.g. MAIL_FROM="kasir@tokosaya.id".
+  if mail_from = System.get_env("MAIL_FROM") do
+    config :zahlungs, :mail_from, {"Zahlungs", mail_from}
+  end
+
   # Public host used for generated URLs (links in emails, redirects, ~p URLs).
   host = System.get_env("PHX_HOST") || "localhost"
   port = String.to_integer(System.get_env("PORT") || "4000")
@@ -85,21 +95,23 @@ if config_env() == :prod do
       ]
   end
 
-  # ## Configuring the mailer
+  # ## Mailer
   #
-  # In production you need to configure the mailer to use a different adapter.
-  # Also, you may need to configure the Swoosh API client of your choice if you
-  # are not using SMTP. Here is an example of the configuration:
+  # No mail adapter is configured here: the default `Local` adapter keeps
+  # messages in memory, so in production nothing is delivered. The app knows
+  # this (`Zahlungs.Mailer.delivers?/0`): it logs a warning at boot and hides
+  # the "Forgot password?" link; admins reset passwords at /admin/users.
+  #
+  # To send real email, add an adapter and its dependency. For SMTP, add
+  # `{:gen_smtp, "~> 1.2"}` to mix.exs and configure:
   #
   #     config :zahlungs, Zahlungs.Mailer,
-  #       adapter: Swoosh.Adapters.Mailgun,
-  #       api_key: System.get_env("MAILGUN_API_KEY"),
-  #       domain: System.get_env("MAILGUN_DOMAIN")
+  #       adapter: Swoosh.Adapters.SMTP,
+  #       relay: System.fetch_env!("SMTP_HOST"),
+  #       port: String.to_integer(System.get_env("SMTP_PORT") || "587"),
+  #       username: System.fetch_env!("SMTP_USERNAME"),
+  #       password: System.fetch_env!("SMTP_PASSWORD"),
+  #       tls: :always
   #
-  # For this example you need include a HTTP client required by Swoosh API client.
-  # Swoosh supports Hackney and Finch out of the box:
-  #
-  #     config :swoosh, :api_client, Swoosh.ApiClient.Hackney
-  #
-  # See https://hexdocs.pm/swoosh/Swoosh.html#module-installation for details.
+  # See docs/DEPLOYMENT.md and https://hexdocs.pm/swoosh/Swoosh.Adapters.SMTP.html.
 end

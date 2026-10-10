@@ -5,7 +5,17 @@ defmodule Zahlungs.Application do
 
   use Application
 
+  require Logger
+
   def start(_type, _args) do
+    unless Zahlungs.Mailer.delivers?() do
+      Logger.warning(
+        "Mailer is not configured: password-reset, confirmation and change-email " <>
+          "messages will NOT be sent. Admins can reset passwords and confirm users at " <>
+          "/admin/users. See docs/DEPLOYMENT.md."
+      )
+    end
+
     children = [
       # Start the Ecto repository
       Zahlungs.Repo,

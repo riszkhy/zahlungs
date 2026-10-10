@@ -63,7 +63,7 @@ defmodule ZahlungsWeb.SupplierLive.Index do
       Suppliers
       <:subtitle>Kelola pemilik barang titipan / konsinyasi (khusus admin)</:subtitle>
       <:actions>
-        <.link patch={~p"/reports/consignment"} class="btn btn-sm btn-link">Settlement</.link>
+        <.link navigate={~p"/reports/consignment"} class="btn btn-sm btn-link">Settlement</.link>
         <.link patch={~p"/admin/suppliers/new"}>
           <.button>New Supplier</.button>
         </.link>

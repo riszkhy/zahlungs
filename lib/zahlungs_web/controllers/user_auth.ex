@@ -1,4 +1,9 @@
 defmodule ZahlungsWeb.UserAuth do
+  @moduledoc """
+  Session-based authentication: logging users in and out, loading the current
+  user, and the plugs / `on_mount` hooks that gate routes by authentication and
+  by the admin role.
+  """
   use ZahlungsWeb, :verified_routes
 
   import Plug.Conn

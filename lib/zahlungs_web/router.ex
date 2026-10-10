@@ -41,6 +41,9 @@ defmodule ZahlungsWeb.Router do
     scope "/" do
       pipe_through :browser
       live_dashboard "/dashboard", metrics: ZahlungsWeb.Telemetry, ecto_repos: [Zahlungs.Repo]
+
+      # Emails sent through the Local adapter in development can be read here.
+      forward "/dev/mailbox", Plug.Swoosh.MailboxPreview
     end
   end
 
@@ -49,8 +52,6 @@ defmodule ZahlungsWeb.Router do
   scope "/", ZahlungsWeb do
     pipe_through [:browser, :redirect_if_user_is_authenticated, :put_session_layout]
 
-    get "/users/register", UserRegistrationController, :new
-    post "/users/register", UserRegistrationController, :create
     get "/users/log_in", UserSessionController, :new
     post "/users/log_in", UserSessionController, :create
     get "/users/reset_password", UserResetPasswordController, :new
@@ -71,7 +72,6 @@ defmodule ZahlungsWeb.Router do
       live "/sales/:id", SalesLive.Index, :show
       live "/shifts", ShiftLive.Index, :index
       live "/shifts/:id", ShiftLive.Index, :show
-      live "/reports/consignment", ReportLive.Consignment, :index
     end
 
     get "/sales/:id/receipt", ReceiptController, :show
@@ -105,6 +105,7 @@ defmodule ZahlungsWeb.Router do
 
       live "/reports/sales", ReportLive.Index, :index
       live "/reports/stock", ReportLive.Stock, :index
+      live "/reports/consignment", ReportLive.Consignment, :index
     end
   end
 

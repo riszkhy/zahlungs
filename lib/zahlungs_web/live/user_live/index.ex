@@ -30,17 +30,15 @@ defmodule ZahlungsWeb.UserLive.Index do
   def handle_event("set_role", %{"id" => id, "role" => role}, socket) do
     id = to_int(id)
 
-    cond do
-      id == socket.assigns.current_user.id ->
-        {:noreply, put_flash(socket, :error, "You cannot change your own role.")}
+    if id == socket.assigns.current_user.id do
+      {:noreply, put_flash(socket, :error, "You cannot change your own role.")}
+    else
+      {:ok, _} = Accounts.set_user_role(Accounts.get_user!(id), role)
 
-      true ->
-        {:ok, _} = Accounts.set_user_role(Accounts.get_user!(id), role)
-
-        {:noreply,
-         socket
-         |> put_flash(:info, "Role updated.")
-         |> load_users()}
+      {:noreply,
+       socket
+       |> put_flash(:info, "Role updated.")
+       |> load_users()}
     end
   end
 
@@ -188,7 +186,7 @@ defmodule ZahlungsWeb.UserLive.Index do
           {if user.active, do: "Active", else: "Inactive"}
         </span>
       </:col>
-      <:col :let={user} label="Joined">{Calendar.strftime(user.inserted_at, "%d %b %Y")}</:col>
+      <:col :let={user} label="Joined">{Calendar.strftime(Zahlungs.LocalTime.to_local(user.inserted_at), "%d %b %Y")}</:col>
       <:action :let={user}>
         <div class="relative" x-data="{ open: false }">
           <button

@@ -25,7 +25,7 @@
     <h1>Zahlungs POS</h1>
     <p class="muted">
       {@sale.code}<br />
-      {Calendar.strftime(@sale.inserted_at, "%d %b %Y %H:%M")}<br />
+      {Calendar.strftime(Zahlungs.LocalTime.to_local(@sale.inserted_at), "%d %b %Y %H:%M")}<br />
       Cashier: {@sale.user && @sale.user.email}
     </p>
 

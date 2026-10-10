@@ -13,6 +13,8 @@ sepenuhnya lewat **environment variables** (`config/runtime.exs`).
 | `PHX_HOST`             |  ⚠️   | `pos.tokosaya.id` (default `localhost`)   | Host publik untuk URL yang digenerate (email, redirect) |
 | `PORT`                 |       | `4000`                                    | Port HTTP yang di-bind                                  |
 | `POOL_SIZE`            |       | `10`                                      | Ukuran pool koneksi DB                                  |
+| `UTC_OFFSET_HOURS`     |       | `7` (WIB; `8` WITA, `9` WIT)              | Zona waktu toko: menentukan awal "hari ini" di laporan dan jam yang ditampilkan |
+| `MAIL_FROM`            |       | `kasir@tokosaya.id`                       | Alamat pengirim email akun (hanya berguna bila mailer sudah dikonfigurasi) |
 | `FORCE_SSL`            |       | `true` / `1` (default off)                | Redirect HTTP→HTTPS + HSTS; **hanya** jika di belakang reverse proxy TLS (trust `x-forwarded-proto`) |
 | `DATABASE_SSL`         |       | `true` / `1` (default off)                | TLS ke database (managed MariaDB)                       |
 | `HTTPS_PORT`           |       | `4001`                                    | Aktifkan listener HTTPS di app sendiri (LAN tanpa proxy) — perlu cert + key |
@@ -125,10 +127,14 @@ sekali → kamera aktif. Jangan set `FORCE_SSL` untuk mode ini (itu untuk proxy)
 - [ ] Smoke test: login kasir → buka shift → transaksi → tutup shift → cek
       laporan
 - [ ] Backup DB terjadwal (mysqldump/managed backup) — data penjualan = uang
-- [ ] Mailer: default Swoosh `Local` tidak mengirim email sungguhan. Reset
-      password via email TIDAK berfungsi sampai adapter prod dikonfigurasi
-      (lihat komentar di `config/runtime.exs`); sementara itu admin bisa reset
-      password user dari `/admin/users`.
+- [ ] Mailer: belum ada adapter email sungguhan, jadi di production tidak ada
+      email yang terkirim (reset password, konfirmasi, ganti email). Aplikasi
+      tahu soal ini: saat boot muncul warning di log dan link "Forgot password?"
+      di halaman login diganti "Lupa password? Hubungi admin." Admin me-reset
+      password dan mengonfirmasi user dari `/admin/users`. Ganti email lewat
+      halaman Profile belum bisa diselesaikan tanpa mailer. Untuk mengaktifkan
+      email: tambahkan dependency adapter (mis. `{:gen_smtp, "~> 1.2"}`) dan
+      konfigurasi sesuai komentar "Mailer" di `config/runtime.exs`.
 
 ## 6. Rollback
 
