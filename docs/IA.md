@@ -49,7 +49,8 @@ Aturan akses berlapis (router):
     ├── /categories             Manajemen kategori (+ /new, /:id/edit)
     ├── /admin/users            Manajemen user (list, buat, ubah role,
     │                           reset password)
-    ├── /admin/stores           Manajemen toko/cabang (+ /new, /:id/edit; aktif/nonaktif)
+    ├── /admin/stores           Manajemen toko/cabang (ubah, aktif/nonaktif)
+    ├── /admin/stores/register  Daftar cabang: wizard 2 langkah (data toko, kasir pertama opsional)
     ├── /admin/logins           Riwayat login + lokasi (filter toko & user)
     ├── /admin/suppliers        Manajemen supplier/consignor (+ /new, /:id/edit)
     ├── /reports/sales          Laporan penjualan (ringkasan, harian, per kasir,

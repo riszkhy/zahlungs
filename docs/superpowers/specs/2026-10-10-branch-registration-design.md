@@ -1,6 +1,6 @@
 # Desain — Registrasi toko cabang (wizard admin)
 
-Tanggal: 2026-10-10 · Status: menunggu tinjauan
+Tanggal: 2026-10-10 · Status: diimplementasikan
 
 ## Tujuan
 

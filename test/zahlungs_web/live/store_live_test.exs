@@ -37,6 +37,16 @@ defmodule ZahlungsWeb.StoreLiveTest do
       assert response =~ "Jl. Mawar 1"
       assert response =~ ~s(href="/admin/stores")
     end
+
+    test "stores are created through the registration wizard only", %{conn: conn} do
+      conn = log_in_user(conn, admin_fixture())
+
+      assert conn |> get("/admin/stores/new") |> response(404)
+
+      response = conn |> get("/admin/stores") |> html_response(200)
+      assert response =~ "Daftar cabang"
+      refute response =~ "Toko baru"
+    end
   end
 
   describe "managing stores" do
@@ -44,44 +54,17 @@ defmodule ZahlungsWeb.StoreLiveTest do
       %{admin: admin_fixture()}
     end
 
-    test "creates a store from the form", %{admin: admin} do
+    test "an invalid edit keeps the modal open with the errors", %{admin: admin} do
+      store = store_fixture()
+
       socket =
         StoreLive.Index
-        |> mount_live(admin, action: :new)
-        |> event("save", %{
-          "store" => %{
-            "name" => "Cabang Baru",
-            "code" => "cb9",
-            "address" => "Jl. Melati 2",
-            "phone" => "021-555",
-            "utc_offset_hours" => "8",
-            "latitude" => "-6.2",
-            "longitude" => "106.8"
-          }
-        })
-
-      assert flash(socket, :info) == "Toko disimpan."
-      assert live_redirect(socket) == "/admin/stores"
-
-      store = Enum.find(Stores.list_stores(), &(&1.code == "CB9"))
-      assert {store.name, store.utc_offset_hours, store.latitude} == {"Cabang Baru", 8, -6.2}
-      assert store.id in Enum.map(socket.assigns.stores, & &1.id)
-    end
-
-    test "shows the errors and saves nothing when the form is invalid", %{admin: admin} do
-      socket =
-        StoreLive.Index
-        |> mount_live(admin, action: :new)
-        |> event("validate", %{"store" => %{"name" => "", "code" => "x y"}})
+        |> mount_live(admin, action: :edit, params: %{"id" => "#{store.id}"})
+        |> event("save", %{"store" => %{"name" => "", "code" => store.code}})
 
       assert socket.assigns.form.errors[:name]
-
-      socket = event(socket, "save", %{"store" => %{"name" => "", "code" => "x y"}})
-
-      assert socket.assigns.form.errors[:code]
       assert live_redirect(socket) == nil
-      refute Enum.any?(Stores.list_stores(), &(&1.code == "X Y"))
-      assert html(socket) =~ "2–8 huruf/angka"
+      assert Stores.get_store!(store.id).name == store.name
     end
 
     test "edits a store", %{admin: admin} do

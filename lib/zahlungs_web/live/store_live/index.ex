@@ -1,7 +1,8 @@
 defmodule ZahlungsWeb.StoreLive.Index do
   @moduledoc """
-  Store (branch) management, admin only: list, create, edit, and activate or
-  deactivate. Stores are never deleted — sales and shifts keep pointing at them.
+  Store (branch) management, admin only: list, edit, and activate or deactivate.
+  New stores are registered through `StoreLive.Register`. Stores are never
+  deleted — sales and shifts keep pointing at them.
   """
   use ZahlungsWeb, :live_view
 
@@ -24,10 +25,6 @@ defmodule ZahlungsWeb.StoreLive.Index do
     assign(socket, page_title: "Toko", store: nil, form: nil)
   end
 
-  defp apply_action(socket, :new, _params) do
-    assign_form(socket, "Toko baru", %Store{})
-  end
-
   defp apply_action(socket, :edit, %{"id" => id}) do
     assign_form(socket, "Ubah toko", Stores.get_store!(id))
   end
@@ -43,13 +40,7 @@ defmodule ZahlungsWeb.StoreLive.Index do
   end
 
   def handle_event("save", %{"store" => params}, socket) do
-    result =
-      case socket.assigns.store do
-        %Store{id: nil} -> Stores.create_store(params)
-        %Store{} = store -> Stores.update_store(store, params)
-      end
-
-    case result do
+    case Stores.update_store(socket.assigns.store, params) do
       {:ok, _store} ->
         {:noreply,
          socket
@@ -102,8 +93,8 @@ defmodule ZahlungsWeb.StoreLive.Index do
       <:subtitle>Kelola cabang (khusus admin). Stok, shift, dan penjualan terpisah per toko.</:subtitle>
       <:actions>
         <.link navigate={~p"/admin/logins"} class="btn btn-sm btn-link">Riwayat login</.link>
-        <.link patch={~p"/admin/stores/new"}>
-          <.button>Toko baru</.button>
+        <.link navigate={~p"/admin/stores/register"}>
+          <.button>Daftar cabang</.button>
         </.link>
       </:actions>
     </.header>
@@ -138,7 +129,7 @@ defmodule ZahlungsWeb.StoreLive.Index do
       </:action>
     </.table>
 
-    <.modal :if={@live_action in [:new, :edit]} id="store-modal" show on_cancel={JS.patch(~p"/admin/stores")}>
+    <.modal :if={@live_action == :edit} id="store-modal" show on_cancel={JS.patch(~p"/admin/stores")}>
       <.header>{@page_title}</.header>
 
       <.form for={@form} id="store-form" phx-change="validate" phx-submit="save">
