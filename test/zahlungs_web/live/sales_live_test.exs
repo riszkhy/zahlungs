@@ -12,7 +12,7 @@ defmodule ZahlungsWeb.SalesLiveTest do
   import ZahlungsWeb.LiveDriver
   import Ecto.Query, only: [from: 2]
 
-  alias Zahlungs.{Catalog, Sales, Shifts}
+  alias Zahlungs.{Sales, Shifts}
   alias ZahlungsWeb.SalesLive
 
   defp admin_fixture do
