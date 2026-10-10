@@ -1,7 +1,7 @@
 defmodule Zahlungs.SalesTest do
   use Zahlungs.DataCase, async: true
 
-  alias Zahlungs.{Sales, Catalog}
+  alias Zahlungs.Sales
 
   import Zahlungs.AccountsFixtures
   import Zahlungs.StoresFixtures
