@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`Zahlungs` is a point-of-sale (POS) web app for a small shop: Phoenix 1.8 + LiveView 1.2 on Elixir `~> 1.14`, MySQL/MariaDB via `myxql`. Cashiers open a shift, sell from a cart (barcode scan or search), and close the shift with a cash reconciliation; admins manage products, categories, suppliers and users, and read the sales, stock and consignment reports. UI text is a mix of Indonesian and English.
+`Zahlungs` is a point-of-sale (POS) web app for a shop with one or more branches (one owner, one central server): Phoenix 1.8 + LiveView 1.2 on Elixir `~> 1.14`, MySQL/MariaDB via `myxql`. Cashiers open a shift, sell from a cart (barcode scan or search), and close the shift with a cash reconciliation; admins manage products, categories, suppliers and users, and read the sales, stock and consignment reports. UI text is a mix of Indonesian and English.
 
 Product docs live in `docs/` (Indonesian): `PRD-POS.md`, `IA.md` (sitemap + who can see what), `CONCEPT-cashier-shift.md`, the `SPRINT-*.md` plans, and `DEPLOYMENT.md`.
 
@@ -31,7 +31,7 @@ JS/CSS assets live in `assets/` and are built by the `esbuild`/`tailwind` mix wr
 
 - Dev/test use **MySQL/MariaDB** via `myxql`. Credentials come from env vars (`DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD`, `DB_NAME`/`DB_TEST_NAME`, with localhost defaults) and/or the gitignored `config/local.secret.exs`.
 - `mix test` runs pending migrations against whatever database the test config points at. If dev and test share one database, tests still clean up after themselves (SQL sandbox), but rows that already exist are visible to them: look fixtures up by a unique name/SKU rather than expecting them first in a list, and don't assert that a table is empty.
-- Migrations live in `priv/repo/migrations/`. Tables: `users`, `users_tokens`, `categories`, `suppliers`, `products`, `sales`, `sale_items`, `cashier_shifts`, `cash_movements`.
+- Migrations live in `priv/repo/migrations/`. Tables: `stores`, `users`, `users_tokens`, `user_logins`, `categories`, `suppliers`, `products`, `product_stocks`, `sales`, `sale_items`, `cashier_shifts`, `cash_movements`. (`products.stock` is a leftover column, no longer read; stock lives in `product_stocks`.)
 - There is no CI workflow in the repo.
 
 ## Production / releases
@@ -45,7 +45,8 @@ JS/CSS assets live in `assets/` and are built by the `esbuild`/`tailwind` mix wr
 Standard Phoenix context layering — keep the boundary between the two. LiveViews and controllers call context functions only, never `Repo` or the schemas directly.
 
 - `lib/zahlungs/` — **business/context layer** (no web concerns).
-  - `accounts.ex` — users, roles (`admin` / `cashier`), activate/deactivate, admin password reset, session and email tokens.
+  - `stores.ex` — the branches. `scope.ex` — `%Zahlungs.Scope{user, store}`: who is acting and in which store (see Multi-store below).
+  - `accounts.ex` — users, roles (`admin` / `cashier`), each cashier's store, activate/deactivate, admin password reset, session and email tokens, the login log.
   - `catalog.ex` — products (SKU, barcode, purchase price/margin, soft delete, consignment flag), categories, suppliers, stock report.
   - `sales.ex` — `create_sale/3`, `return_sale/2`, `void_sale/3`, sales history, and all reports including the consignment statement.
   - `shifts.ex` — open/close shift, cash movements, expected-cash reconciliation.
@@ -61,6 +62,17 @@ Standard Phoenix context layering — keep the boundary between the two. LiveVie
 - Event handlers re-check the role for sensitive actions (return, void) — hiding a button is not authorization.
 - Tokens (session, email confirmation, reset, email change) are hashed and stored in `users_tokens`. Passwords are hashed with `pbkdf2_elixir`.
 
+### Multi-store
+
+- **Shared:** users, categories, suppliers, products (name, SKU, barcode, prices). **Per store:** stock (`product_stocks`), shifts, cash movements, sales.
+- **Scope.** `UserAuth` builds a `Zahlungs.Scope` per request / LiveView mount (`@current_scope`). A cashier's store is their own; an admin's is the one picked in the navbar switcher (session `:store_id`), or `nil` for "all stores". Context functions that read or write per-store data take the scope as their first argument and filter with `Scope.store_id/1`, which raises for a non-admin without a store — never accept a `store_id` from params.
+- **Fetching another store's row raises** `Ecto.NoResultsError` (`Sales.get_sale!/2`, `Shifts.get_shift!/2`), i.e. a 404.
+- **A sale's store is its shift's store**, and the shift's comes from the scope at `Shifts.open_shift/2`. `create_sale/3` takes stock from that store; `return_sale`/`void_sale` put it back there, not in the store of whoever processes them. The cashier screen reads stock with the open shift's store (`@sale_scope`), which can differ from the navbar choice.
+- **"All stores"** (admin, `scope.store == nil`): lists and reports are unfiltered, product `stock` is the sum over stores, and opening a shift or setting stock is refused.
+- **Product `stock` is a virtual field** filled from the scope's store by `Catalog` (`list_products/2`, `get_product!/2`, …); a product loaded any other way has `stock: 0`.
+- **Time zone is per store** (`stores.utc_offset_hours`): pass the store to `Zahlungs.LocalTime` functions; without one the default offset applies.
+- **Login:** `ZahlungsWeb.LoginThrottle` refuses logins after repeated failures; `Accounts.record_login/3` logs each successful login with the browser's position (audit only — never used to refuse a login). A cashier without an active store is not let in.
+
 ### Invariants worth knowing before changing sales or shifts
 
 - **A sale needs an open shift.** `Sales.create_sale/3` looks up and row-locks the cashier's open shift itself; it ignores any `shift_id` from the caller and returns `{:error, :no_open_shift}` otherwise.
@@ -75,6 +87,6 @@ Standard Phoenix context layering — keep the boundary between the two. LiveVie
 - **Time:** timestamps are stored in UTC; anything about "today", a date range, or a time shown to a person goes through `Zahlungs.LocalTime` (fixed offset, `config :zahlungs, :utc_offset_hours`, default 7 = WIB). Don't use `Date.utc_today/0` for business dates.
 - **Money:** `Decimal` everywhere, displayed with `format_money/1`.
 - `config :zahlungs, :env, Mix.env()` is set in `config.exs`; the router uses it at compile time to mount `/dashboard` (LiveDashboard) and `/dev/mailbox` in dev/test only.
-- Test support in `test/support/`: `conn_case`, `data_case`, fixtures for accounts, catalog and shifts (`user_on_shift_fixture/0` gives a user who can record sales), and `live_driver.ex`.
+- Test support in `test/support/`: `conn_case`, `data_case`, fixtures for stores, accounts, catalog and shifts, and `live_driver.ex`. Each test gets its own default store (`StoresFixtures.default_store/0`); `user_fixture/1` and `product_fixture/1` use it, `scope(user)` / `store_scope()` build scopes, `stock_of(product)` reads stock, and `user_on_shift_fixture/0` gives a user who can record sales.
 - **LiveView tests** can't use `Phoenix.LiveViewTest.live/2` yet — it needs the `lazy_html` package, which isn't installed. Access control is tested with `get/2`; behaviour is tested by driving the LiveView's callbacks through `ZahlungsWeb.LiveDriver` (`mount_live/3`, `event/3`, `html/1`). Events sent with `JS.push(value: ...)` arrive as JSON numbers, so handlers must accept both integers and strings for ids and pages.
 - Line endings are LF, enforced by `.gitattributes`.

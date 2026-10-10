@@ -136,7 +136,36 @@ sekali → kamera aktif. Jangan set `FORCE_SSL` untuk mode ini (itu untuk proxy)
       email: tambahkan dependency adapter (mis. `{:gen_smtp, "~> 1.2"}`) dan
       konfigurasi sesuai komentar "Mailer" di `config/runtime.exs`.
 
-## 6. Rollback
+## 6. Multi-toko (server pusat online)
+
+Satu instalasi melayani semua cabang lewat internet.
+
+- **Migrasi ke multi-toko** (`20261011090000`–`20261011090003`) membuat tabel
+  `stores`, toko bawaan **"Toko Utama"** (kode `TU`), dan memindahkan semua
+  kasir, shift, penjualan, dan stok yang ada ke toko itu. Ambil backup dulu dan
+  coba di salinan database: migrasi ini mengubah data nyata dan DDL MySQL tidak
+  transaksional.
+- Setelah migrasi: login admin → `/admin/stores` → lengkapi alamat/telepon Toko
+  Utama (tampil di struk), buat cabang lain, lalu tempatkan kasir lewat kolom
+  **Store** di `/admin/users`. Kasir tanpa toko aktif tidak bisa login.
+- Stok cabang baru mulai dari 0 untuk semua produk: pilih cabang itu di navbar,
+  lalu isi stok lewat form produk.
+- Kolom lama `products.stock` sengaja belum dihapus (tidak dipakai lagi);
+  dihapus pada rilis berikutnya.
+- **Wajib HTTPS** (`FORCE_SSL=true` di belakang reverse proxy). Selain keamanan,
+  browser hanya memberi lokasi dan kamera barcode di halaman HTTPS.
+- **Zona waktu per toko** diatur di form toko (WIB/WITA/WIT). `UTC_OFFSET_HOURS`
+  hanya dipakai saat admin melihat "Semua toko".
+- **Pembatas login:** 5 kali gagal untuk satu email dari satu alamat → ditahan
+  15 menit (di memori, hilang saat restart). Di belakang proxy alamatnya adalah
+  alamat proxy, jadi praktis berlaku per email.
+- **Log lokasi login** disimpan 90 hari (`config :zahlungs,
+  :login_log_retention_days`) dan dibersihkan otomatis tiap hari.
+- **Internet toko putus = toko tidak bisa berjualan.** Siapkan prosedur manual
+  (catat di kertas, input ulang setelah tersambung).
+- `POOL_SIZE`: naikkan sesuai jumlah kasir yang aktif bersamaan di semua toko.
+
+## 7. Rollback
 
 ```bash
 bin/zahlungs eval "Release.rollback(Zahlungs.Repo, 20260701170000)"

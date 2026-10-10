@@ -49,6 +49,8 @@ Aturan akses berlapis (router):
     ├── /categories             Manajemen kategori (+ /new, /:id/edit)
     ├── /admin/users            Manajemen user (list, buat, ubah role,
     │                           reset password)
+    ├── /admin/stores           Manajemen toko/cabang (+ /new, /:id/edit; aktif/nonaktif)
+    ├── /admin/logins           Riwayat login + lokasi (filter toko & user)
     ├── /admin/suppliers        Manajemen supplier/consignor (+ /new, /:id/edit)
     ├── /reports/sales          Laporan penjualan (ringkasan, harian, per kasir,
     │                           per kategori, produk terlaris)
@@ -72,6 +74,7 @@ Urutan link disesuaikan peran:
 | Products    |   –   |    –    |   ✓   | `/products`            |
 | Categories  |   –   |    –    |   ✓   | `/categories`          |
 | Users       |   –   |    –    |   ✓   | `/admin/users`         |
+| Stores      |   –   |    –    |   ✓   | `/admin/stores`        |
 | Suppliers   |   –   |    –    |   ✓   | `/admin/suppliers`     |
 | Reports     |   –   |    –    |   ✓   | `/reports/sales`       |
 | Stock       |   –   |    –    |   ✓   | `/reports/stock`       |
@@ -173,3 +176,21 @@ Kelola user (admin):
 - `docs/SPRINT-konsinyasi.md` — sprint konsinyasi (Model A)
 - `docs/SPRINT-cash-movements.md` — sprint kas laci + bayar konsinyasi
 - `docs/SPRINT-void-koreksi.md` — sprint void/koreksi invoice
+
+## Multi-toko
+
+- **Toko aktif.** Kasir terikat ke tokonya (nama toko tampil di navbar). Admin
+  memilih toko lewat pemilih di navbar, termasuk **"Semua toko"**; pilihan
+  disimpan di session.
+- **Per toko:** stok, shift, gerakan kas, penjualan, struk. Katalog, kategori,
+  supplier, dan user dikelola terpusat.
+- **Kasir hanya melihat tokonya sendiri**: `/sales`, `/sales/:id`, struk,
+  `/shifts/:id`, dan stok di `/catalog` serta `/cashier`. Data toko lain = 404.
+- **"Semua toko" (admin):** laporan dan daftar digabung, laporan penjualan
+  menambah rincian per toko, stok tampil sebagai jumlah semua toko. Tidak bisa
+  membuka shift atau mengubah stok — pilih satu toko dulu.
+- **Layar kasir** selalu memakai toko dari shift yang sedang terbuka, walaupun
+  admin sudah memindahkan pemilih toko.
+- **Login:** lokasi (lat/long) dari browser dicatat bila diizinkan; tidak
+  pernah menolak login. Lima kali salah password untuk email yang sama menahan
+  login 15 menit.
