@@ -13,9 +13,11 @@ defmodule Zahlungs.Sales do
   alias Zahlungs.Repo
 
   alias Zahlungs.Accounts.User
-  alias Zahlungs.Catalog.Product
+  alias Zahlungs.Catalog.{Product, ProductStock}
   alias Zahlungs.Sales.{Sale, SaleItem}
+  alias Zahlungs.Scope
   alias Zahlungs.Shifts
+  alias Zahlungs.Stores
 
   @doc """
   Records a sale from a cart.
@@ -31,7 +33,8 @@ defmodule Zahlungs.Sales do
 
   The sale is recorded on the cashier's open shift, which is looked up and
   locked here (never taken from the caller), so a sale can't land on a closed
-  shift or on none at all.
+  shift or on none at all. The shift also decides the **store**: the sale
+  belongs to the shift's store and takes its stock from there.
 
   Stock is decremented with a guarded `UPDATE ... WHERE stock >= qty`, so the
   whole transaction rolls back (no sale, no stock change) if any item would
@@ -96,27 +99,35 @@ defmodule Zahlungs.Sales do
   end
 
   defp do_create_sale(user, items, totals) do
-    sale_attrs =
-      Map.merge(totals, %{user_id: user.id, status: "completed", code: generate_code()})
+    sale_attrs = Map.merge(totals, %{user_id: user.id, status: "completed"})
 
     Multi.new()
     |> Multi.run(:shift, fn _repo, _changes -> Shifts.lock_current_shift(user) end)
-    |> Multi.insert(:sale, fn %{shift: shift} ->
-      Sale.changeset(%Sale{}, Map.put(sale_attrs, :shift_id, shift.id))
+    |> Multi.run(:store, fn _repo, %{shift: shift} -> {:ok, Stores.get_store!(shift.store_id)} end)
+    |> Multi.insert(:sale, fn %{shift: shift, store: store} ->
+      Sale.changeset(
+        %Sale{},
+        Map.merge(sale_attrs, %{
+          shift_id: shift.id,
+          store_id: store.id,
+          code: generate_code(store)
+        })
+      )
     end)
     |> insert_items_and_decrement_stock(items)
     |> Repo.transaction()
     |> case do
-      {:ok, %{sale: sale}} -> {:ok, Repo.preload(sale, [:user, items: :product])}
+      {:ok, %{sale: sale}} -> {:ok, Repo.preload(sale, [:user, :store, items: :product])}
       {:error, _step, reason, _changes} -> {:error, reason}
     end
   end
 
-  # Human-readable, collision-resistant invoice code: INV + timestamp + random hex.
-  defp generate_code do
-    ts = Calendar.strftime(LocalTime.now(), "%y%m%d%H%M%S")
+  # Human-readable, collision-resistant invoice code: store code + INV +
+  # timestamp (store-local) + random hex.
+  defp generate_code(store) do
+    ts = Calendar.strftime(LocalTime.now(store), "%y%m%d%H%M%S")
     suffix = :crypto.strong_rand_bytes(2) |> Base.encode16()
-    "INV#{ts}#{suffix}"
+    "#{store.code}-INV#{ts}#{suffix}"
   end
 
   defp insert_items_and_decrement_stock(multi, items) do
@@ -134,15 +145,22 @@ defmodule Zahlungs.Sales do
           supplier_id: item.supplier_id
         })
       end)
-      |> Multi.run({:stock, item.product_id}, fn repo, _changes -> decrement_stock(repo, item) end)
+      |> Multi.run({:stock, item.product_id}, fn repo, %{store: store} ->
+        decrement_stock(repo, store.id, item)
+      end)
     end)
   end
 
-  # Guarded decrement: only succeeds while enough stock is left.
-  defp decrement_stock(repo, item) do
+  # Guarded decrement of the store's stock: only succeeds while enough is left
+  # (a store with no stock row for the product has none).
+  defp decrement_stock(repo, store_id, item) do
     {count, _} =
       repo.update_all(
-        from(p in Product, where: p.id == ^item.product_id and p.stock >= ^item.quantity),
+        from(ps in ProductStock,
+          where:
+            ps.store_id == ^store_id and ps.product_id == ^item.product_id and
+              ps.stock >= ^item.quantity
+        ),
         inc: [stock: -item.quantity]
       )
 
@@ -212,7 +230,7 @@ defmodule Zahlungs.Sales do
     |> Multi.update(:sale, fn %{shift: shift} ->
       Sale.return_changeset(sale, shift_closed?(shift))
     end)
-    |> restore_stock(sale.items)
+    |> restore_stock(sale)
     |> Repo.transaction()
     |> case do
       {:ok, %{sale: returned}} -> {:ok, returned}
@@ -239,7 +257,7 @@ defmodule Zahlungs.Sales do
     |> Multi.update(:sale, fn %{shift: shift} ->
       Sale.void_changeset(sale, user.id, reason, shift_closed?(shift))
     end)
-    |> restore_stock(sale.items)
+    |> restore_stock(sale)
     |> Repo.transaction()
     |> case do
       {:ok, %{sale: voided}} -> {:ok, voided}
@@ -290,14 +308,16 @@ defmodule Zahlungs.Sales do
 
   defp record_refund(%Sale{}, _shift, _refunded_by), do: {:ok, nil}
 
-  defp restore_stock(multi, items) do
+  # Puts the items back into the stock of the store that sold them — not the
+  # store of whoever processes the return.
+  defp restore_stock(multi, %Sale{store_id: store_id, items: items}) do
     Enum.reduce(items, multi, fn item, multi ->
       if item.product_id do
-        Multi.update_all(
+        Multi.insert(
           multi,
           {:restore, item.id},
-          from(p in Product, where: p.id == ^item.product_id),
-          inc: [stock: item.quantity]
+          %ProductStock{store_id: store_id, product_id: item.product_id, stock: item.quantity},
+          on_conflict: [inc: [stock: item.quantity]]
         )
       else
         multi
@@ -306,6 +326,16 @@ defmodule Zahlungs.Sales do
   end
 
   ## Queries
+  #
+  # Everything below is read through a scope: a cashier sees their store's
+  # sales, an admin the store they picked or all of them.
+
+  defp for_store(query, scope) do
+    case Scope.store_id(scope) do
+      nil -> query
+      store_id -> where(query, [s], s.store_id == ^store_id)
+    end
+  end
 
   @doc """
   Lists recent sales (most recent first), preloading the cashier and items.
@@ -315,46 +345,50 @@ defmodule Zahlungs.Sales do
     * `:offset` - rows to skip, for paging (default 0)
     * `:date` - a `%Date{}` to restrict to sales recorded on that (shop-local) day
   """
-  def list_sales(opts \\ []) do
+  def list_sales(%Scope{} = scope, opts \\ []) do
     limit = opts[:limit] || 50
     offset = opts[:offset] || 0
 
     Sale
-    |> filter_on_date(opts[:date])
+    |> for_store(scope)
+    |> filter_on_date(opts[:date], scope)
     |> order_by(desc: :inserted_at, desc: :id)
     |> limit(^limit)
     |> offset(^offset)
-    |> preload([:user, :items])
+    |> preload([:user, :store, :items])
     |> Repo.all()
   end
 
-  @doc "Counts sales matching the same `:date` filter as `list_sales/1`."
-  def count_sales(opts \\ []) do
+  @doc "Counts sales matching the same `:date` filter as `list_sales/2`."
+  def count_sales(%Scope{} = scope, opts \\ []) do
     Sale
-    |> filter_on_date(opts[:date])
+    |> for_store(scope)
+    |> filter_on_date(opts[:date], scope)
     |> Repo.aggregate(:count)
   end
 
-  defp filter_on_date(query, nil), do: query
+  defp filter_on_date(query, nil, _scope), do: query
 
-  defp filter_on_date(query, %Date{} = date) do
-    {start, finish} = day_range(date, date)
+  defp filter_on_date(query, %Date{} = date, scope) do
+    {start, finish} = LocalTime.day_range(date, date, scope.store)
     where(query, [s], s.inserted_at >= ^start and s.inserted_at <= ^finish)
   end
 
-  @doc "Gets a sale with its items (and their products) and cashier."
-  def get_sale!(id) do
+  @doc """
+  Gets a sale with its items (and their products), cashier and store. Raises
+  `Ecto.NoResultsError` if it belongs to another store than the scope's.
+  """
+  def get_sale!(%Scope{} = scope, id) do
     Sale
+    |> for_store(scope)
     |> Repo.get!(id)
-    |> Repo.preload([:user, items: :product])
+    |> Repo.preload([:user, :store, items: :product])
   end
 
   @doc "Returns `%{count: integer, total: Decimal}` for sales recorded today (shop-local)."
-  def sales_summary_today do
-    today = LocalTime.today()
-    {start, _finish} = day_range(today, today)
-
-    query = from s in Sale, where: s.inserted_at >= ^start and s.status == "completed"
+  def sales_summary_today(%Scope{} = scope) do
+    today = LocalTime.today(scope.store)
+    query = completed_sales(scope, today, today)
 
     %{
       count: Repo.aggregate(query, :count),
@@ -364,6 +398,16 @@ defmodule Zahlungs.Sales do
 
   ## Reporting
 
+  # Completed sales of the scope's store(s) within the inclusive range of
+  # shop-local dates. With a store, days start and end on that store's clock;
+  # across all stores, on the default one (see Zahlungs.LocalTime).
+  defp completed_sales(scope, %Date{} = date_from, %Date{} = date_to) do
+    {start, finish} = LocalTime.day_range(date_from, date_to, scope.store)
+
+    from s in for_store(Sale, scope),
+      where: s.status == "completed" and s.inserted_at >= ^start and s.inserted_at <= ^finish
+  end
+
   @doc """
   Sales report metrics for the inclusive date range (completed sales only).
 
@@ -371,13 +415,12 @@ defmodule Zahlungs.Sales do
   discount/tax), `:discount`, `:tax`, `:gross_sales` (sum of line totals),
   `:cogs` (cost of goods sold from the purchase-price snapshot), `:gross_profit`.
   """
-  def sales_report(%Date{} = date_from, %Date{} = date_to) do
-    {start, finish} = day_range(date_from, date_to)
+  def sales_report(%Scope{} = scope, %Date{} = date_from, %Date{} = date_to) do
+    sales = completed_sales(scope, date_from, date_to)
 
     totals =
       Repo.one(
-        from s in Sale,
-          where: s.status == "completed" and s.inserted_at >= ^start and s.inserted_at <= ^finish,
+        from s in sales,
           select: %{
             transactions: count(s.id),
             revenue: coalesce(sum(s.total), 0),
@@ -388,9 +431,8 @@ defmodule Zahlungs.Sales do
 
     items =
       Repo.one(
-        from i in SaleItem,
-          join: s in assoc(i, :sale),
-          where: s.status == "completed" and s.inserted_at >= ^start and s.inserted_at <= ^finish,
+        from s in sales,
+          join: i in assoc(s, :items),
           select: %{
             items_sold: coalesce(sum(i.quantity), 0),
             gross_sales: coalesce(sum(i.line_total), 0),
@@ -414,14 +456,11 @@ defmodule Zahlungs.Sales do
   end
 
   @doc "Top-selling products by quantity for the date range (completed sales)."
-  def top_products(%Date{} = date_from, %Date{} = date_to, limit \\ 10) do
-    {start, finish} = day_range(date_from, date_to)
-
+  def top_products(%Scope{} = scope, %Date{} = date_from, %Date{} = date_to, limit \\ 10) do
     Repo.all(
-      from i in SaleItem,
-        join: s in assoc(i, :sale),
+      from s in completed_sales(scope, date_from, date_to),
+        join: i in assoc(s, :items),
         left_join: p in assoc(i, :product),
-        where: s.status == "completed" and s.inserted_at >= ^start and s.inserted_at <= ^finish,
         group_by: [i.product_id, p.name],
         order_by: [desc: sum(i.quantity)],
         limit: ^limit,
@@ -434,15 +473,12 @@ defmodule Zahlungs.Sales do
   end
 
   @doc "Per-category breakdown (completed sales) for the date range: category, quantity, revenue."
-  def sales_by_category(%Date{} = date_from, %Date{} = date_to) do
-    {start, finish} = day_range(date_from, date_to)
-
+  def sales_by_category(%Scope{} = scope, %Date{} = date_from, %Date{} = date_to) do
     Repo.all(
-      from i in SaleItem,
-        join: s in assoc(i, :sale),
+      from s in completed_sales(scope, date_from, date_to),
+        join: i in assoc(s, :items),
         left_join: p in assoc(i, :product),
         left_join: c in assoc(p, :category),
-        where: s.status == "completed" and s.inserted_at >= ^start and s.inserted_at <= ^finish,
         group_by: c.name,
         order_by: [desc: sum(i.line_total)],
         select: %{
@@ -463,16 +499,12 @@ defmodule Zahlungs.Sales do
   snapshot taken when it was sold, so later changes to the product don't alter
   past periods.
   """
-  def consignment_settlement(%Date{} = date_from, %Date{} = date_to) do
-    {start, finish} = day_range(date_from, date_to)
-
+  def consignment_settlement(%Scope{} = scope, %Date{} = date_from, %Date{} = date_to) do
     Repo.all(
-      from i in SaleItem,
-        join: s in assoc(i, :sale),
+      from s in completed_sales(scope, date_from, date_to),
+        join: i in assoc(s, :items),
         join: sup in assoc(i, :supplier),
-        where:
-          s.status == "completed" and i.consignment == true and
-            s.inserted_at >= ^start and s.inserted_at <= ^finish,
+        where: i.consignment == true,
         group_by: [sup.id, sup.name],
         order_by: [desc: sum(i.line_total)],
         select: %{
@@ -496,18 +528,21 @@ defmodule Zahlungs.Sales do
   Consignment statement per supplier: what was sold and paid within the date
   range, plus the balance still owed as of `date_to`.
 
-  Each row has the period figures of `consignment_settlement/2` (`:qty_sold`,
+  Each row has the period figures of `consignment_settlement/3` (`:qty_sold`,
   `:revenue`, `:payable`, `:margin`), `:paid` (payments made in the range) and
   `:outstanding`. The outstanding balance is cumulative — everything payable up
   to `date_to` minus everything paid up to `date_to` — because a payment rarely
   falls in the same period as the sales it settles. Suppliers with no activity
   in the range are still listed while a balance remains.
+
+  With a store in the scope, only that store's sales and payments count; an
+  admin looking at all stores gets the supplier's balance across them.
   """
-  def consignment_statement(%Date{} = date_from, %Date{} = date_to) do
-    period = Map.new(consignment_settlement(date_from, date_to), &{&1.supplier_id, &1})
-    paid_in_period = Shifts.consignment_payments_by_supplier(date_from, date_to)
-    payable_to_date = consignment_payable_to_date(date_to)
-    paid_to_date = Shifts.consignment_payments_to_date(date_to)
+  def consignment_statement(%Scope{} = scope, %Date{} = date_from, %Date{} = date_to) do
+    period = Map.new(consignment_settlement(scope, date_from, date_to), &{&1.supplier_id, &1})
+    paid_in_period = Shifts.consignment_payments_by_supplier(scope, date_from, date_to)
+    payable_to_date = consignment_payable_to_date(scope, date_to)
+    paid_to_date = Shifts.consignment_payments_to_date(scope, date_to)
 
     zero = Decimal.new(0)
 
@@ -537,12 +572,12 @@ defmodule Zahlungs.Sales do
 
   # Everything payable to each supplier for consignment items sold up to (and
   # including) `date_to`, as `%{supplier_id => %{supplier: name, payable: Decimal}}`.
-  defp consignment_payable_to_date(%Date{} = date_to) do
-    {_start, finish} = day_range(date_to, date_to)
+  defp consignment_payable_to_date(scope, %Date{} = date_to) do
+    {_start, finish} = LocalTime.day_range(date_to, date_to, scope.store)
 
     Repo.all(
-      from i in SaleItem,
-        join: s in assoc(i, :sale),
+      from s in for_store(Sale, scope),
+        join: i in assoc(s, :items),
         join: sup in assoc(i, :supplier),
         where: s.status == "completed" and i.consignment == true and s.inserted_at <= ^finish,
         group_by: [sup.id, sup.name],
@@ -560,14 +595,12 @@ defmodule Zahlungs.Sales do
   defp to_int(n) when is_integer(n), do: n
 
   @doc "Daily breakdown (completed sales) for the date range: date, transactions, revenue."
-  def sales_by_day(%Date{} = date_from, %Date{} = date_to) do
-    {start, finish} = day_range(date_from, date_to)
-    offset = LocalTime.offset_seconds()
+  def sales_by_day(%Scope{} = scope, %Date{} = date_from, %Date{} = date_to) do
+    offset = LocalTime.offset_seconds(scope.store)
 
     # Group on the shop-local calendar day, not the UTC one.
     Repo.all(
-      from s in Sale,
-        where: s.status == "completed" and s.inserted_at >= ^start and s.inserted_at <= ^finish,
+      from s in completed_sales(scope, date_from, date_to),
         group_by: selected_as(:day),
         order_by: selected_as(:day),
         select: %{
@@ -583,13 +616,10 @@ defmodule Zahlungs.Sales do
   end
 
   @doc "Per-cashier breakdown (completed sales) for the date range: cashier, transactions, revenue."
-  def sales_by_cashier(%Date{} = date_from, %Date{} = date_to) do
-    {start, finish} = day_range(date_from, date_to)
-
+  def sales_by_cashier(%Scope{} = scope, %Date{} = date_from, %Date{} = date_to) do
     Repo.all(
-      from s in Sale,
+      from s in completed_sales(scope, date_from, date_to),
         left_join: u in assoc(s, :user),
-        where: s.status == "completed" and s.inserted_at >= ^start and s.inserted_at <= ^finish,
         group_by: [s.user_id, u.email],
         order_by: [desc: sum(s.total)],
         select: %{
@@ -600,7 +630,20 @@ defmodule Zahlungs.Sales do
     )
   end
 
-  defp day_range(date_from, date_to), do: LocalTime.day_range(date_from, date_to)
+  @doc "Per-store breakdown (completed sales) for the date range: store, transactions, revenue."
+  def sales_by_store(%Scope{} = scope, %Date{} = date_from, %Date{} = date_to) do
+    Repo.all(
+      from s in completed_sales(scope, date_from, date_to),
+        join: st in assoc(s, :store),
+        group_by: [st.id, st.name],
+        order_by: [desc: sum(s.total)],
+        select: %{
+          store: st.name,
+          transactions: count(s.id),
+          revenue: coalesce(sum(s.total), 0)
+        }
+    )
+  end
 
   ## Helpers
 

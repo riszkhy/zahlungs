@@ -12,14 +12,14 @@ defmodule ZahlungsWeb.ReportLive.Consignment do
 
   @impl true
   def mount(_params, _session, socket) do
-    today = Zahlungs.LocalTime.today()
+    today = Zahlungs.LocalTime.today(socket.assigns.current_scope.store)
     from = Date.beginning_of_month(today)
 
     {:ok,
      socket
      |> assign(:page_title, "Consignment Settlement")
      |> assign(from: Date.to_iso8601(from), to: Date.to_iso8601(today))
-     |> assign(:on_hand, Catalog.consignment_stock_on_hand())
+     |> assign(:on_hand, Catalog.consignment_stock_on_hand(socket.assigns.current_scope))
      |> load_report()}
   end
 
@@ -31,7 +31,7 @@ defmodule ZahlungsWeb.ReportLive.Consignment do
   defp load_report(socket) do
     with {:ok, from} <- Date.from_iso8601(socket.assigns.from),
          {:ok, to} <- Date.from_iso8601(socket.assigns.to) do
-      rows = Sales.consignment_statement(from, to)
+      rows = Sales.consignment_statement(socket.assigns.current_scope, from, to)
       assign(socket, settlement: rows, totals: totals(rows))
     else
       _ -> assign(socket, settlement: [], totals: zero_totals())

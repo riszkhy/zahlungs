@@ -85,7 +85,18 @@ defmodule ZahlungsWeb.ProductLive.FormComponent do
             id="selling-price-input"
             label="Selling price (auto from purchase + margin)"
           />
-          <.input field={@form[:stock]} type="number" label="Stock" min="0" required />
+          <%!-- Stock is per store: this is the stock of the store picked in the navbar. --%>
+          <.input
+            :if={@scope.store}
+            field={@form[:stock]}
+            type="number"
+            label={"Stock di #{@scope.store.name}"}
+            min="0"
+            required
+          />
+          <p :if={is_nil(@scope.store)} class="mt-2 text-sm text-amber-700">
+            Stok diatur per toko: pilih satu toko di menu atas untuk mengubahnya.
+          </p>
         </div>
 
         <.input
@@ -249,7 +260,7 @@ defmodule ZahlungsWeb.ProductLive.FormComponent do
   defp positive_number?(_), do: false
 
   defp save_product(socket, :edit, params) do
-    case Catalog.update_product(socket.assigns.product, params) do
+    case Catalog.update_product(socket.assigns.scope, socket.assigns.product, params) do
       {:ok, product} ->
         notify_parent({:saved, product})
 
@@ -264,7 +275,7 @@ defmodule ZahlungsWeb.ProductLive.FormComponent do
   end
 
   defp save_product(socket, :new, params) do
-    case Catalog.create_product(params) do
+    case Catalog.create_product(socket.assigns.scope, params) do
       {:ok, product} ->
         notify_parent({:saved, product})
 

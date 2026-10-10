@@ -223,6 +223,24 @@ Hooks.MoneyInput = {
   }
 }
 
+// Store form: "use my current location" fills the latitude/longitude inputs.
+Hooks.StoreLocation = {
+  mounted() {
+    this.el.querySelector("[data-use-my-location]").addEventListener("click", () => {
+      if (!navigator.geolocation) return
+      navigator.geolocation.getCurrentPosition(({coords}) => {
+        const set = (name, value) => {
+          const input = this.el.querySelector(`[name="store[${name}]"]`)
+          input.value = value
+          input.dispatchEvent(new Event("input", {bubbles: true}))
+        }
+        set("latitude", coords.latitude)
+        set("longitude", coords.longitude)
+      })
+    })
+  }
+}
+
 let csrfToken = document
   .querySelector("meta[name='csrf-token']")
   .getAttribute('content')
@@ -252,3 +270,37 @@ liveSocket.connect()
 // >> liveSocket.enableLatencySim(1000)  // enabled for duration of browser session
 // >> liveSocket.disableLatencySim()
 window.liveSocket = liveSocket
+
+// Login location (audit only): ask the browser where the device is and send it
+// along with the login form. Never blocks logging in: if permission is denied,
+// unavailable, or slow, the form goes out without a position.
+const loginForm = document.getElementById("login-form")
+
+if (loginForm && navigator.geolocation) {
+  let settled = false
+  let waitingToSubmit = false
+
+  const finish = () => {
+    settled = true
+    if (waitingToSubmit) loginForm.submit()
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    ({coords}) => {
+      document.getElementById("login-latitude").value = coords.latitude
+      document.getElementById("login-longitude").value = coords.longitude
+      document.getElementById("login-accuracy").value = coords.accuracy
+      finish()
+    },
+    finish,
+    {enableHighAccuracy: true, timeout: 5000, maximumAge: 60000}
+  )
+
+  // If the user submits before the position arrived, give it a moment.
+  loginForm.addEventListener("submit", (event) => {
+    if (settled || waitingToSubmit) return
+    event.preventDefault()
+    waitingToSubmit = true
+    setTimeout(() => { if (!settled) finish() }, 3000)
+  })
+}

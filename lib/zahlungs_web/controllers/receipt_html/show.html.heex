@@ -22,10 +22,13 @@
     </style>
   </head>
   <body>
-    <h1>Zahlungs POS</h1>
+    <h1>{@sale.store.name}</h1>
+    <p :if={@sale.store.address || @sale.store.phone} class="muted">
+      {@sale.store.address}<br :if={@sale.store.address && @sale.store.phone} />{@sale.store.phone}
+    </p>
     <p class="muted">
       {@sale.code}<br />
-      {Calendar.strftime(Zahlungs.LocalTime.to_local(@sale.inserted_at), "%d %b %Y %H:%M")}<br />
+      {Calendar.strftime(Zahlungs.LocalTime.to_local(@sale.inserted_at, @sale.store), "%d %b %Y %H:%M")}<br />
       Cashier: {@sale.user && @sale.user.email}
     </p>
 

@@ -6,6 +6,7 @@ defmodule ZahlungsWeb.CashierLiveTest do
   use ZahlungsWeb.ConnCase, async: true
 
   import Zahlungs.AccountsFixtures
+  import Zahlungs.StoresFixtures
   import Zahlungs.CatalogFixtures
   import Zahlungs.ShiftsFixtures
   import ZahlungsWeb.LiveDriver
@@ -29,7 +30,7 @@ defmodule ZahlungsWeb.CashierLiveTest do
 
     test "shows the cart once a shift is open", %{conn: conn} do
       user = user_fixture()
-      {:ok, _shift} = Zahlungs.Shifts.open_shift(user, 100_000)
+      {:ok, _shift} = Zahlungs.Shifts.open_shift(scope(user), 100_000)
 
       conn = conn |> log_in_user(user) |> get("/cashier")
       response = html_response(conn, 200)
@@ -192,7 +193,7 @@ defmodule ZahlungsWeb.CashierLiveTest do
 
       assert flash(socket, :error) == "Diskon harus antara 0 dan subtotal."
       assert is_nil(socket.assigns.last_sale)
-      assert Catalog.get_product!(product.id).stock == 10
+      assert stock_of(product) == 10
     end
   end
 
@@ -225,7 +226,7 @@ defmodule ZahlungsWeb.CashierLiveTest do
       assert Decimal.equal?(sale.total, Decimal.new("1500"))
       assert Decimal.equal?(sale.change_due, Decimal.new("500"))
       assert [%{quantity: 2}] = sale.items
-      assert Catalog.get_product!(product.id).stock == 8
+      assert stock_of(product) == 8
 
       # The cart is cleared for the next customer, the receipt stays up.
       assert socket.assigns.cart == []
@@ -244,18 +245,18 @@ defmodule ZahlungsWeb.CashierLiveTest do
 
       assert flash(socket, :error) == "Amount paid is less than the total."
       assert [_] = socket.assigns.cart
-      assert Catalog.get_product!(product.id).stock == 10
+      assert stock_of(product) == 10
     end
 
     test "is refused when the stock ran out after the item was added",
          %{socket: socket, product: product} do
-      {:ok, _} = Catalog.update_product(product, %{stock: 1})
+      {:ok, _} = Catalog.update_product(store_scope(), product, %{stock: 1})
 
       socket = event(socket, "checkout")
 
       assert flash(socket, :error) == "Insufficient stock for #{product.name}."
       assert is_nil(socket.assigns.last_sale)
-      assert Catalog.get_product!(product.id).stock == 1
+      assert stock_of(product) == 1
     end
 
     test "is refused when the shift was closed from another tab, and the screen catches up",
@@ -267,8 +268,11 @@ defmodule ZahlungsWeb.CashierLiveTest do
       assert flash(socket, :error) == "Shift belum dibuka atau sudah ditutup."
       assert is_nil(socket.assigns.shift)
       assert html(socket) =~ "Open shift"
-      assert Sales.list_sales(limit: 1000) |> Enum.filter(&(&1.user_id == user.id)) == []
-      assert Catalog.get_product!(product.id).stock == 10
+
+      assert Sales.list_sales(store_scope(), limit: 1000) |> Enum.filter(&(&1.user_id == user.id)) ==
+               []
+
+      assert stock_of(product) == 10
     end
   end
 
@@ -327,7 +331,7 @@ defmodule ZahlungsWeb.CashierLiveTest do
       assert is_nil(socket.assigns.shift)
       assert is_nil(Shifts.current_shift(user))
 
-      closed = Shifts.get_shift!(shift.id)
+      closed = Shifts.get_shift!(store_scope(), shift.id)
       assert closed.status == "closed"
       assert Decimal.equal?(closed.variance, Decimal.new("-500"))
       assert html(socket) =~ "Open shift"
@@ -341,7 +345,11 @@ defmodule ZahlungsWeb.CashierLiveTest do
 
       assert flash(socket, :error) == "Shift ini sudah ditutup."
       assert is_nil(socket.assigns.shift)
-      assert Decimal.equal?(Shifts.get_shift!(shift.id).counted_cash, Decimal.new("100000"))
+
+      assert Decimal.equal?(
+               Shifts.get_shift!(store_scope(), shift.id).counted_cash,
+               Decimal.new("100000")
+             )
     end
   end
 end

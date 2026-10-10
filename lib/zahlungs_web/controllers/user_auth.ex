@@ -10,6 +10,7 @@ defmodule ZahlungsWeb.UserAuth do
   import Phoenix.Controller
 
   alias Zahlungs.Accounts
+  alias Zahlungs.Scope
 
   # Make the remember me cookie valid for 60 days.
   # If you want bump or reduce this value, also change
@@ -97,7 +98,10 @@ defmodule ZahlungsWeb.UserAuth do
   def fetch_current_user(conn, _opts) do
     {user_token, conn} = ensure_user_token(conn)
     user = user_token && Accounts.get_user_by_session_token(user_token)
-    assign(conn, :current_user, user)
+
+    conn
+    |> assign(:current_user, user)
+    |> assign(:current_scope, Scope.for_user(user, get_session(conn, :store_id)))
   end
 
   defp ensure_user_token(conn) do
@@ -134,16 +138,34 @@ defmodule ZahlungsWeb.UserAuth do
   they use the application at all, here would be a good place.
   """
   def require_authenticated_user(conn, _opts) do
-    if conn.assigns[:current_user] do
-      conn
-    else
-      conn
-      |> put_flash(:error, "You must log in to access this page.")
-      |> maybe_store_return_to()
-      |> redirect(to: ~p"/users/log_in")
-      |> halt()
+    cond do
+      is_nil(conn.assigns[:current_user]) ->
+        conn
+        |> put_flash(:error, "You must log in to access this page.")
+        |> maybe_store_return_to()
+        |> redirect(to: ~p"/users/log_in")
+        |> halt()
+
+      # A cashier whose store was deactivated (or who has none) has nowhere to
+      # work: end the session instead of showing pages that need a store.
+      not Scope.usable?(conn.assigns[:current_scope] || Scope.for_user(conn.assigns.current_user)) ->
+        user_token = get_session(conn, :user_token)
+        user_token && Accounts.delete_session_token(user_token)
+
+        conn
+        |> renew_session()
+        |> delete_resp_cookie(@remember_me_cookie)
+        |> put_flash(:error, no_store_message())
+        |> redirect(to: ~p"/users/log_in")
+        |> halt()
+
+      true ->
+        conn
     end
   end
+
+  @doc "Shown to a cashier who has no active store to work in."
+  def no_store_message, do: "Akun Anda belum ditempatkan di toko aktif. Hubungi admin."
 
   @doc """
   Handles mounting and authenticating the current_user in LiveViews.
@@ -179,15 +201,27 @@ defmodule ZahlungsWeb.UserAuth do
   def on_mount(:ensure_authenticated, _params, session, socket) do
     socket = mount_current_user(socket, session)
 
-    if socket.assigns.current_user do
-      {:cont, socket}
-    else
-      socket =
-        socket
-        |> Phoenix.LiveView.put_flash(:error, "You must log in to access this page.")
-        |> Phoenix.LiveView.redirect(to: ~p"/users/log_in")
+    cond do
+      is_nil(socket.assigns.current_user) ->
+        socket =
+          socket
+          |> Phoenix.LiveView.put_flash(:error, "You must log in to access this page.")
+          |> Phoenix.LiveView.redirect(to: ~p"/users/log_in")
 
-      {:halt, socket}
+        {:halt, socket}
+
+      # The plug ends the session on the next full request; here it is enough
+      # to not mount a view that needs a store.
+      not Scope.usable?(socket.assigns.current_scope) ->
+        socket =
+          socket
+          |> Phoenix.LiveView.put_flash(:error, no_store_message())
+          |> Phoenix.LiveView.redirect(to: ~p"/users/log_in")
+
+        {:halt, socket}
+
+      true ->
+        {:cont, socket}
     end
   end
 
@@ -214,10 +248,15 @@ defmodule ZahlungsWeb.UserAuth do
   end
 
   defp mount_current_user(socket, session) do
-    Phoenix.Component.assign_new(socket, :current_user, fn ->
-      if user_token = session["user_token"] do
-        Accounts.get_user_by_session_token(user_token)
-      end
+    socket =
+      Phoenix.Component.assign_new(socket, :current_user, fn ->
+        if user_token = session["user_token"] do
+          Accounts.get_user_by_session_token(user_token)
+        end
+      end)
+
+    Phoenix.Component.assign_new(socket, :current_scope, fn ->
+      Scope.for_user(socket.assigns.current_user, session["store_id"])
     end)
   end
 

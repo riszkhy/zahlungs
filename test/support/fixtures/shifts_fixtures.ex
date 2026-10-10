@@ -7,7 +7,7 @@ defmodule Zahlungs.ShiftsFixtures do
 
   @doc "Opens a shift for the user. Sales can only be recorded on an open shift."
   def shift_fixture(user, opening_cash \\ 0) do
-    {:ok, shift} = Shifts.open_shift(user, opening_cash)
+    {:ok, shift} = Shifts.open_shift(Zahlungs.Scope.for_user(user), opening_cash)
     shift
   end
 

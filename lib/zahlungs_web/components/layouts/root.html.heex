@@ -47,7 +47,7 @@
         </button>
 
         <nav class="w-full md:w-auto hidden md:block" x-bind:class="{ hidden: !open }">
-          <.user_menu current_user={assigns[:current_user]} />
+          <.user_menu current_user={assigns[:current_user]} current_scope={assigns[:current_scope]} />
         </nav>
       </div>
     </header>

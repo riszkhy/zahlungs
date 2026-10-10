@@ -5,6 +5,7 @@ defmodule Zahlungs.ConsignmentTest do
   alias Zahlungs.Catalog.Supplier
 
   import Zahlungs.CatalogFixtures
+  import Zahlungs.StoresFixtures
   import Zahlungs.ShiftsFixtures
 
   describe "suppliers" do
@@ -29,7 +30,7 @@ defmodule Zahlungs.ConsignmentTest do
   describe "consignment product" do
     test "requires a supplier when marked as consignment" do
       assert {:error, changeset} =
-               Catalog.create_product(%{
+               Catalog.create_product(store_scope(), %{
                  name: "Titip A",
                  price: "1000",
                  stock: 5,
@@ -43,7 +44,7 @@ defmodule Zahlungs.ConsignmentTest do
       supplier = supplier_fixture()
 
       assert {:ok, product} =
-               Catalog.create_product(%{
+               Catalog.create_product(store_scope(), %{
                  name: "Titip A",
                  price: "1000",
                  stock: 5,
@@ -83,7 +84,7 @@ defmodule Zahlungs.ConsignmentTest do
       # dev/test share one DB, so scope assertions to this test's supplier.
       row =
         Enum.find(
-          Sales.consignment_settlement(today, today),
+          Sales.consignment_settlement(store_scope(), today, today),
           &(&1.supplier_id == ctx.supplier.id)
         )
 
@@ -107,7 +108,7 @@ defmodule Zahlungs.ConsignmentTest do
       today = Zahlungs.LocalTime.today()
 
       refute Enum.any?(
-               Sales.consignment_settlement(today, today),
+               Sales.consignment_settlement(store_scope(), today, today),
                &(&1.supplier_id == ctx.supplier.id)
              )
     end
@@ -128,13 +129,17 @@ defmodule Zahlungs.ConsignmentTest do
           amount_paid: "2000"
         })
 
-      {:ok, _} = Catalog.update_product(ctx.product, %{consignment: false, supplier_id: nil})
+      {:ok, _} =
+        Catalog.update_product(store_scope(), ctx.product, %{consignment: false, supplier_id: nil})
 
       {:ok, _} =
-        Catalog.update_product(regular, %{consignment: true, supplier_id: later_supplier.id})
+        Catalog.update_product(store_scope(), regular, %{
+          consignment: true,
+          supplier_id: later_supplier.id
+        })
 
       today = Zahlungs.LocalTime.today()
-      rows = Sales.consignment_settlement(today, today)
+      rows = Sales.consignment_settlement(store_scope(), today, today)
 
       assert %{qty_sold: 3} = Enum.find(rows, &(&1.supplier_id == ctx.supplier.id))
       refute Enum.any?(rows, &(&1.supplier_id == later_supplier.id))
@@ -146,7 +151,12 @@ defmodule Zahlungs.ConsignmentTest do
           amount_paid: "3000"
         })
 
-      row = Enum.find(Catalog.consignment_stock_on_hand(), &(&1.supplier_id == ctx.supplier.id))
+      row =
+        Enum.find(
+          Catalog.consignment_stock_on_hand(store_scope()),
+          &(&1.supplier_id == ctx.supplier.id)
+        )
+
       assert row.supplier == ctx.supplier.name
       # 10 - 3 sold = 7 units left; value at 700 = 4900
       assert row.units == 7
@@ -172,7 +182,11 @@ defmodule Zahlungs.ConsignmentTest do
     end
 
     defp statement_row(from, to, supplier),
-      do: Enum.find(Sales.consignment_statement(from, to), &(&1.supplier_id == supplier.id))
+      do:
+        Enum.find(
+          Sales.consignment_statement(store_scope(), from, to),
+          &(&1.supplier_id == supplier.id)
+        )
 
     defp pay(user, supplier, amount) do
       {:ok, _} =

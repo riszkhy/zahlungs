@@ -33,7 +33,7 @@ defmodule ZahlungsWeb.SalesLive.Index do
   defp apply_action(socket, :show, %{"id" => id}) do
     socket
     |> assign(:page_title, "Sale detail")
-    |> assign(:sale, Sales.get_sale!(id))
+    |> assign(:sale, Sales.get_sale!(socket.assigns.current_scope, id))
   end
 
   @impl true
@@ -47,7 +47,7 @@ defmodule ZahlungsWeb.SalesLive.Index do
 
   def handle_event("return", %{"id" => id}, socket) do
     if socket.assigns.current_user.role == "admin" do
-      sale = Sales.get_sale!(id)
+      sale = Sales.get_sale!(socket.assigns.current_scope, id)
 
       case Sales.return_sale(sale, socket.assigns.current_user) do
         {:ok, _returned} ->
@@ -69,7 +69,8 @@ defmodule ZahlungsWeb.SalesLive.Index do
   end
 
   def handle_event("prompt_void", %{"id" => id}, socket) do
-    {:noreply, assign(socket, voiding: Sales.get_sale!(id), void_reason: "")}
+    {:noreply,
+     assign(socket, voiding: Sales.get_sale!(socket.assigns.current_scope, id), void_reason: "")}
   end
 
   def handle_event("cancel_void", _params, socket) do
@@ -123,12 +124,13 @@ defmodule ZahlungsWeb.SalesLive.Index do
   end
 
   defp load_sales(socket) do
+    scope = socket.assigns.current_scope
     date = parse_date(socket.assigns.date)
-    total = Sales.count_sales(date: date)
+    total = Sales.count_sales(scope, date: date)
     total_pages = max(1, ceil(total / @per_page))
     page = min(socket.assigns.page, total_pages)
 
-    sales = Sales.list_sales(date: date, limit: @per_page, offset: (page - 1) * @per_page)
+    sales = Sales.list_sales(scope, date: date, limit: @per_page, offset: (page - 1) * @per_page)
 
     assign(socket, sales: sales, total: total, total_pages: total_pages, page: page)
   end
@@ -164,7 +166,8 @@ defmodule ZahlungsWeb.SalesLive.Index do
 
     <.table id="sales" rows={@sales}>
       <:col :let={sale} label="Code">{sale.code}</:col>
-      <:col :let={sale} label="Date">{Calendar.strftime(Zahlungs.LocalTime.to_local(sale.inserted_at), "%d %b %Y %H:%M")}</:col>
+      <:col :let={sale} label="Date">{Calendar.strftime(Zahlungs.LocalTime.to_local(sale.inserted_at, sale.store), "%d %b %Y %H:%M")}</:col>
+      <:col :let={sale} :if={is_nil(@current_scope.store)} label="Store">{sale.store.name}</:col>
       <:col :let={sale} label="Cashier">{sale.user && sale.user.email}</:col>
       <:col :let={sale} label="Items">{length(sale.items)}</:col>
       <:col :let={sale} label="Total">{format_money(sale.total)}</:col>

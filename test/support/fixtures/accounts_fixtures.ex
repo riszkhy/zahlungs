@@ -14,13 +14,27 @@ defmodule Zahlungs.AccountsFixtures do
     })
   end
 
+  @doc """
+  A cashier in the test's default store. Pass `store_id:` for another store, or
+  `store_id: nil` for a user without one.
+  """
   def user_fixture(attrs \\ %{}) do
+    {store_id, attrs} =
+      attrs
+      |> Map.new()
+      |> Map.pop_lazy(:store_id, fn -> Zahlungs.StoresFixtures.default_store().id end)
+
     {:ok, user} =
       attrs
       |> valid_user_attributes()
       |> Zahlungs.Accounts.register_user()
 
-    user
+    if store_id do
+      {:ok, user} = Zahlungs.Accounts.set_user_store(user, store_id)
+      user
+    else
+      user
+    end
   end
 
   def extract_user_token(fun) do

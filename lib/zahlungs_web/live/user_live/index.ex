@@ -42,6 +42,20 @@ defmodule ZahlungsWeb.UserLive.Index do
     end
   end
 
+  def handle_event("set_store", %{"user_id" => id, "store_id" => store_id}, socket) do
+    user = Accounts.get_user!(to_int(id))
+    store_id = if store_id in [nil, ""], do: nil, else: to_int(store_id)
+
+    case Accounts.set_user_store(user, store_id) do
+      {:ok, _user} ->
+        {:noreply, socket |> put_flash(:info, "#{user.email} dipindahkan.") |> load_users()}
+
+      {:error, changeset} ->
+        {message, _opts} = Keyword.fetch!(changeset.errors, :store_id)
+        {:noreply, socket |> put_flash(:error, message) |> load_users()}
+    end
+  end
+
   def handle_event("toggle_confirmed", %{"id" => id}, socket) do
     user = Accounts.get_user!(to_int(id))
     {:ok, updated} = Accounts.set_user_confirmed(user, is_nil(user.confirmed_at))
@@ -136,7 +150,21 @@ defmodule ZahlungsWeb.UserLive.Index do
     """
   end
 
-  defp load_users(socket), do: assign(socket, :users, Accounts.list_users())
+  defp load_users(socket) do
+    assign(socket,
+      users: Accounts.list_users(),
+      store_options: Zahlungs.Stores.store_options()
+    )
+  end
+
+  # A user still pointing at a deactivated store keeps it in their own list.
+  defp store_options_for(%{store: %{id: id, name: name}}, options) do
+    if Enum.any?(options, fn {_name, option_id} -> option_id == id end),
+      do: options,
+      else: [{"#{name} (nonaktif)", id} | options]
+  end
+
+  defp store_options_for(_user, options), do: options
 
   defp to_int(id) when is_integer(id), do: id
   defp to_int(id) when is_binary(id), do: String.to_integer(id)
@@ -161,6 +189,15 @@ defmodule ZahlungsWeb.UserLive.Index do
       <:col :let={user} label="Email">
         {user.email}
         <span :if={user.id == @current_user.id} class="text-xs text-gray-400">(you)</span>
+      </:col>
+      <:col :let={user} label="Store">
+        <form phx-change="set_store" id={"user-store-#{user.id}"}>
+          <input type="hidden" name="user_id" value={user.id} />
+          <select name="store_id" aria-label={"Toko untuk #{user.email}"} class="form-control text-sm py-1">
+            <option :if={user.role == "admin" or is_nil(user.store_id)} value="">—</option>
+            {Phoenix.HTML.Form.options_for_select(store_options_for(user, @store_options), user.store_id)}
+          </select>
+        </form>
       </:col>
       <:col :let={user} label="Role">
         <span class={[

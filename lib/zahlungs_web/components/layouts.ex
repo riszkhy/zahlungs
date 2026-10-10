@@ -13,9 +13,45 @@ defmodule ZahlungsWeb.Layouts do
   embed_templates "layouts/*"
 
   @doc """
+  The store the user is working in. An admin gets a switcher (any active store,
+  or all of them); a cashier just sees the name of their store.
+  """
+  attr :scope, :map, required: true
+
+  def store_switcher(assigns) do
+    assigns = assign(assigns, :admin?, Zahlungs.Scope.admin?(assigns.scope))
+
+    ~H"""
+    <.form :if={@admin?} for={%{}} action={~p"/stores/select"} method="post" class="inline">
+      <input type="hidden" name="return_to" value="" />
+      <select
+        name="store_id"
+        aria-label="Toko aktif"
+        onchange="this.form.return_to.value = window.location.pathname; this.form.submit()"
+        class="rounded border-0 bg-white/15 py-1 pl-2 pr-7 text-sm text-white focus:ring-1 focus:ring-white"
+      >
+        <option value="all" selected={is_nil(@scope.store)} class="text-gray-800">Semua toko</option>
+        <option
+          :for={store <- Zahlungs.Stores.list_active_stores()}
+          value={store.id}
+          selected={@scope.store && @scope.store.id == store.id}
+          class="text-gray-800"
+        >
+          {store.name}
+        </option>
+      </select>
+    </.form>
+    <span :if={not @admin? and @scope.store} class="rounded bg-white/15 px-2 py-1 text-white">
+      {@scope.store.name}
+    </span>
+    """
+  end
+
+  @doc """
   Renders the navigation user menu shown in the root layout.
   """
   attr :current_user, :map, default: nil
+  attr :current_scope, :map, default: nil
 
   def user_menu(assigns) do
     ~H"""
@@ -35,6 +71,9 @@ defmodule ZahlungsWeb.Layouts do
         <.link :if={@current_user.role == "admin"} href={~p"/admin/users"} class="text-white/90 hover:text-white hover:underline">
           Users
         </.link>
+        <.link :if={@current_user.role == "admin"} href={~p"/admin/stores"} class="text-white/90 hover:text-white hover:underline">
+          Stores
+        </.link>
         <.link :if={@current_user.role == "admin"} href={~p"/admin/suppliers"} class="text-white/90 hover:text-white hover:underline">
           Suppliers
         </.link>
@@ -47,6 +86,7 @@ defmodule ZahlungsWeb.Layouts do
         <.link :if={@current_user.role == "admin"} href={~p"/reports/consignment"} class="text-white/90 hover:text-white hover:underline">
           Consignment
         </.link>
+        <.store_switcher :if={@current_scope} scope={@current_scope} />
         <.link href={~p"/users/settings"} class="text-white/90 hover:text-white hover:underline">Profile</.link>
         <span class="hidden md:inline text-white/70">{@current_user.email}</span>
         <.form for={%{}} action={~p"/users/log_out"} method="delete" class="inline">

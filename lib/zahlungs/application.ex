@@ -23,6 +23,8 @@ defmodule Zahlungs.Application do
       ZahlungsWeb.Telemetry,
       # Start the PubSub system
       {Phoenix.PubSub, name: Zahlungs.PubSub},
+      # Counts failed logins to slow down password guessing
+      ZahlungsWeb.LoginThrottle,
       # Start the Endpoint (http/https)
       ZahlungsWeb.Endpoint
       # Start a worker by calling: Zahlungs.Worker.start_link(arg)
@@ -31,6 +33,12 @@ defmodule Zahlungs.Application do
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options
+    # Prunes old login-log rows; off in tests, which own their database sandbox.
+    children =
+      if Application.get_env(:zahlungs, :prune_login_log, true),
+        do: children ++ [Zahlungs.Accounts.LoginPruner],
+        else: children
+
     opts = [strategy: :one_for_one, name: Zahlungs.Supervisor]
     Supervisor.start_link(children, opts)
   end

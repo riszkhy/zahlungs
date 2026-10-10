@@ -15,6 +15,19 @@ alias Zahlungs.Accounts.User
 alias Zahlungs.Repo
 
 defmodule Seeds do
+  @doc "The store seeded cashiers and stock go into: the first active one, created if none exists."
+  def store do
+    case Zahlungs.Stores.default_store() do
+      nil ->
+        {:ok, store} = Zahlungs.Stores.create_store(%{name: "Toko Utama", code: "TU"})
+        IO.puts("Seeded store: Toko Utama")
+        store
+
+      store ->
+        store
+    end
+  end
+
   @doc "Idempotently create a confirmed user with the given role."
   def ensure_user(email, password, role, name) do
     case Accounts.get_user_by_email(email) do
@@ -23,6 +36,8 @@ defmodule Seeds do
 
         user =
           if role == "cashier" do
+            # A cashier works in a store and can't log in without one.
+            {:ok, user} = Accounts.set_user_store(user, store().id)
             user
           else
             {:ok, user} = Accounts.set_user_role(user, role)
@@ -94,7 +109,8 @@ defmodule CatalogSeeds do
   def ensure_product(attrs) do
     case Repo.get_by(Product, sku: attrs.sku) do
       nil ->
-        {:ok, _} = Catalog.create_product(attrs)
+        # Stock is per store: the sample stock goes into the seed store.
+        {:ok, _} = Catalog.create_product(Zahlungs.Scope.for_store(Seeds.store()), attrs)
         IO.puts("Seeded product: #{attrs.sku}")
 
       _existing ->

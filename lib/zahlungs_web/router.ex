@@ -86,6 +86,8 @@ defmodule ZahlungsWeb.Router do
   scope "/", ZahlungsWeb do
     pipe_through [:browser, :require_authenticated_user, :require_admin_user]
 
+    post "/stores/select", StoreSelectionController, :update
+
     live_session :require_admin_user,
       on_mount: [{ZahlungsWeb.UserAuth, :ensure_admin}] do
       live "/products", ProductLive.Index, :index
@@ -98,6 +100,11 @@ defmodule ZahlungsWeb.Router do
 
       live "/admin/users", UserLive.Index, :index
       live "/admin/users/new", UserLive.Index, :new
+
+      live "/admin/stores", StoreLive.Index, :index
+      live "/admin/stores/new", StoreLive.Index, :new
+      live "/admin/stores/:id/edit", StoreLive.Index, :edit
+      live "/admin/logins", LoginLive.Index, :index
 
       live "/admin/suppliers", SupplierLive.Index, :index
       live "/admin/suppliers/new", SupplierLive.Index, :new

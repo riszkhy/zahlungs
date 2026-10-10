@@ -28,7 +28,12 @@ defmodule Zahlungs.CatalogFixtures do
         stock: 10
       })
 
-    {:ok, product} = Catalog.create_product(attrs)
+    {:ok, product} = Catalog.create_product(Zahlungs.StoresFixtures.store_scope(), attrs)
     product
+  end
+
+  @doc "Units of the product on hand in a store (the test's default store unless given)."
+  def stock_of(product, store \\ nil) do
+    Catalog.get_product!(Zahlungs.StoresFixtures.store_scope(store), product.id).stock
   end
 end

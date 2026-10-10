@@ -5,6 +5,7 @@ defmodule Zahlungs.CatalogTest do
   alias Zahlungs.Catalog.{Category, Product}
 
   import Zahlungs.CatalogFixtures
+  import Zahlungs.StoresFixtures
 
   describe "categories" do
     test "create_category/1 with valid data creates a category" do
@@ -47,7 +48,7 @@ defmodule Zahlungs.CatalogTest do
   describe "products" do
     test "create_product/1 with valid data defaults to active" do
       assert {:ok, %Product{} = product} =
-               Catalog.create_product(%{
+               Catalog.create_product(store_scope(), %{
                  sku: "A1",
                  name: "Widget",
                  price: Decimal.new("5"),
@@ -58,7 +59,7 @@ defmodule Zahlungs.CatalogTest do
     end
 
     test "create_product/1 requires name (SKU is auto-generated)" do
-      assert {:error, changeset} = Catalog.create_product(%{price: 1, stock: 1})
+      assert {:error, changeset} = Catalog.create_product(store_scope(), %{price: 1, stock: 1})
       errors = errors_on(changeset)
       assert "can't be blank" in errors.name
       refute Map.has_key?(errors, :sku)
@@ -68,14 +69,14 @@ defmodule Zahlungs.CatalogTest do
       product_fixture(sku: "DUP1")
 
       assert {:error, changeset} =
-               Catalog.create_product(%{sku: "DUP1", name: "Y", price: 1, stock: 1})
+               Catalog.create_product(store_scope(), %{sku: "DUP1", name: "Y", price: 1, stock: 1})
 
       assert %{sku: ["has already been taken"]} = errors_on(changeset)
     end
 
     test "create_product/1 rejects negative price and stock" do
       assert {:error, changeset} =
-               Catalog.create_product(%{sku: "N1", name: "Z", price: -1, stock: -1})
+               Catalog.create_product(store_scope(), %{sku: "N1", name: "Z", price: -1, stock: -1})
 
       errors = errors_on(changeset)
       assert "must be greater than or equal to 0" in errors.price
@@ -84,7 +85,7 @@ defmodule Zahlungs.CatalogTest do
 
     test "create_product/1 stores purchase price and margin" do
       {:ok, product} =
-        Catalog.create_product(%{
+        Catalog.create_product(store_scope(), %{
           sku: unique_sku(),
           name: "Widget",
           price: Decimal.new("1200"),
@@ -99,7 +100,7 @@ defmodule Zahlungs.CatalogTest do
 
     test "create_product/1 rejects negative purchase price and margin" do
       assert {:error, changeset} =
-               Catalog.create_product(%{
+               Catalog.create_product(store_scope(), %{
                  sku: unique_sku(),
                  name: "Z",
                  price: 1,
@@ -117,10 +118,10 @@ defmodule Zahlungs.CatalogTest do
       product = product_fixture(name: "Coca Cola", sku: "COKE-1")
       _other = product_fixture(name: "Water", sku: "WTR-1")
 
-      assert [found] = Catalog.list_products(search: "coca")
+      assert [found] = Catalog.list_products(store_scope(), search: "coca")
       assert found.id == product.id
 
-      assert [found2] = Catalog.list_products(search: "coke")
+      assert [found2] = Catalog.list_products(store_scope(), search: "coke")
       assert found2.id == product.id
     end
 
@@ -129,7 +130,7 @@ defmodule Zahlungs.CatalogTest do
       product = product_fixture(category_id: category.id)
       _other = product_fixture()
 
-      assert [found] = Catalog.list_products(category_id: category.id)
+      assert [found] = Catalog.list_products(store_scope(), category_id: category.id)
       assert found.id == product.id
       assert found.category.id == category.id
     end
@@ -138,8 +139,8 @@ defmodule Zahlungs.CatalogTest do
       inactive = product_fixture()
       {:ok, _} = Catalog.set_product_active(inactive, false)
 
-      active_ids = Catalog.list_products(active: true) |> Enum.map(& &1.id)
-      inactive_ids = Catalog.list_products(active: false) |> Enum.map(& &1.id)
+      active_ids = Catalog.list_products(store_scope(), active: true) |> Enum.map(& &1.id)
+      inactive_ids = Catalog.list_products(store_scope(), active: false) |> Enum.map(& &1.id)
 
       refute inactive.id in active_ids
       assert inactive.id in inactive_ids
@@ -156,8 +157,8 @@ defmodule Zahlungs.CatalogTest do
       assert deleted.deleted_at
 
       # Excluded from all queries...
-      assert_raise Ecto.NoResultsError, fn -> Catalog.get_product!(product.id) end
-      refute product.id in Enum.map(Catalog.list_products(), & &1.id)
+      assert_raise Ecto.NoResultsError, fn -> Catalog.get_product!(store_scope(), product.id) end
+      refute product.id in Enum.map(Catalog.list_products(store_scope()), & &1.id)
 
       # ...but the row still exists in the database.
       assert Zahlungs.Repo.get(Zahlungs.Catalog.Product, product.id)
@@ -167,7 +168,7 @@ defmodule Zahlungs.CatalogTest do
       _high = product_fixture(stock: 50)
       low = product_fixture(stock: 2)
 
-      low_stock = Catalog.list_low_stock_products(5)
+      low_stock = Catalog.list_low_stock_products(store_scope(), 5)
       assert low.id in Enum.map(low_stock, & &1.id)
       refute Enum.any?(low_stock, &(&1.stock > 5))
     end
@@ -176,7 +177,7 @@ defmodule Zahlungs.CatalogTest do
       in_stock = product_fixture(stock: 5)
       out = product_fixture(stock: 0)
 
-      ids = Catalog.list_products(in_stock: true) |> Enum.map(& &1.id)
+      ids = Catalog.list_products(store_scope(), in_stock: true) |> Enum.map(& &1.id)
       assert in_stock.id in ids
       refute out.id in ids
     end
@@ -187,19 +188,19 @@ defmodule Zahlungs.CatalogTest do
       product_fixture(category_id: category.id)
       _other = product_fixture()
 
-      assert Catalog.count_products(category_id: category.id) == 2
+      assert Catalog.count_products(store_scope(), category_id: category.id) == 2
     end
 
     test "list_products/1 supports limit and offset for pagination" do
       category = category_fixture()
       for i <- 1..5, do: product_fixture(category_id: category.id, name: "P#{i}")
 
-      page1 = Catalog.list_products(category_id: category.id, limit: 2, offset: 0)
-      page2 = Catalog.list_products(category_id: category.id, limit: 2, offset: 2)
+      page1 = Catalog.list_products(store_scope(), category_id: category.id, limit: 2, offset: 0)
+      page2 = Catalog.list_products(store_scope(), category_id: category.id, limit: 2, offset: 2)
 
       assert length(page1) == 2
       assert length(page2) == 2
-      assert Catalog.count_products(category_id: category.id) == 5
+      assert Catalog.count_products(store_scope(), category_id: category.id) == 5
       # Distinct pages
       assert MapSet.disjoint?(
                MapSet.new(Enum.map(page1, & &1.id)),
@@ -215,7 +216,7 @@ defmodule Zahlungs.CatalogTest do
 
       out = product_fixture(stock: 0, price: Decimal.new("5000"))
 
-      report = Catalog.stock_report(5)
+      report = Catalog.stock_report(store_scope(), 5)
 
       assert report.products >= 2
       assert Decimal.gt?(report.cost_value, Decimal.new("0"))
@@ -252,7 +253,12 @@ defmodule Zahlungs.CatalogTest do
 
       # creating a product without a SKU auto-generates it
       {:ok, product} =
-        Catalog.create_product(%{name: "A", price: 1, stock: 1, category_id: category.id})
+        Catalog.create_product(store_scope(), %{
+          name: "A",
+          price: 1,
+          stock: 1,
+          category_id: category.id
+        })
 
       assert product.sku == sku1
 
@@ -271,7 +277,11 @@ defmodule Zahlungs.CatalogTest do
       product = product_fixture(barcode: barcode)
 
       assert product.barcode == barcode
-      assert product.id in Enum.map(Catalog.list_products(search: barcode), & &1.id)
+
+      assert product.id in Enum.map(
+               Catalog.list_products(store_scope(), search: barcode),
+               & &1.id
+             )
     end
 
     test "barcode is unique when present" do
@@ -279,14 +289,28 @@ defmodule Zahlungs.CatalogTest do
       product_fixture(barcode: barcode)
 
       assert {:error, changeset} =
-               Catalog.create_product(%{name: "Dup", price: 1, stock: 1, barcode: barcode})
+               Catalog.create_product(store_scope(), %{
+                 name: "Dup",
+                 price: 1,
+                 stock: 1,
+                 barcode: barcode
+               })
 
       assert %{barcode: ["has already been taken"]} = errors_on(changeset)
     end
 
     test "blank barcodes are stored as nil and may repeat" do
-      assert {:ok, a} = Catalog.create_product(%{name: "A", price: 1, stock: 1, barcode: ""})
-      assert {:ok, b} = Catalog.create_product(%{name: "B", price: 1, stock: 1, barcode: "   "})
+      assert {:ok, a} =
+               Catalog.create_product(store_scope(), %{name: "A", price: 1, stock: 1, barcode: ""})
+
+      assert {:ok, b} =
+               Catalog.create_product(store_scope(), %{
+                 name: "B",
+                 price: 1,
+                 stock: 1,
+                 barcode: "   "
+               })
+
       assert is_nil(a.barcode)
       assert is_nil(b.barcode)
     end
@@ -297,8 +321,8 @@ defmodule Zahlungs.CatalogTest do
       barcode = "899#{System.unique_integer([:positive])}"
       product = product_fixture(barcode: barcode)
 
-      assert Catalog.get_product_by_code(barcode).id == product.id
-      assert Catalog.get_product_by_code(product.sku).id == product.id
+      assert Catalog.get_product_by_code(store_scope(), barcode).id == product.id
+      assert Catalog.get_product_by_code(store_scope(), product.sku).id == product.id
     end
 
     test "ignores inactive products, unknown and blank codes" do
@@ -306,9 +330,16 @@ defmodule Zahlungs.CatalogTest do
       product = product_fixture(barcode: barcode)
       {:ok, _} = Catalog.set_product_active(product, false)
 
-      assert is_nil(Catalog.get_product_by_code(barcode))
-      assert is_nil(Catalog.get_product_by_code("nope-#{System.unique_integer([:positive])}"))
-      assert is_nil(Catalog.get_product_by_code(""))
+      assert is_nil(Catalog.get_product_by_code(store_scope(), barcode))
+
+      assert is_nil(
+               Catalog.get_product_by_code(
+                 store_scope(),
+                 "nope-#{System.unique_integer([:positive])}"
+               )
+             )
+
+      assert is_nil(Catalog.get_product_by_code(store_scope(), ""))
     end
   end
 

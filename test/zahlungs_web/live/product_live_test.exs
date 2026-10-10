@@ -8,6 +8,7 @@ defmodule ZahlungsWeb.ProductLiveTest do
   use ZahlungsWeb.ConnCase, async: true
 
   import Zahlungs.AccountsFixtures
+  import Zahlungs.StoresFixtures
   import Zahlungs.CatalogFixtures
   import ZahlungsWeb.LiveDriver
 
@@ -85,10 +86,10 @@ defmodule ZahlungsWeb.ProductLiveTest do
     test "toggle_active deactivates and reactivates a product",
          %{socket: socket, product: product} do
       socket = event(socket, "toggle_active", %{"id" => product.id})
-      refute Catalog.get_product!(product.id).active
+      refute Catalog.get_product!(store_scope(), product.id).active
 
       event(socket, "toggle_active", %{"id" => product.id})
-      assert Catalog.get_product!(product.id).active
+      assert Catalog.get_product!(store_scope(), product.id).active
     end
 
     test "delete removes the product from the list but keeps its row for history",

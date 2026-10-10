@@ -13,13 +13,14 @@ defmodule ZahlungsWeb.HomeLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    summary = Sales.sales_summary_today()
-    low_stock_products = Catalog.list_low_stock_products(@low_stock_threshold)
+    scope = socket.assigns.current_scope
+    summary = Sales.sales_summary_today(scope)
+    low_stock_products = Catalog.list_low_stock_products(scope, @low_stock_threshold)
 
     {:ok,
      socket
      |> assign(:page_title, "Home")
-     |> assign(:active_products, Catalog.count_products(active: true))
+     |> assign(:active_products, Catalog.count_products(scope, active: true))
      |> assign(:low_stock_products, low_stock_products)
      |> assign(:low_stock, length(low_stock_products))
      |> assign(:categories, length(Catalog.list_categories()))

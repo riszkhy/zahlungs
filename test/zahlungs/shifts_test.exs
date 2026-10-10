@@ -4,6 +4,7 @@ defmodule Zahlungs.ShiftsTest do
   alias Zahlungs.{Shifts, Sales}
 
   import Zahlungs.AccountsFixtures
+  import Zahlungs.StoresFixtures
   import Zahlungs.CatalogFixtures
   import Zahlungs.ShiftsFixtures
 
@@ -11,7 +12,7 @@ defmodule Zahlungs.ShiftsTest do
     user = user_fixture()
     assert is_nil(Shifts.current_shift(user))
 
-    assert {:ok, shift} = Shifts.open_shift(user, "100000")
+    assert {:ok, shift} = Shifts.open_shift(scope(user), "100000")
     assert shift.status == "open"
     assert Decimal.equal?(shift.opening_cash, Decimal.new("100000"))
     assert Shifts.current_shift(user).id == shift.id
@@ -19,14 +20,14 @@ defmodule Zahlungs.ShiftsTest do
 
   test "cannot open a second shift while one is open" do
     user = user_fixture()
-    {:ok, _} = Shifts.open_shift(user, 100_000)
-    assert {:error, :already_open} = Shifts.open_shift(user, 50_000)
+    {:ok, _} = Shifts.open_shift(scope(user), 100_000)
+    assert {:error, :already_open} = Shifts.open_shift(scope(user), 50_000)
   end
 
   test "close_shift/3 computes expected cash and variance" do
     user = user_fixture()
     product = product_fixture(price: Decimal.new("1000"), stock: 10)
-    {:ok, shift} = Shifts.open_shift(user, "100000")
+    {:ok, shift} = Shifts.open_shift(scope(user), "100000")
 
     {:ok, _} =
       Sales.create_sale(user, [%{product_id: product.id, quantity: 2}], %{
@@ -43,14 +44,14 @@ defmodule Zahlungs.ShiftsTest do
 
   test "cannot close an already-closed shift" do
     user = user_fixture()
-    {:ok, shift} = Shifts.open_shift(user, 0)
+    {:ok, shift} = Shifts.open_shift(scope(user), 0)
     {:ok, closed} = Shifts.close_shift(shift, 0)
     assert {:error, :not_open} = Shifts.close_shift(closed, 0)
   end
 
   test "a stale `open` struct cannot close the shift again or add cash movements" do
     user = user_fixture()
-    {:ok, shift} = Shifts.open_shift(user, 0)
+    {:ok, shift} = Shifts.open_shift(scope(user), 0)
     {:ok, closed} = Shifts.close_shift(shift, "500")
 
     # `shift` still says "open", as it would in a cashier screen left open elsewhere.
@@ -59,27 +60,31 @@ defmodule Zahlungs.ShiftsTest do
     assert {:error, :not_open} =
              Shifts.add_cash_movement(shift, %{"category" => "expense", "amount" => "100"})
 
-    assert Decimal.equal?(Shifts.get_shift!(shift.id).counted_cash, closed.counted_cash)
+    assert Decimal.equal?(
+             Shifts.get_shift!(store_scope(), shift.id).counted_cash,
+             closed.counted_cash
+           )
+
     assert Shifts.list_cash_movements(shift) == []
   end
 
   test "a user can open a new shift after closing the previous one" do
     user = user_fixture()
-    {:ok, first} = Shifts.open_shift(user, 0)
+    {:ok, first} = Shifts.open_shift(scope(user), 0)
     {:ok, _} = Shifts.close_shift(first, 0)
 
-    assert {:ok, second} = Shifts.open_shift(user, 0)
+    assert {:ok, second} = Shifts.open_shift(scope(user), 0)
     assert Shifts.current_shift(user).id == second.id
   end
 
   test "open_shift/2 returns the changeset for an invalid opening cash" do
-    assert {:error, %Ecto.Changeset{}} = Shifts.open_shift(user_fixture(), "-1")
+    assert {:error, %Ecto.Changeset{}} = Shifts.open_shift(scope(user_fixture()), "-1")
   end
 
   test "expected_cash and summary count only cash sales" do
     user = user_fixture()
     product = product_fixture(price: Decimal.new("1000"), stock: 10)
-    {:ok, shift} = Shifts.open_shift(user, "100000")
+    {:ok, shift} = Shifts.open_shift(scope(user), "100000")
 
     {:ok, _} =
       Sales.create_sale(user, [%{product_id: product.id, quantity: 1}], %{
@@ -105,7 +110,7 @@ defmodule Zahlungs.ShiftsTest do
 
   test "cash movements adjust expected cash (in adds, out subtracts)" do
     user = user_fixture()
-    {:ok, shift} = Shifts.open_shift(user, "100000")
+    {:ok, shift} = Shifts.open_shift(scope(user), "100000")
 
     {:ok, _} = Shifts.add_cash_movement(shift, %{"category" => "cash_in", "amount" => "20000"})
     {:ok, _} = Shifts.add_cash_movement(shift, %{"category" => "expense", "amount" => "5000"})
@@ -122,7 +127,7 @@ defmodule Zahlungs.ShiftsTest do
   test "consignment payment requires a supplier and cannot be recorded on a closed shift" do
     user = user_fixture()
     supplier = supplier_fixture()
-    {:ok, shift} = Shifts.open_shift(user, 0)
+    {:ok, shift} = Shifts.open_shift(scope(user), 0)
 
     assert {:error, changeset} =
              Shifts.add_cash_movement(shift, %{
@@ -148,7 +153,7 @@ defmodule Zahlungs.ShiftsTest do
   test "consignment_payments_by_supplier/2 sums payments per supplier in range" do
     user = user_fixture()
     supplier = supplier_fixture()
-    {:ok, shift} = Shifts.open_shift(user, 0)
+    {:ok, shift} = Shifts.open_shift(scope(user), 0)
 
     {:ok, _} =
       Shifts.add_cash_movement(shift, %{
@@ -165,7 +170,7 @@ defmodule Zahlungs.ShiftsTest do
       })
 
     today = Zahlungs.LocalTime.today()
-    paid = Shifts.consignment_payments_by_supplier(today, today)
+    paid = Shifts.consignment_payments_by_supplier(store_scope(), today, today)
     assert Decimal.equal?(Map.fetch!(paid, supplier.id), Decimal.new("5000"))
   end
 
@@ -173,15 +178,15 @@ defmodule Zahlungs.ShiftsTest do
     user = user_fixture()
     other = user_fixture()
     product = product_fixture(price: Decimal.new("1000"), stock: 5)
-    {:ok, shift} = Shifts.open_shift(user, 0)
-    {:ok, _other_shift} = Shifts.open_shift(other, 0)
+    {:ok, shift} = Shifts.open_shift(scope(user), 0)
+    {:ok, _other_shift} = Shifts.open_shift(scope(other), 0)
 
     {:ok, _} =
       Sales.create_sale(user, [%{product_id: product.id, quantity: 1}], %{
         amount_paid: "1000"
       })
 
-    mine = Shifts.list_shifts(user_id: user.id)
+    mine = Shifts.list_shifts(store_scope(), user_id: user.id)
     assert Enum.map(mine, & &1.id) == [shift.id]
 
     assert [sale] = Shifts.shift_sales(shift)
@@ -227,7 +232,7 @@ defmodule Zahlungs.ShiftsTest do
       # The closed shift still shows what was reconciled at closing.
       assert_cash(closed, "102000")
       assert %{transactions: 1} = Shifts.shift_summary(closed)
-      assert Decimal.equal?(Shifts.get_shift!(shift.id).variance, Decimal.new("0"))
+      assert Decimal.equal?(Shifts.get_shift!(store_scope(), shift.id).variance, Decimal.new("0"))
 
       assert [%{category: "refund", direction: "out"} = refund] =
                Shifts.list_cash_movements(admin_shift)

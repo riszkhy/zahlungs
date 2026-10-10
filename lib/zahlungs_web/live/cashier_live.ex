@@ -22,16 +22,30 @@ defmodule ZahlungsWeb.CashierLive do
        movements: [],
        supplier_options: Zahlungs.Catalog.supplier_options()
      )
-     |> assign(:shift, Shifts.current_shift(socket.assigns.current_user))
+     |> assign_shift(Shifts.current_shift(socket.assigns.current_user))
      |> load_movements()
      |> reset_cart()}
+  end
+
+  # Sales are recorded in the store of the open shift, so that is the store
+  # whose stock and clock this screen shows — for an admin it can differ from
+  # the store picked in the navbar after the shift was opened.
+  defp assign_shift(socket, shift) do
+    scope = socket.assigns.current_scope
+
+    sale_scope =
+      if shift && (is_nil(scope.store) or shift.store_id != scope.store.id),
+        do: %{scope | store: Zahlungs.Stores.get_store!(shift.store_id)},
+        else: scope
+
+    assign(socket, shift: shift, sale_scope: sale_scope)
   end
 
   # Re-reads the user's open shift: the one in assigns can be stale when it was
   # closed (or a new one opened) from another tab or device.
   defp refresh_shift(socket) do
     socket
-    |> assign(:shift, Shifts.current_shift(socket.assigns.current_user))
+    |> assign_shift(Shifts.current_shift(socket.assigns.current_user))
     |> load_movements()
   end
 
@@ -44,16 +58,20 @@ defmodule ZahlungsWeb.CashierLive do
 
   @impl true
   def handle_event("open_shift", %{"opening_cash" => opening_cash}, socket) do
-    case Shifts.open_shift(socket.assigns.current_user, strip_money(opening_cash)) do
+    case Shifts.open_shift(socket.assigns.current_scope, strip_money(opening_cash)) do
       {:ok, shift} ->
         {:noreply,
-         socket |> assign(:shift, shift) |> load_movements() |> put_flash(:info, "Shift opened.")}
+         socket |> assign_shift(shift) |> load_movements() |> put_flash(:info, "Shift opened.")}
 
       {:error, :already_open} ->
         {:noreply,
          socket
-         |> assign(:shift, Shifts.current_shift(socket.assigns.current_user))
+         |> assign_shift(Shifts.current_shift(socket.assigns.current_user))
          |> put_flash(:error, "You already have an open shift.")}
+
+      {:error, :no_store} ->
+        {:noreply,
+         put_flash(socket, :error, "Pilih satu toko di menu atas dulu untuk membuka shift.")}
 
       {:error, _changeset} ->
         {:noreply, put_flash(socket, :error, "Could not open shift (check the opening cash).")}
@@ -78,7 +96,8 @@ defmodule ZahlungsWeb.CashierLive do
       {:ok, closed} ->
         {:noreply,
          socket
-         |> assign(shift: nil, closing: false, movements: [])
+         |> assign(closing: false, movements: [])
+         |> assign_shift(nil)
          |> put_flash(:info, "Shift closed. Variance: #{format_money(closed.variance)}.")}
 
       {:error, :not_open} ->
@@ -144,7 +163,12 @@ defmodule ZahlungsWeb.CashierLive do
       if String.trim(q) == "" do
         []
       else
-        Catalog.list_products(search: q, active: true, in_stock: true, limit: 8)
+        Catalog.list_products(socket.assigns.sale_scope,
+          search: q,
+          active: true,
+          in_stock: true,
+          limit: 8
+        )
       end
 
     {:noreply, assign(socket, search: q, results: results)}
@@ -154,7 +178,7 @@ defmodule ZahlungsWeb.CashierLive do
   # An exact barcode/SKU match is added to the cart and the box is cleared so the
   # next item can be scanned immediately.
   def handle_event("scan", %{"q" => code}, socket) do
-    case Catalog.get_product_by_code(code) do
+    case Catalog.get_product_by_code(socket.assigns.sale_scope, code) do
       nil ->
         {:noreply,
          socket
@@ -469,6 +493,12 @@ defmodule ZahlungsWeb.CashierLive do
       <p class="mt-1 text-sm text-gray-500">
         You must open a shift (enter the opening cash) before making sales.
       </p>
+      <p :if={@current_scope.store} class="mt-1 text-sm text-gray-700">
+        Toko: <strong>{@current_scope.store.name}</strong>
+      </p>
+      <p :if={is_nil(@current_scope.store)} class="mt-1 text-sm text-amber-700">
+        Pilih satu toko di menu atas dulu — shift dibuka untuk satu toko.
+      </p>
       <form phx-submit="open_shift" class="mt-4">
         <label class="block text-sm">
           Opening cash (modal awal)
@@ -491,7 +521,7 @@ defmodule ZahlungsWeb.CashierLive do
 
     <div :if={@shift} class="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-green-200 bg-green-50 p-3 text-sm">
       <span class="text-gray-700">
-        Shift #{@shift.id} · opened {Calendar.strftime(Zahlungs.LocalTime.to_local(@shift.opened_at), "%d %b %Y %H:%M")} · float {format_money(@shift.opening_cash)}
+        <strong :if={@sale_scope.store}>{@sale_scope.store.name}</strong> · Shift #{@shift.id} · opened {Calendar.strftime(Zahlungs.LocalTime.to_local(@shift.opened_at, @sale_scope.store), "%d %b %Y %H:%M")} · float {format_money(@shift.opening_cash)}
       </span>
       <div class="flex items-center gap-4">
         <button type="button" phx-click="toggle_movement" class="font-medium text-green-700 hover:underline">

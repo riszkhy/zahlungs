@@ -6,6 +6,7 @@ defmodule ZahlungsWeb.ShiftLiveTest do
   use ZahlungsWeb.ConnCase, async: true
 
   import Zahlungs.AccountsFixtures
+  import Zahlungs.StoresFixtures
   import Zahlungs.CatalogFixtures
   import Zahlungs.ShiftsFixtures
   import ZahlungsWeb.LiveDriver
@@ -27,7 +28,7 @@ defmodule ZahlungsWeb.ShiftLiveTest do
       user = user_fixture()
       {:ok, _} = Zahlungs.Accounts.update_user_name(user, %{name: "Budi Kasir"})
       user = Zahlungs.Accounts.get_user!(user.id)
-      {:ok, shift} = Shifts.open_shift(user, 100_000)
+      {:ok, shift} = Shifts.open_shift(scope(user), 100_000)
 
       conn = conn |> log_in_user(user) |> get("/shifts")
       response = html_response(conn, 200)

@@ -4,6 +4,7 @@ defmodule Zahlungs.SalesTest do
   alias Zahlungs.{Sales, Catalog}
 
   import Zahlungs.AccountsFixtures
+  import Zahlungs.StoresFixtures
   import Zahlungs.CatalogFixtures
   import Zahlungs.ShiftsFixtures
 
@@ -31,7 +32,7 @@ defmodule Zahlungs.SalesTest do
       assert Decimal.equal?(item.unit_price, Decimal.new("1000"))
       assert Decimal.equal?(item.purchase_price, Decimal.new("700"))
 
-      assert Catalog.get_product!(product.id).stock == 7
+      assert stock_of(product) == 7
     end
 
     test "applies discount and tax to the total" do
@@ -65,7 +66,7 @@ defmodule Zahlungs.SalesTest do
         assert {:error, ^error} = Sales.create_sale(user, cart, payment)
       end
 
-      assert Catalog.get_product!(product.id).stock == 10
+      assert stock_of(product) == 10
     end
 
     test "accepts a discount equal to the subtotal (a free sale)" do
@@ -121,7 +122,7 @@ defmodule Zahlungs.SalesTest do
       {:ok, _} = Zahlungs.Shifts.close_shift(shift, 0)
 
       assert {:error, :no_open_shift} = Sales.create_sale(user, cart, %{amount_paid: "1000"})
-      assert Catalog.get_product!(product.id).stock == 5
+      assert stock_of(product) == 5
     end
 
     test "defaults to cash payment method" do
@@ -170,7 +171,7 @@ defmodule Zahlungs.SalesTest do
 
       assert [item] = sale.items
       assert item.quantity == 3
-      assert Catalog.get_product!(product.id).stock == 7
+      assert stock_of(product) == 7
     end
 
     test "rejects an empty cart" do
@@ -197,7 +198,7 @@ defmodule Zahlungs.SalesTest do
                })
 
       # Whole transaction rolled back: stock not touched.
-      assert Catalog.get_product!(product.id).stock == 2
+      assert stock_of(product) == 2
     end
   end
 
@@ -209,12 +210,12 @@ defmodule Zahlungs.SalesTest do
       {:ok, sale} =
         Sales.create_sale(user, [%{product_id: product.id, quantity: 3}], %{amount_paid: "3000"})
 
-      assert Catalog.get_product!(product.id).stock == 7
+      assert stock_of(product) == 7
 
       assert {:ok, returned} = Sales.return_sale(sale)
       assert returned.status == "returned"
       assert returned.returned_at
-      assert Catalog.get_product!(product.id).stock == 10
+      assert stock_of(product) == 10
     end
 
     test "cannot return a sale twice" do
@@ -239,7 +240,7 @@ defmodule Zahlungs.SalesTest do
       assert {:ok, _} = Sales.return_sale(sale)
       assert {:error, :already_returned} = Sales.return_sale(sale)
       assert {:error, :not_voidable} = Sales.void_sale(sale, user, "dobel")
-      assert Catalog.get_product!(product.id).stock == 10
+      assert stock_of(product) == 10
     end
 
     test "returned sales drop out of today's summary" do
@@ -249,9 +250,9 @@ defmodule Zahlungs.SalesTest do
       {:ok, sale} =
         Sales.create_sale(user, [%{product_id: product.id, quantity: 1}], %{amount_paid: "1000"})
 
-      before = Sales.sales_summary_today()
+      before = Sales.sales_summary_today(store_scope())
       {:ok, _} = Sales.return_sale(sale)
-      after_return = Sales.sales_summary_today()
+      after_return = Sales.sales_summary_today(store_scope())
 
       assert after_return.count == before.count - 1
     end
@@ -265,14 +266,14 @@ defmodule Zahlungs.SalesTest do
       {:ok, sale} =
         Sales.create_sale(user, [%{product_id: product.id, quantity: 3}], %{amount_paid: "3000"})
 
-      assert Catalog.get_product!(product.id).stock == 7
+      assert stock_of(product) == 7
 
       assert {:ok, voided} = Sales.void_sale(sale, user, "salah qty")
       assert voided.status == "void"
       assert voided.void_reason == "salah qty"
       assert voided.voided_by_id == user.id
       assert voided.voided_at
-      assert Catalog.get_product!(product.id).stock == 10
+      assert stock_of(product) == 10
     end
 
     test "cannot void a non-completed sale" do
@@ -296,7 +297,7 @@ defmodule Zahlungs.SalesTest do
       assert {:ok, _} = Sales.void_sale(sale, user, "salah qty")
       assert {:error, :not_voidable} = Sales.void_sale(sale, user, "dobel")
       assert {:error, :already_returned} = Sales.return_sale(sale)
-      assert Catalog.get_product!(product.id).stock == 10
+      assert stock_of(product) == 10
     end
 
     test "voided sales drop out of today's summary" do
@@ -306,16 +307,16 @@ defmodule Zahlungs.SalesTest do
       {:ok, sale} =
         Sales.create_sale(user, [%{product_id: product.id, quantity: 1}], %{amount_paid: "1000"})
 
-      before = Sales.sales_summary_today()
+      before = Sales.sales_summary_today(store_scope())
       {:ok, _} = Sales.void_sale(sale, user, "koreksi")
-      assert Sales.sales_summary_today().count == before.count - 1
+      assert Sales.sales_summary_today(store_scope()).count == before.count - 1
     end
 
     test "a cashier cannot void a sale from a closed shift, but an admin can" do
       cashier = user_fixture()
       {:ok, admin} = Zahlungs.Accounts.set_user_role(user_fixture(), "admin")
       product = product_fixture(price: Decimal.new("1000"), stock: 10)
-      {:ok, shift} = Zahlungs.Shifts.open_shift(cashier, 0)
+      {:ok, shift} = Zahlungs.Shifts.open_shift(scope(cashier), 0)
 
       {:ok, sale} =
         Sales.create_sale(cashier, [%{product_id: product.id, quantity: 1}], %{
@@ -339,8 +340,8 @@ defmodule Zahlungs.SalesTest do
         Sales.create_sale(user, [%{product_id: product.id, quantity: 1}], %{amount_paid: "1000"})
 
       today = Zahlungs.LocalTime.today()
-      ids_today = Sales.list_sales(date: today) |> Enum.map(& &1.id)
-      ids_past = Sales.list_sales(date: ~D[2000-01-01]) |> Enum.map(& &1.id)
+      ids_today = Sales.list_sales(store_scope(), date: today) |> Enum.map(& &1.id)
+      ids_past = Sales.list_sales(store_scope(), date: ~D[2000-01-01]) |> Enum.map(& &1.id)
 
       assert sale.id in ids_today
       refute sale.id in ids_past
@@ -366,10 +367,10 @@ defmodule Zahlungs.SalesTest do
           sale.id
         end
 
-      assert Sales.count_sales(date: day) == 3
-      assert Sales.count_sales(date: ~D[2001-05-06]) == 0
+      assert Sales.count_sales(store_scope(), date: day) == 3
+      assert Sales.count_sales(store_scope(), date: ~D[2001-05-06]) == 0
 
-      page = fn offset -> Sales.list_sales(date: day, limit: 2, offset: offset) end
+      page = fn offset -> Sales.list_sales(store_scope(), date: day, limit: 2, offset: offset) end
       assert Enum.map(page.(0), & &1.id) == ids |> Enum.reverse() |> Enum.take(2)
       assert Enum.map(page.(2), & &1.id) == [hd(ids)]
       assert page.(4) == []
@@ -391,10 +392,13 @@ defmodule Zahlungs.SalesTest do
         set: [inserted_at: early_morning]
       )
 
-      assert sale.id in (Sales.list_sales(date: day) |> Enum.map(& &1.id))
-      refute sale.id in (Sales.list_sales(date: Date.add(day, -1)) |> Enum.map(& &1.id))
+      assert sale.id in (Sales.list_sales(store_scope(), date: day) |> Enum.map(& &1.id))
 
-      assert [%{date: ^day, transactions: 1}] = Sales.sales_by_day(Date.add(day, -1), day)
+      refute sale.id in (Sales.list_sales(store_scope(), date: Date.add(day, -1))
+                         |> Enum.map(& &1.id))
+
+      assert [%{date: ^day, transactions: 1}] =
+               Sales.sales_by_day(store_scope(), Date.add(day, -1), day)
     end
   end
 
@@ -409,13 +413,13 @@ defmodule Zahlungs.SalesTest do
         Sales.create_sale(user, [%{product_id: product.id, quantity: 2}], %{amount_paid: "2000"})
 
       today = Zahlungs.LocalTime.today()
-      report = Sales.sales_report(today, today)
+      report = Sales.sales_report(store_scope(), today, today)
 
       assert report.transactions >= 1
       assert Decimal.gt?(report.gross_sales, Decimal.new("0"))
       assert Decimal.gt?(report.gross_profit, Decimal.new("0"))
 
-      top = Sales.top_products(today, today, 1000)
+      top = Sales.top_products(store_scope(), today, today, 1000)
       assert Enum.any?(top, &(&1.name == product.name and &1.quantity >= 2))
     end
 
@@ -428,7 +432,7 @@ defmodule Zahlungs.SalesTest do
         Sales.create_sale(user, [%{product_id: product.id, quantity: 3}], %{amount_paid: "3000"})
 
       today = Zahlungs.LocalTime.today()
-      rows = Sales.sales_by_category(today, today)
+      rows = Sales.sales_by_category(store_scope(), today, today)
       assert Enum.any?(rows, &(&1.category == category.name and &1.quantity >= 3))
     end
 
@@ -441,10 +445,10 @@ defmodule Zahlungs.SalesTest do
 
       today = Zahlungs.LocalTime.today()
 
-      day_rows = Sales.sales_by_day(today, today)
+      day_rows = Sales.sales_by_day(store_scope(), today, today)
       assert Enum.any?(day_rows, &(&1.transactions >= 1))
 
-      cashier_rows = Sales.sales_by_cashier(today, today)
+      cashier_rows = Sales.sales_by_cashier(store_scope(), today, today)
       assert Enum.any?(cashier_rows, &(&1.cashier == user.email and &1.transactions >= 1))
     end
 
@@ -458,9 +462,9 @@ defmodule Zahlungs.SalesTest do
         Sales.create_sale(user, [%{product_id: product.id, quantity: 1}], %{amount_paid: "1000"})
 
       today = Zahlungs.LocalTime.today()
-      before = Sales.sales_report(today, today)
+      before = Sales.sales_report(store_scope(), today, today)
       {:ok, _} = Sales.return_sale(sale)
-      after_return = Sales.sales_report(today, today)
+      after_return = Sales.sales_report(store_scope(), today, today)
 
       assert after_return.transactions == before.transactions - 1
     end
@@ -474,7 +478,7 @@ defmodule Zahlungs.SalesTest do
       {:ok, _} =
         Sales.create_sale(user, [%{product_id: product.id, quantity: 2}], %{amount_paid: "2000"})
 
-      summary = Sales.sales_summary_today()
+      summary = Sales.sales_summary_today(store_scope())
       assert summary.count >= 1
       assert Decimal.gt?(summary.total, Decimal.new("0"))
     end

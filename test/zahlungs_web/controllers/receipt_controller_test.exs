@@ -2,6 +2,7 @@ defmodule ZahlungsWeb.ReceiptControllerTest do
   use ZahlungsWeb.ConnCase, async: true
 
   import Zahlungs.CatalogFixtures
+  import Zahlungs.StoresFixtures
   import Zahlungs.ShiftsFixtures
 
   alias Zahlungs.Sales
@@ -17,7 +18,8 @@ defmodule ZahlungsWeb.ReceiptControllerTest do
     response = html_response(conn, 200)
 
     assert response =~ sale.code
-    assert response =~ "Zahlungs POS"
+    # Headed by the store that made the sale.
+    assert response =~ "<h1>#{default_store().name}</h1>"
     assert response =~ "window.print()"
     # Standalone page: no app navigation chrome.
     refute response =~ "Manage Products"

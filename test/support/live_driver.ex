@@ -26,14 +26,16 @@ defmodule ZahlungsWeb.LiveDriver do
 
   @doc """
   Mounts `view` as `user`. Options: `:action` (the live action, default
-  `:index`) and `:params` (default `%{}`).
+  `:index`), `:params` (default `%{}`) and `:store` (an admin's store choice: a
+  store id or `"all"`; default is the user's own store).
   """
   def mount_live(view, user, opts \\ []) do
     assigns = %{
       __changed__: %{},
       flash: %{},
       live_action: Keyword.get(opts, :action, :index),
-      current_user: user
+      current_user: user,
+      current_scope: Zahlungs.Scope.for_user(user, Keyword.get(opts, :store))
     }
 
     {:ok, socket} =

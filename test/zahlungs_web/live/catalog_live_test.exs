@@ -7,6 +7,7 @@ defmodule ZahlungsWeb.CatalogLiveTest do
   use ZahlungsWeb.ConnCase, async: true
 
   import Zahlungs.AccountsFixtures
+  import Zahlungs.StoresFixtures
   import Zahlungs.CatalogFixtures
   import ZahlungsWeb.LiveDriver
 

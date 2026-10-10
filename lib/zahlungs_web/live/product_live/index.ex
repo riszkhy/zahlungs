@@ -37,7 +37,7 @@ defmodule ZahlungsWeb.ProductLive.Index do
   defp apply_action(socket, :edit, %{"id" => id}) do
     socket
     |> assign(:page_title, "Edit Product")
-    |> assign(:product, Catalog.get_product!(id))
+    |> assign(:product, Catalog.get_product!(socket.assigns.current_scope, id))
   end
 
   @impl true
@@ -94,13 +94,13 @@ defmodule ZahlungsWeb.ProductLive.Index do
   end
 
   def handle_event("toggle_active", %{"id" => id}, socket) do
-    product = Catalog.get_product!(id)
+    product = Catalog.get_product!(socket.assigns.current_scope, id)
     {:ok, _} = Catalog.set_product_active(product, !product.active)
     {:noreply, load_products(socket)}
   end
 
   def handle_event("delete", %{"id" => id}, socket) do
-    product = Catalog.get_product!(id)
+    product = Catalog.get_product!(socket.assigns.current_scope, id)
     {:ok, _} = Catalog.delete_product(product)
 
     {:noreply,
@@ -121,7 +121,7 @@ defmodule ZahlungsWeb.ProductLive.Index do
       active: parse_active(socket.assigns.active_filter)
     ]
 
-    assign(socket, :products, Catalog.list_products(opts))
+    assign(socket, :products, Catalog.list_products(socket.assigns.current_scope, opts))
   end
 
   defp parse_active("true"), do: true
@@ -233,6 +233,7 @@ defmodule ZahlungsWeb.ProductLive.Index do
         title={@page_title}
         action={@live_action}
         product={@product}
+        scope={@current_scope}
         patch={~p"/products"}
       />
     </.modal>

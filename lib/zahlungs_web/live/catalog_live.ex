@@ -88,12 +88,15 @@ defmodule ZahlungsWeb.CatalogLive do
       active: true
     ]
 
-    total = Catalog.count_products(filters)
+    total = Catalog.count_products(socket.assigns.current_scope, filters)
     total_pages = max(1, ceil(total / @per_page))
     page = min(socket.assigns.page, total_pages)
 
     products =
-      Catalog.list_products(filters ++ [limit: @per_page, offset: (page - 1) * @per_page])
+      Catalog.list_products(
+        socket.assigns.current_scope,
+        filters ++ [limit: @per_page, offset: (page - 1) * @per_page]
+      )
 
     assign(socket, products: products, total: total, total_pages: total_pages, page: page)
   end
