@@ -1,0 +1,6 @@
+# Keep every text file LF in the working tree, whatever core.autocrlf says.
+# Mixed CRLF/LF files made `mix format --check-formatted` and credo fail.
+* text=auto eol=lf
+
+*.ico binary
+*.png binary
