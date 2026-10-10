@@ -74,6 +74,13 @@ defmodule ZahlungsWeb.Layouts do
         <.link :if={@current_user.role == "admin"} href={~p"/admin/stores"} class="text-white/90 hover:text-white hover:underline">
           Stores
         </.link>
+        <.link
+          :if={@current_user.role == "admin"}
+          href={~p"/admin/stores/register"}
+          class="text-white/90 hover:text-white hover:underline"
+        >
+          Daftar Cabang
+        </.link>
         <.link :if={@current_user.role == "admin"} href={~p"/admin/suppliers"} class="text-white/90 hover:text-white hover:underline">
           Suppliers
         </.link>

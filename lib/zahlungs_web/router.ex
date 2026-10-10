@@ -103,6 +103,7 @@ defmodule ZahlungsWeb.Router do
 
       live "/admin/stores", StoreLive.Index, :index
       live "/admin/stores/new", StoreLive.Index, :new
+      live "/admin/stores/register", StoreLive.Register, :new
       live "/admin/stores/:id/edit", StoreLive.Index, :edit
       live "/admin/logins", LoginLive.Index, :index
 
