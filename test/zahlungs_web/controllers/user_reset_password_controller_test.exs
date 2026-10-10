@@ -31,6 +31,9 @@ defmodule ZahlungsWeb.UserResetPasswordControllerTest do
     end
 
     test "does not send reset password token if email is invalid", %{conn: conn} do
+      # Counted, not compared to []: the database may hold other users' tokens.
+      tokens_before = Repo.aggregate(Accounts.UserToken, :count)
+
       conn =
         post(conn, Routes.user_reset_password_path(conn, :create), %{
           "user" => %{"email" => "unknown@example.com"}
@@ -38,7 +41,7 @@ defmodule ZahlungsWeb.UserResetPasswordControllerTest do
 
       assert redirected_to(conn) == "/"
       assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "If your email is in our system"
-      assert Repo.all(Accounts.UserToken) == []
+      assert Repo.aggregate(Accounts.UserToken, :count) == tokens_before
     end
   end
 

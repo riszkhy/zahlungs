@@ -6,6 +6,15 @@ defmodule Zahlungs.AccountsTest do
   import Zahlungs.AccountsFixtures
   alias Zahlungs.Accounts.{User, UserToken}
 
+  # Backdates only this user's tokens: the database the tests run against may
+  # hold other rows (e.g. real sessions), so an unscoped update is not "just ours".
+  defp expire_tokens(user) do
+    {1, nil} =
+      Repo.update_all(from(t in UserToken, where: t.user_id == ^user.id),
+        set: [inserted_at: ~N[2020-01-01 00:00:00]]
+      )
+  end
+
   describe "admin user management" do
     test "list_users/0 returns users" do
       user = user_fixture()
@@ -298,7 +307,7 @@ defmodule Zahlungs.AccountsTest do
     end
 
     test "does not update email if token expired", %{user: user, token: token} do
-      {1, nil} = Repo.update_all(UserToken, set: [inserted_at: ~N[2020-01-01 00:00:00]])
+      expire_tokens(user)
       assert Accounts.update_user_email(user, token) == :error
       assert Repo.get!(User, user.id).email == user.email
       assert Repo.get_by(UserToken, user_id: user.id)
@@ -416,8 +425,8 @@ defmodule Zahlungs.AccountsTest do
       refute Accounts.get_user_by_session_token("oops")
     end
 
-    test "does not return user for expired token", %{token: token} do
-      {1, nil} = Repo.update_all(UserToken, set: [inserted_at: ~N[2020-01-01 00:00:00]])
+    test "does not return user for expired token", %{user: user, token: token} do
+      expire_tokens(user)
       refute Accounts.get_user_by_session_token(token)
     end
   end
@@ -477,7 +486,7 @@ defmodule Zahlungs.AccountsTest do
     end
 
     test "does not confirm email if token expired", %{user: user, token: token} do
-      {1, nil} = Repo.update_all(UserToken, set: [inserted_at: ~N[2020-01-01 00:00:00]])
+      expire_tokens(user)
       assert Accounts.confirm_user(token) == :error
       refute Repo.get!(User, user.id).confirmed_at
       assert Repo.get_by(UserToken, user_id: user.id)
@@ -526,7 +535,7 @@ defmodule Zahlungs.AccountsTest do
     end
 
     test "does not return the user if token expired", %{user: user, token: token} do
-      {1, nil} = Repo.update_all(UserToken, set: [inserted_at: ~N[2020-01-01 00:00:00]])
+      expire_tokens(user)
       refute Accounts.get_user_by_reset_password_token(token)
       assert Repo.get_by(UserToken, user_id: user.id)
     end

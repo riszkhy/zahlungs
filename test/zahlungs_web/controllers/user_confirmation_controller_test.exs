@@ -44,6 +44,9 @@ defmodule ZahlungsWeb.UserConfirmationControllerTest do
     end
 
     test "does not send confirmation token if email is invalid", %{conn: conn} do
+      # Counted, not compared to []: the database may hold other users' tokens.
+      tokens_before = Repo.aggregate(Accounts.UserToken, :count)
+
       conn =
         post(conn, Routes.user_confirmation_path(conn, :create), %{
           "user" => %{"email" => "unknown@example.com"}
@@ -51,7 +54,7 @@ defmodule ZahlungsWeb.UserConfirmationControllerTest do
 
       assert redirected_to(conn) == "/"
       assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "If your email is in our system"
-      assert Repo.all(Accounts.UserToken) == []
+      assert Repo.aggregate(Accounts.UserToken, :count) == tokens_before
     end
   end
 
@@ -78,7 +81,7 @@ defmodule ZahlungsWeb.UserConfirmationControllerTest do
       assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "User confirmed successfully"
       assert Accounts.get_user!(user.id).confirmed_at
       refute get_session(conn, :user_token)
-      assert Repo.all(Accounts.UserToken) == []
+      refute Repo.get_by(Accounts.UserToken, user_id: user.id)
 
       # When not logged in
       conn = post(conn, Routes.user_confirmation_path(conn, :update, token))
