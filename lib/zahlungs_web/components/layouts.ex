@@ -48,61 +48,87 @@ defmodule ZahlungsWeb.Layouts do
   end
 
   @doc """
-  Renders the navigation user menu shown in the root layout.
+  The cashier's everyday screens, shown in the top bar from tablet width up.
+  Admin and account links are in `menu_drawer/1`.
   """
-  attr :current_user, :map, default: nil
+  def primary_nav(assigns) do
+    ~H"""
+    <nav id="primary-nav" class="hidden items-center gap-1 md:flex" aria-label="Kasir">
+      <.link :for={{label, path} <- cashier_links()} href={path} class="nav-tap">{label}</.link>
+    </nav>
+    """
+  end
+
+  @doc """
+  The full menu, grouped, in a drawer that slides in from the right. Opened by
+  the Menu button in the root layout (Alpine `open`).
+  """
+  attr :current_user, :map, required: true
   attr :current_scope, :map, default: nil
 
-  def user_menu(assigns) do
+  def menu_drawer(assigns) do
     ~H"""
-    <div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-4 text-sm font-medium py-3 md:py-0">
-      <%= if @current_user do %>
-        <.link href={~p"/home"} class="text-white/90 hover:text-white hover:underline">Home</.link>
-        <.link href={~p"/cashier"} class="text-white/90 hover:text-white hover:underline">Cashier</.link>
-        <.link href={~p"/catalog"} class="text-white/90 hover:text-white hover:underline">Catalog</.link>
-        <.link href={~p"/sales"} class="text-white/90 hover:text-white hover:underline">Sales</.link>
-        <.link href={~p"/shifts"} class="text-white/90 hover:text-white hover:underline">Shifts</.link>
-        <.link :if={@current_user.role == "admin"} href={~p"/products"} class="text-white/90 hover:text-white hover:underline">
-          Products
-        </.link>
-        <.link :if={@current_user.role == "admin"} href={~p"/categories"} class="text-white/90 hover:text-white hover:underline">
-          Categories
-        </.link>
-        <.link :if={@current_user.role == "admin"} href={~p"/admin/users"} class="text-white/90 hover:text-white hover:underline">
-          Users
-        </.link>
-        <.link :if={@current_user.role == "admin"} href={~p"/admin/stores"} class="text-white/90 hover:text-white hover:underline">
-          Stores
-        </.link>
-        <.link
-          :if={@current_user.role == "admin"}
-          href={~p"/admin/stores/register"}
-          class="text-white/90 hover:text-white hover:underline"
-        >
-          Daftar Cabang
-        </.link>
-        <.link :if={@current_user.role == "admin"} href={~p"/admin/suppliers"} class="text-white/90 hover:text-white hover:underline">
-          Suppliers
-        </.link>
-        <.link :if={@current_user.role == "admin"} href={~p"/reports/sales"} class="text-white/90 hover:text-white hover:underline">
-          Reports
-        </.link>
-        <.link :if={@current_user.role == "admin"} href={~p"/reports/stock"} class="text-white/90 hover:text-white hover:underline">
-          Stock
-        </.link>
-        <.link :if={@current_user.role == "admin"} href={~p"/reports/consignment"} class="text-white/90 hover:text-white hover:underline">
-          Consignment
-        </.link>
-        <.store_switcher :if={@current_scope} scope={@current_scope} />
-        <.link href={~p"/users/settings"} class="text-white/90 hover:text-white hover:underline">Profile</.link>
-        <span class="hidden md:inline text-white/70">{@current_user.email}</span>
-        <.form for={%{}} action={~p"/users/log_out"} method="delete" class="inline">
-          <button type="submit" class="text-white/90 hover:text-white hover:underline">Log out</button>
+    <aside
+      id="menu-drawer"
+      x-show="open"
+      x-cloak
+      @keydown.escape.window="open = false"
+      class="fixed inset-y-0 right-0 z-50 flex w-72 max-w-full flex-col overflow-y-auto bg-white text-gray-800 shadow-xl"
+      aria-label="Menu"
+    >
+      <div class="flex items-center justify-between border-b border-gray-200 px-4 py-3">
+        <span class="font-semibold">Menu</span>
+        <button type="button" class="drawer-link !w-auto" @click="open = false">Tutup</button>
+      </div>
+
+      <.menu_group title="Kasir" links={[{"Home", ~p"/home"} | cashier_links()]} />
+      <.menu_group :if={@current_user.role == "admin"} title="Admin" links={admin_links()} />
+
+      <div class="mt-auto border-t border-gray-200 px-2 py-3">
+        <p class="px-3 text-xs font-semibold uppercase tracking-wide text-gray-500">Akun</p>
+        <p class="truncate px-3 py-1 text-sm text-gray-500">{@current_user.email}</p>
+        <.link href={~p"/users/settings"} class="drawer-link">Profile</.link>
+        <.form for={%{}} action={~p"/users/log_out"} method="delete">
+          <button type="submit" class="drawer-link text-left text-red-700">Log out</button>
         </.form>
-      <% else %>
-        <.link href={~p"/users/log_in"} class="text-white/90 hover:text-white hover:underline">Log in</.link>
-      <% end %>
+      </div>
+    </aside>
+    """
+  end
+
+  attr :title, :string, required: true
+  attr :links, :list, required: true
+
+  defp menu_group(assigns) do
+    ~H"""
+    <div class="px-2 py-3">
+      <p class="px-3 text-xs font-semibold uppercase tracking-wide text-gray-500">{@title}</p>
+      <.link :for={{label, path} <- @links} href={path} class="drawer-link">{label}</.link>
     </div>
     """
+  end
+
+  defp cashier_links do
+    [
+      {"Cashier", ~p"/cashier"},
+      {"Sales", ~p"/sales"},
+      {"Shifts", ~p"/shifts"},
+      {"Catalog", ~p"/catalog"}
+    ]
+  end
+
+  defp admin_links do
+    [
+      {"Products", ~p"/products"},
+      {"Categories", ~p"/categories"},
+      {"Users", ~p"/admin/users"},
+      {"Stores", ~p"/admin/stores"},
+      {"Daftar Cabang", ~p"/admin/stores/register"},
+      {"Riwayat login", ~p"/admin/logins"},
+      {"Suppliers", ~p"/admin/suppliers"},
+      {"Reports", ~p"/reports/sales"},
+      {"Stock", ~p"/reports/stock"},
+      {"Consignment", ~p"/reports/consignment"}
+    ]
   end
 end

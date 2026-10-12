@@ -195,6 +195,10 @@ Hooks.CurrencyInput = {
       this.el.value = ""
       this.pushEvent("set_amount_paid", { value: "" })
     })
+    // Quick-cash buttons: show the amount the server already recorded.
+    this.handleEvent("set_amount_paid_input", ({ value }) => {
+      this.el.value = String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ".")
+    })
   },
   reformat() {
     const digits = this.el.value.replace(/\D/g, "")

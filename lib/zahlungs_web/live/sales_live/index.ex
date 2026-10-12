@@ -164,6 +164,28 @@ defmodule ZahlungsWeb.SalesLive.Index do
       </label>
     </form>
 
+    <%!-- Below landscape-tablet width a row doesn't fit: one tappable card per sale. --%>
+    <div class="mt-4 space-y-2 lg:hidden">
+      <.link :for={sale <- @sales} id={"sale-card-#{sale.id}"} patch={~p"/sales/#{sale}"} class="list-card">
+        <span class="min-w-0 flex-1">
+          <span class="block truncate font-medium">{sale.code}</span>
+          <span class="block text-xs text-gray-500">
+            {Calendar.strftime(Zahlungs.LocalTime.to_local(sale.inserted_at, sale.store), "%d %b %Y %H:%M")}
+            · {length(sale.items)} item
+            <span :if={is_nil(@current_scope.store)}>· {sale.store.name}</span>
+          </span>
+        </span>
+        <span class="text-right">
+          <span class="block font-semibold">{format_money(sale.total)}</span>
+          <span class={["inline-block rounded-full px-2 py-0.5 text-xs", status_badge_class(sale.status)]}>
+            {sale.status}
+          </span>
+        </span>
+      </.link>
+      <p :if={@sales == []} class="text-sm text-gray-500">Belum ada penjualan.</p>
+    </div>
+
+    <div class="hidden lg:block">
     <.table id="sales" rows={@sales}>
       <:col :let={sale} label="Code">{sale.code}</:col>
       <:col :let={sale} label="Date">{Calendar.strftime(Zahlungs.LocalTime.to_local(sale.inserted_at, sale.store), "%d %b %Y %H:%M")}</:col>
@@ -180,6 +202,7 @@ defmodule ZahlungsWeb.SalesLive.Index do
         <.link patch={~p"/sales/#{sale}"}>View</.link>
       </:action>
     </.table>
+    </div>
 
     <div :if={@total_pages > 1} class="mt-6 flex items-center justify-center gap-4">
       <.button

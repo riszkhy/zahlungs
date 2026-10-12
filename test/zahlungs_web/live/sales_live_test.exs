@@ -69,6 +69,20 @@ defmodule ZahlungsWeb.SalesLiveTest do
     end
   end
 
+  describe "narrow screens" do
+    setup :sale_fixture
+
+    test "each sale is also a card that opens its detail", %{cashier: cashier, sale: sale} do
+      rendered = SalesLive.Index |> mount_live(cashier) |> html()
+
+      [_, card] = Regex.run(~r{<a[^>]*id="sale-card-#{sale.id}"[^>]*>(.*?)</a>}s, rendered)
+
+      assert rendered =~ ~s(href="/sales/#{sale.id}")
+      assert card =~ sale.code
+      assert card =~ "completed"
+    end
+  end
+
   describe "paging" do
     test "shows 25 per page and clamps out-of-range pages" do
       cashier = user_on_shift_fixture()

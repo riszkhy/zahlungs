@@ -75,6 +75,35 @@ defmodule ZahlungsWeb.ShiftLive.Index do
       <:subtitle>Riwayat sesi kas</:subtitle>
     </.header>
 
+    <%!-- Below landscape-tablet width a row doesn't fit: one tappable card per shift. --%>
+    <div class="mt-4 space-y-2 lg:hidden">
+      <.link :for={shift <- @shifts} id={"shift-card-#{shift.id}"} patch={~p"/shifts/#{shift}"} class="list-card">
+        <span class="min-w-0 flex-1">
+          <span class="block truncate font-medium">Shift #{shift.id} · {cashier_name(shift.user)}</span>
+          <span class="block text-xs text-gray-500">
+            {fmt(shift.opened_at, shift.store)} – {fmt(shift.closed_at, shift.store)}
+            <span :if={is_nil(@current_scope.store)}>· {shift.store.name}</span>
+          </span>
+        </span>
+        <span class="text-right">
+          <span
+            :if={shift.status == "closed"}
+            class={["block font-semibold", variance_class(shift.variance)]}
+          >
+            {format_money(shift.variance)}
+          </span>
+          <span class={[
+            "inline-block rounded-full px-2 py-0.5 text-xs",
+            (shift.status == "open" && "bg-green-100 text-green-700") || "bg-gray-100 text-gray-700"
+          ]}>
+            {shift.status}
+          </span>
+        </span>
+      </.link>
+      <p :if={@shifts == []} class="text-sm text-gray-500">Belum ada shift.</p>
+    </div>
+
+    <div class="hidden lg:block">
     <.table id="shifts" rows={@shifts}>
       <:col :let={shift} label="#">{shift.id}</:col>
       <:col :let={shift} :if={is_nil(@current_scope.store)} label="Store">{shift.store.name}</:col>
@@ -104,6 +133,7 @@ defmodule ZahlungsWeb.ShiftLive.Index do
         <.link patch={~p"/shifts/#{shift}"}>View</.link>
       </:action>
     </.table>
+    </div>
 
     <.modal :if={@live_action == :show and @shift} id="shift-modal" show on_cancel={JS.patch(~p"/shifts")}>
       <h3 class="text-lg font-semibold">Shift #{@shift.id}</h3>

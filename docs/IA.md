@@ -195,3 +195,21 @@ Kelola user (admin):
 - **Login:** lokasi (lat/long) dari browser dicatat bila diizinkan; tidak
   pernah menolak login. Lima kali salah password untuk email yang sama menahan
   login 15 menit.
+
+## Tampilan tablet (kasir)
+
+- **Bar atas:** Cashier, Sales, Shifts, Catalog selalu satu ketukan; toko aktif;
+  tombol **Menu** membuka laci berisi semua link, dikelompokkan *Kasir* / *Admin*
+  / *Akun* (Profile, Log out).
+- **/cashier, mendatar** (lebar >= 1024, atau >= 768 posisi landscape): produk
+  di kiri, keranjang + pembayaran di kanan dan tetap terlihat saat digulir.
+- **/cashier, tegak:** produk memenuhi layar; bilah bawah menampilkan jumlah
+  item + total dan tombol **Bayar** yang membuka panel keranjang.
+- **Kotak produk:** hingga 24 produk berstok tampil tanpa mencari; ketuk untuk
+  menambah. Chip kategori dan kotak cari mempersempitnya.
+- **Nominal cepat:** "Uang pas" dan pecahan (5/10/20/50/100 ribu) yang cukup
+  menutup total.
+- **/sales dan /shifts:** di bawah lebar 1024 tiap baris menjadi kartu yang bisa
+  diketuk; di atasnya tetap tabel.
+- **Tabel lain** digulir ke samping di dalam kotaknya bila lebih lebar dari layar.
+- Target sentuh minimal 44 px; input 16 px pada layar sentuh.

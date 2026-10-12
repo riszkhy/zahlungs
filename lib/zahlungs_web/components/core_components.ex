@@ -366,8 +366,8 @@ defmodule ZahlungsWeb.CoreComponents do
 
   def table(assigns) do
     ~H"""
-    <div id={@id} class="overflow-y-auto px-4 sm:overflow-visible sm:px-0">
-      <table class="w-[40rem] mt-6 sm:w-full">
+    <div id={@id} class="overflow-x-auto">
+      <table class="mt-6 w-full min-w-[40rem]">
         <thead class="text-sm text-left leading-6 text-gray-500">
           <tr>
             <th :for={col <- @col} class="p-2 pb-4 pr-6 font-normal">{col[:label]}</th>

@@ -12,6 +12,8 @@ defmodule ZahlungsWeb.CashierLive do
     {:ok,
      socket
      |> assign(page_title: "Cashier", last_sale: nil, scanning: false)
+     |> assign(category_id: nil, cart_open: false)
+     |> assign(:category_options, Zahlungs.Catalog.category_options())
      |> assign(opening_cash: "", closing: false, counted_cash: "", close_note: "", summary: nil)
      |> assign(
        movement_open: false,
@@ -47,6 +49,28 @@ defmodule ZahlungsWeb.CashierLive do
     socket
     |> assign_shift(Shifts.current_shift(socket.assigns.current_user))
     |> load_movements()
+    |> load_products()
+  end
+
+  @tile_limit 24
+
+  # The product tiles: what can be sold right now in the open shift's store,
+  # narrowed by the search box and the category chip. Empty without a shift.
+  defp load_products(socket) do
+    results =
+      if socket.assigns.shift do
+        Catalog.list_products(socket.assigns.sale_scope,
+          search: socket.assigns.search,
+          category_id: socket.assigns.category_id,
+          active: true,
+          in_stock: true,
+          limit: @tile_limit
+        )
+      else
+        []
+      end
+
+    assign(socket, :results, results)
   end
 
   defp load_movements(socket) do
@@ -61,7 +85,11 @@ defmodule ZahlungsWeb.CashierLive do
     case Shifts.open_shift(socket.assigns.current_scope, strip_money(opening_cash)) do
       {:ok, shift} ->
         {:noreply,
-         socket |> assign_shift(shift) |> load_movements() |> put_flash(:info, "Shift opened.")}
+         socket
+         |> assign_shift(shift)
+         |> load_movements()
+         |> load_products()
+         |> put_flash(:info, "Shift opened.")}
 
       {:error, :already_open} ->
         {:noreply,
@@ -159,19 +187,38 @@ defmodule ZahlungsWeb.CashierLive do
 
   @impl true
   def handle_event("search", %{"q" => q}, socket) do
-    results =
-      if String.trim(q) == "" do
-        []
-      else
-        Catalog.list_products(socket.assigns.sale_scope,
-          search: q,
-          active: true,
-          in_stock: true,
-          limit: 8
-        )
-      end
+    {:noreply, socket |> assign(:search, q) |> load_products()}
+  end
 
-    {:noreply, assign(socket, search: q, results: results)}
+  def handle_event("set_category", %{"id" => id}, socket) do
+    category_id = if id in [nil, ""], do: nil, else: to_int(id)
+    {:noreply, socket |> assign(:category_id, category_id) |> load_products()}
+  end
+
+  # Portrait tablets show the cart as a panel over the product tiles.
+  def handle_event("toggle_cart", _params, socket) do
+    {:noreply, assign(socket, :cart_open, not socket.assigns.cart_open)}
+  end
+
+  # One tap instead of typing the cash handed over: the exact total (rounded up
+  # to whole rupiah) or a banknote amount. The input is owned by a JS hook, so
+  # the new value is pushed to it as well.
+  def handle_event("quick_cash", %{"amount" => amount}, socket) do
+    value =
+      case amount do
+        "exact" ->
+          socket.assigns.total |> Decimal.round(0, :ceiling) |> Decimal.to_integer()
+
+        other ->
+          to_int(other)
+      end
+      |> Integer.to_string()
+
+    {:noreply,
+     socket
+     |> assign(:amount_paid, value)
+     |> assign_totals()
+     |> push_event("set_amount_paid_input", %{value: value})}
   end
 
   # Submit (Enter) — also fired by a barcode scanner after it "types" the code.
@@ -196,7 +243,8 @@ defmodule ZahlungsWeb.CashierLive do
         {:noreply,
          socket
          |> add_to_cart(product)
-         |> assign(search: "", results: [])
+         |> assign(:search, "")
+         |> load_products()
          |> assign_totals()
          |> push_event("beep", %{type: "ok"})
          |> put_flash(:info, "Added #{product.name}.")}
@@ -358,11 +406,20 @@ defmodule ZahlungsWeb.CashierLive do
       tax: "",
       amount_paid: "",
       payment_method: "cash",
-      search: "",
-      results: []
+      search: ""
     )
     |> assign_totals()
+    |> load_products()
   end
+
+  @banknotes [5_000, 10_000, 20_000, 50_000, 100_000]
+
+  # Banknote amounts that would cover the total, for the quick-cash buttons.
+  defp quick_amounts(total) do
+    Enum.filter(@banknotes, &(not Decimal.lt?(Decimal.new(&1), total)))
+  end
+
+  defp cart_units(cart), do: Enum.reduce(cart, 0, &(&1.quantity + &2))
 
   defp assign_totals(socket) do
     subtotal = cart_subtotal(socket.assigns.cart)
@@ -549,9 +606,14 @@ defmodule ZahlungsWeb.CashierLive do
       </ul>
     </div>
 
-    <div :if={@shift} class="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
-      <%!-- Product search --%>
-      <div>
+    <%!--
+      Two panels side by side on a landscape tablet or wider (products left, cart
+      right). On a portrait tablet the products fill the screen and the cart is a
+      panel opened from the bar pinned to the bottom.
+    --%>
+    <div :if={@shift} class="mt-4 grid grid-cols-1 gap-6 lg:grid-cols-5 md:landscape:grid-cols-5">
+      <%!-- Product search + tiles --%>
+      <div class="pb-24 lg:col-span-3 lg:pb-0 md:landscape:col-span-3 md:landscape:pb-0">
         <form phx-change="search" phx-submit="scan">
           <input
             type="text"
@@ -584,25 +646,56 @@ defmodule ZahlungsWeb.CashierLive do
           <p class="mt-1 text-xs text-gray-400">Point the camera at a barcode.</p>
         </div>
 
-        <ul class="mt-3 divide-y divide-gray-100">
-          <li :for={product <- @results} class="flex items-center justify-between py-2">
-            <div>
-              <p class="text-sm font-medium">{product.name}</p>
-              <p class="text-xs text-gray-400">{product.sku} · stock {product.stock} · {format_money(product.price)}</p>
-            </div>
-            <.button phx-click={JS.push("add", value: %{id: product.id})} class="!py-1 !px-3 !text-sm">
-              Add
-            </.button>
-          </li>
-          <li :if={@search != "" and @results == []} class="py-2 text-sm text-gray-400">
-            No in-stock products match.
-          </li>
-        </ul>
+        <div class="mt-3 flex gap-2 overflow-x-auto pb-1" role="group" aria-label="Kategori">
+          <button
+            type="button"
+            phx-click={JS.push("set_category", value: %{id: ""})}
+            class={["chip", is_nil(@category_id) && "chip-active"]}
+          >
+            Semua
+          </button>
+          <button
+            :for={{name, id} <- @category_options}
+            type="button"
+            phx-click={JS.push("set_category", value: %{id: id})}
+            class={["chip", @category_id == id && "chip-active"]}
+          >
+            {name}
+          </button>
+        </div>
+
+        <div class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <button
+            :for={product <- @results}
+            type="button"
+            phx-click={JS.push("add", value: %{id: product.id})}
+            class="product-tile"
+          >
+            <span class="block font-medium leading-snug">{product.name}</span>
+            <span class="mt-1 block text-blue-700">{format_money(product.price)}</span>
+            <span class="mt-1 block text-xs text-gray-500">Stok {product.stock}</span>
+          </button>
+        </div>
+        <p :if={@results == []} class="mt-3 text-sm text-gray-500">
+          Tidak ada produk berstok yang cocok.
+        </p>
       </div>
 
       <%!-- Cart + payment --%>
-      <div class="rounded-lg border border-gray-200 p-4 shadow-sm">
-        <h3 class="font-semibold text-gray-700">Cart</h3>
+      <div class={[
+        "cart-panel lg:col-span-2 md:landscape:col-span-2",
+        (@cart_open && "cart-panel-open") || "hidden lg:block md:landscape:block"
+      ]}>
+        <div class="flex items-center justify-between">
+          <h3 class="font-semibold text-gray-700">Cart</h3>
+          <button
+            type="button"
+            phx-click="toggle_cart"
+            class="touch-target text-sm text-gray-600 underline lg:hidden md:landscape:hidden"
+          >
+            Tutup
+          </button>
+        </div>
 
         <p :if={@cart == []} class="mt-3 text-sm text-gray-400">Cart is empty. Add products to begin.</p>
 
@@ -614,9 +707,9 @@ defmodule ZahlungsWeb.CashierLive do
             </td>
             <td class="py-2">
               <div class="flex items-center gap-2">
-                <.link phx-click={JS.push("dec", value: %{id: item.product_id})} class="px-2 border rounded">-</.link>
+                <.link phx-click={JS.push("dec", value: %{id: item.product_id})} class="qty-button">-</.link>
                 <span>{item.quantity}</span>
-                <.link phx-click={JS.push("inc", value: %{id: item.product_id})} class="px-2 border rounded">+</.link>
+                <.link phx-click={JS.push("inc", value: %{id: item.product_id})} class="qty-button">+</.link>
               </div>
             </td>
             <td class="py-2 text-right">{format_money(Decimal.mult(item.unit_price, item.quantity))}</td>
@@ -672,6 +765,25 @@ defmodule ZahlungsWeb.CashierLive do
             class="form-control"
           />
         </label>
+        <div
+          :if={@payment_method == "cash" and @cart != []}
+          class="mt-2 flex flex-wrap gap-2"
+          role="group"
+          aria-label="Nominal cepat"
+        >
+          <button type="button" phx-click={JS.push("quick_cash", value: %{amount: "exact"})} class="chip">
+            Uang pas
+          </button>
+          <button
+            :for={amount <- quick_amounts(@total)}
+            type="button"
+            data-quick-cash={amount}
+            phx-click={JS.push("quick_cash", value: %{amount: amount})}
+            class="chip"
+          >
+            {format_money(amount)}
+          </button>
+        </div>
         <p :if={@payment_method != "cash"} class="text-sm text-gray-500 mt-2">
           Dibayar pas sejumlah total ({payment_method_label(@payment_method)}).
         </p>
@@ -687,6 +799,17 @@ defmodule ZahlungsWeb.CashierLive do
             Complete Sale
           </.button>
         </div>
+      </div>
+
+      <%!-- Portrait only: the cart at a glance, pinned to the bottom of the screen. --%>
+      <div class="cart-bar lg:hidden md:landscape:hidden">
+        <div class="min-w-0 flex-1">
+          <p class="text-xs text-gray-500">{cart_units(@cart)} item</p>
+          <p class="truncate text-lg font-semibold">{format_money(@total)}</p>
+        </div>
+        <button type="button" phx-click="toggle_cart" class="btn btn-primary touch-target" disabled={@cart == []}>
+          {if @cart_open, do: "Tutup", else: "Bayar"}
+        </button>
       </div>
     </div>
 

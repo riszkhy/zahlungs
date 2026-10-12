@@ -55,6 +55,20 @@ defmodule ZahlungsWeb.ShiftLiveTest do
     end
   end
 
+  describe "narrow screens" do
+    test "each shift is also a card that opens its detail" do
+      cashier = user_fixture()
+      shift = shift_fixture(cashier, "100000")
+
+      rendered = ShiftLive.Index |> mount_live(cashier) |> html()
+
+      [_, card] = Regex.run(~r{<a[^>]*id="shift-card-#{shift.id}"[^>]*>(.*?)</a>}s, rendered)
+
+      assert rendered =~ ~s(href="/shifts/#{shift.id}")
+      assert card =~ "open"
+    end
+  end
+
   describe "shift detail" do
     setup do
       cashier = user_fixture()

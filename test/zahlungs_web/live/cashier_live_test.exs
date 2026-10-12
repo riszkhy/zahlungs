@@ -115,7 +115,10 @@ defmodule ZahlungsWeb.CashierLiveTest do
 
       assert [%{quantity: 2}] = socket.assigns.cart
 
-      assert event(socket, "search", %{"q" => "  "}).assigns.results == []
+      # A blank search goes back to the product tiles, not to an empty list.
+      blank = event(socket, "search", %{"q" => "  "})
+      assert blank.assigns.search == "  "
+      assert blank.assigns.results != []
     end
 
     test "quantity is capped at the stock on hand, and decreasing below 1 removes the line",
@@ -131,6 +134,142 @@ defmodule ZahlungsWeb.CashierLiveTest do
 
       assert event(socket, "dec", %{"id" => id}).assigns.cart == []
       assert event(socket, "remove", %{"id" => id}).assigns.cart == []
+    end
+  end
+
+  describe "product tiles" do
+    setup do
+      user = user_on_shift_fixture()
+      category = category_fixture()
+      label = "Tile #{System.unique_integer([:positive])}"
+
+      in_stock =
+        product_fixture(name: "#{label} A", stock: 5, category_id: category.id)
+
+      sold_out = product_fixture(name: "#{label} B", stock: 0, category_id: category.id)
+      elsewhere = product_fixture(name: "#{label} C", stock: 5)
+
+      %{
+        user: user,
+        category: category,
+        label: label,
+        in_stock: in_stock,
+        sold_out: sold_out,
+        elsewhere: elsewhere,
+        socket: mount_live(CashierLive, user)
+      }
+    end
+
+    test "are shown without searching: in-stock products only, at most 24", %{socket: socket} do
+      assert socket.assigns.results != []
+      assert length(socket.assigns.results) <= 24
+      assert Enum.all?(socket.assigns.results, &(&1.stock > 0 and &1.active))
+    end
+
+    test "a category chip narrows the tiles, and clearing it widens them again", ctx do
+      socket = event(ctx.socket, "set_category", %{"id" => ctx.category.id})
+
+      assert Enum.map(socket.assigns.results, & &1.id) == [ctx.in_stock.id]
+      assert html(socket) =~ ctx.in_stock.name
+      refute html(socket) =~ ctx.sold_out.name
+
+      socket = event(socket, "set_category", %{"id" => ""})
+      assert socket.assigns.category_id == nil
+    end
+
+    test "search and category combine", ctx do
+      socket = event(ctx.socket, "search", %{"q" => ctx.label})
+
+      assert Enum.sort(Enum.map(socket.assigns.results, & &1.id)) ==
+               Enum.sort([ctx.in_stock.id, ctx.elsewhere.id])
+
+      socket = event(socket, "set_category", %{"id" => "#{ctx.category.id}"})
+      assert Enum.map(socket.assigns.results, & &1.id) == [ctx.in_stock.id]
+    end
+
+    test "tapping a tile adds the product to the cart", ctx do
+      socket =
+        ctx.socket
+        |> event("set_category", %{"id" => ctx.category.id})
+        |> event("add", %{"id" => ctx.in_stock.id})
+
+      assert [%{product_id: id, quantity: 1}] = socket.assigns.cart
+      assert id == ctx.in_stock.id
+    end
+
+    test "a product sold out by this sale leaves the tiles", ctx do
+      last_one = product_fixture(name: "#{ctx.label} Last", price: Decimal.new("1000"), stock: 1)
+
+      socket =
+        ctx.socket
+        |> event("search", %{"q" => last_one.name})
+        |> event("add", %{"id" => last_one.id})
+        |> event("set_amount_paid", %{"value" => "1000"})
+        |> event("checkout")
+        |> event("new_sale")
+        |> event("search", %{"q" => last_one.name})
+
+      assert socket.assigns.results == []
+    end
+
+    test "the cart panel can be opened and closed (portrait)", %{socket: socket} do
+      refute socket.assigns.cart_open
+
+      socket = event(socket, "toggle_cart")
+      assert socket.assigns.cart_open
+
+      refute event(socket, "toggle_cart").assigns.cart_open
+    end
+  end
+
+  describe "quick cash" do
+    setup do
+      user = user_on_shift_fixture()
+      product = product_fixture(price: Decimal.new("1000"), stock: 10)
+
+      socket =
+        CashierLive
+        |> mount_live(user)
+        |> event("scan", %{"q" => product.sku})
+        |> event("scan", %{"q" => product.sku})
+
+      %{socket: socket}
+    end
+
+    test "exact amount fills in the total and enables checkout", %{socket: socket} do
+      socket = event(socket, "quick_cash", %{"amount" => "exact"})
+
+      assert socket.assigns.amount_paid == "2000"
+      assert socket.assigns.can_checkout
+      assert Decimal.equal?(socket.assigns.change_due, Decimal.new("0"))
+      assert pushed_events(socket) == [{"set_amount_paid_input", %{value: "2000"}}]
+    end
+
+    test "a denomination sets the amount paid and shows the change", %{socket: socket} do
+      socket = event(socket, "quick_cash", %{"amount" => 50_000})
+
+      assert socket.assigns.amount_paid == "50000"
+      assert Decimal.equal?(socket.assigns.change_due, Decimal.new("48000"))
+      assert socket.assigns.can_checkout
+    end
+
+    test "exact amount rounds a fractional total up to whole rupiah", %{socket: socket} do
+      socket =
+        socket
+        |> event("payment", %{"discount" => "0.5", "tax" => ""})
+        |> event("quick_cash", %{"amount" => "exact"})
+
+      assert socket.assigns.amount_paid == "2000"
+      assert socket.assigns.can_checkout
+    end
+
+    test "offers exact cash and only denominations that cover the total", %{socket: socket} do
+      rendered = html(socket)
+
+      assert rendered =~ "Uang pas"
+      assert rendered =~ "5.000"
+      assert rendered =~ "100.000"
+      refute rendered =~ ~s(data-quick-cash="1000")
     end
   end
 

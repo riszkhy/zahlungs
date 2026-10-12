@@ -190,6 +190,52 @@ defmodule ZahlungsWeb.MultiStoreAuthTest do
     end
   end
 
+  describe "menu" do
+    test "the bar keeps the cashier's four screens one tap away", %{conn: conn} do
+      response = conn |> log_in_user(user_fixture()) |> get("/home") |> html_response(200)
+
+      [_, primary] = Regex.run(~r/<nav[^>]*id="primary-nav"[^>]*>(.*?)<\/nav>/s, response)
+
+      for path <- ~w(/cashier /sales /shifts /catalog) do
+        assert primary =~ ~s(href="#{path}")
+      end
+
+      refute primary =~ "/admin/"
+    end
+
+    test "everything else is grouped in the drawer, with the admin group for admins only",
+         %{conn: conn} do
+      as_admin = conn |> log_in_user(admin_fixture()) |> get("/home") |> html_response(200)
+
+      [_, drawer] = Regex.run(~r/<aside[^>]*id="menu-drawer"[^>]*>(.*?)<\/aside>/s, as_admin)
+
+      assert drawer =~ "Kasir"
+      assert drawer =~ "Admin"
+      assert drawer =~ "Akun"
+
+      for path <- ~w(/products /categories /admin/users /admin/stores /admin/stores/register
+                      /admin/suppliers /reports/sales /reports/stock /reports/consignment
+                      /users/settings) do
+        assert drawer =~ ~s(href="#{path}")
+      end
+
+      assert drawer =~ ~s(action="/users/log_out")
+
+      as_cashier = conn |> log_in_user(user_fixture()) |> get("/home") |> html_response(200)
+      [_, drawer] = Regex.run(~r/<aside[^>]*id="menu-drawer"[^>]*>(.*?)<\/aside>/s, as_cashier)
+
+      refute drawer =~ "/admin/"
+      refute drawer =~ "/reports/"
+      assert drawer =~ ~s(href="/users/settings")
+    end
+
+    test "guests only get a log in link", %{conn: conn} do
+      response = conn |> get("/users/reset_password") |> html_response(200)
+
+      refute response =~ ~s(id="menu-drawer")
+    end
+  end
+
   describe "navbar" do
     test "an admin gets the switcher with every active store and all stores", %{conn: conn} do
       other = store_fixture(name: "Cabang Navbar")
