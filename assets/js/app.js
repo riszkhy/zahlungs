@@ -283,10 +283,17 @@ const loginForm = document.getElementById("login-form")
 if (loginForm && navigator.geolocation) {
   let settled = false
   let waitingToSubmit = false
+  // The form goes out once. A second POST would carry the CSRF token of the
+  // session the first one just replaced, and fail after a successful login.
+  let sent = false
 
   const finish = () => {
     settled = true
-    if (waitingToSubmit) loginForm.submit()
+
+    if (waitingToSubmit && !sent) {
+      sent = true
+      loginForm.submit()
+    }
   }
 
   navigator.geolocation.getCurrentPosition(
@@ -302,9 +309,23 @@ if (loginForm && navigator.geolocation) {
 
   // If the user submits before the position arrived, give it a moment.
   loginForm.addEventListener("submit", (event) => {
-    if (settled || waitingToSubmit) return
+    if (sent || waitingToSubmit) return event.preventDefault()
+
+    if (settled) {
+      sent = true
+      return
+    }
+
     event.preventDefault()
     waitingToSubmit = true
-    setTimeout(() => { if (!settled) finish() }, 3000)
+    setTimeout(finish, 3000)
+  })
+
+  // Coming back with the browser's Back button restores this page as it was.
+  window.addEventListener("pageshow", (event) => {
+    if (event.persisted) {
+      sent = false
+      waitingToSubmit = false
+    }
   })
 }
