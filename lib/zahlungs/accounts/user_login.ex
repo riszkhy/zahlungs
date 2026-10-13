@@ -19,6 +19,7 @@ defmodule Zahlungs.Accounts.UserLogin do
 
     belongs_to :user, Zahlungs.Accounts.User
     belongs_to :store, Zahlungs.Stores.Store
+    belongs_to :organization, Zahlungs.Organizations.Organization
 
     timestamps(updated_at: false)
   end

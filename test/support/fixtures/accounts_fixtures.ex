@@ -19,6 +19,8 @@ defmodule Zahlungs.AccountsFixtures do
   `store_id: nil` for a user without one.
   """
   def user_fixture(attrs \\ %{}) do
+    Zahlungs.StoresFixtures.default_org()
+
     {store_id, attrs} =
       attrs
       |> Map.new()
@@ -35,6 +37,16 @@ defmodule Zahlungs.AccountsFixtures do
     else
       user
     end
+  end
+
+  @doc "The platform operator: belongs to no organization."
+  def superadmin_fixture(attrs \\ %{}) do
+    {:ok, user} =
+      attrs
+      |> valid_user_attributes()
+      |> Zahlungs.Accounts.create_platform_admin()
+
+    user
   end
 
   def extract_user_token(fun) do

@@ -213,3 +213,14 @@ Kelola user (admin):
   diketuk; di atasnya tetap tabel.
 - **Tabel lain** digulir ke samping di dalam kotaknya bila lebih lebar dari layar.
 - Target sentuh minimal 44 px; input 16 px pada layar sentuh.
+
+## SaaS (banyak pemilik)
+
+- **/signup** (tamu): daftar bisnis baru -> organisasi berstatus menunggu,
+  "Toko Utama", dan akun pemilik. **/signup/pending**: konfirmasi.
+- **/platform/organizations** (hanya `superadmin`): daftar organisasi + pemilik,
+  filter status, Setujui / Tolak / Tangguhkan / Aktifkan lagi, catatan, dan
+  catatan tagihan manual.
+- `superadmin` tidak punya menu kasir maupun admin toko; membuka halaman itu
+  mengembalikannya ke `/platform/organizations`.
+- Semua halaman lain hanya menampilkan data organisasi user yang login.

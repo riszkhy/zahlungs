@@ -51,13 +51,21 @@ defmodule ZahlungsWeb.Layouts do
   The cashier's everyday screens, shown in the top bar from tablet width up.
   Admin and account links are in `menu_drawer/1`.
   """
+  attr :current_user, :map, required: true
+
   def primary_nav(assigns) do
     ~H"""
-    <nav id="primary-nav" class="hidden items-center gap-1 md:flex" aria-label="Kasir">
-      <.link :for={{label, path} <- cashier_links()} href={path} class="nav-tap">{label}</.link>
+    <nav id="primary-nav" class="hidden items-center gap-1 md:flex" aria-label="Utama">
+      <.link :for={{label, path} <- primary_links(@current_user)} href={path} class="nav-tap">{label}</.link>
     </nav>
     """
   end
+
+  # The platform operator has no point of sale, only the organizations page.
+  defp primary_links(%{role: "superadmin"}), do: platform_links()
+  defp primary_links(_user), do: cashier_links()
+
+  defp platform_links, do: [{"Organisasi", ~p"/platform/organizations"}]
 
   @doc """
   The full menu, grouped, in a drawer that slides in from the right. Opened by
@@ -81,13 +89,20 @@ defmodule ZahlungsWeb.Layouts do
         <button type="button" class="drawer-link !w-auto" @click="open = false">Tutup</button>
       </div>
 
-      <.menu_group title="Kasir" links={[{"Home", ~p"/home"} | cashier_links()]} />
+      <.menu_group :if={@current_user.role == "superadmin"} title="Platform" links={platform_links()} />
+      <.menu_group
+        :if={@current_user.role != "superadmin"}
+        title="Kasir"
+        links={[{"Home", ~p"/home"} | cashier_links()]}
+      />
       <.menu_group :if={@current_user.role == "admin"} title="Admin" links={admin_links()} />
 
       <div class="mt-auto border-t border-gray-200 px-2 py-3">
         <p class="px-3 text-xs font-semibold uppercase tracking-wide text-gray-500">Akun</p>
         <p class="truncate px-3 py-1 text-sm text-gray-500">{@current_user.email}</p>
-        <.link href={~p"/users/settings"} class="drawer-link">Profile</.link>
+        <.link :if={@current_user.role != "superadmin"} href={~p"/users/settings"} class="drawer-link">
+          Profile
+        </.link>
         <.form for={%{}} action={~p"/users/log_out"} method="delete">
           <button type="submit" class="drawer-link text-left text-red-700">Log out</button>
         </.form>

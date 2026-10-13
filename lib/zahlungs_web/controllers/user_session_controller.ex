@@ -17,7 +17,7 @@ defmodule ZahlungsWeb.UserSessionController do
 
     with :ok <- LoginThrottle.check(email, ip),
          %{} = user <- Accounts.get_user_by_email_and_password(email, password),
-         true <- Scope.usable?(Scope.for_user(user)) do
+         :ok <- allowed(Scope.for_user(user)) do
       LoginThrottle.reset(email, ip)
       record_login(conn, user, user_params, ip)
       UserAuth.log_in_user(conn, user, user_params)
@@ -35,8 +35,18 @@ defmodule ZahlungsWeb.UserSessionController do
         # In order to prevent user enumeration attacks, don't disclose whether the email is registered.
         render(conn, :new, error_message: "Invalid email or password")
 
-      false ->
-        render(conn, :new, error_message: UserAuth.no_store_message())
+      {:blocked, reason} ->
+        render(conn, :new, error_message: UserAuth.block_message(reason))
+    end
+  end
+
+  # The platform operator has no organization to be approved; everyone else
+  # needs an active one (and a cashier, an active store).
+  defp allowed(scope) do
+    cond do
+      Scope.platform_admin?(scope) -> :ok
+      reason = Scope.block_reason(scope) -> {:blocked, reason}
+      true -> :ok
     end
   end
 

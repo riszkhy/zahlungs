@@ -45,6 +45,9 @@ defmodule Zahlungs.Sales do
   def create_sale(_user, [], _payment), do: {:error, :empty_cart}
 
   def create_sale(user, cart, payment) do
+    # The cashier decides whose catalog and stock this is.
+    Repo.put_org_id(user.organization_id)
+
     with [_ | _] = items <- build_items(cart),
          {:ok, totals} <- compute_totals(items, payment) do
       do_create_sale(user, items, totals)
@@ -330,9 +333,11 @@ defmodule Zahlungs.Sales do
   # Everything below is read through a scope: a cashier sees their store's
   # sales, an admin the store they picked or all of them.
 
+  # One store, or — for an admin looking at all stores — every store of their
+  # organization. Never unfiltered: these tables are shared by all owners.
   defp for_store(query, scope) do
     case Scope.store_id(scope) do
-      nil -> query
+      nil -> where(query, [s], s.store_id in ^Zahlungs.Stores.store_ids())
       store_id -> where(query, [s], s.store_id == ^store_id)
     end
   end

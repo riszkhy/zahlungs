@@ -165,7 +165,26 @@ Satu instalasi melayani semua cabang lewat internet.
   (catat di kertas, input ulang setelah tersambung).
 - `POOL_SIZE`: naikkan sesuai jumlah kasir yang aktif bersamaan di semua toko.
 
-## 7. Rollback
+## 7. SaaS (banyak pemilik)
+
+Rincian model dan batasannya ada di `docs/SAAS-multi-pemilik.md`.
+
+- Migrasi `20261013090000`-`20261013090001` membuat tabel `organizations`,
+  organisasi bawaan **"Organisasi Utama"** (aktif), memindahkan semua data lama
+  ke sana, dan mengganti indeks unik (SKU, barcode, kategori, kode toko, kode
+  invoice) menjadi per organisasi/toko. Backup dulu.
+- **Super admin** (operator platform): set `SEED_PLATFORM_ADMIN_EMAIL` dan
+  `SEED_PLATFORM_ADMIN_PASSWORD`, jalankan `bin/seed`, lalu hapus env
+  password-nya. Akun ini hanya bisa membuka `/platform`.
+- Pendaftar baru muncul berstatus "Menunggu" di `/platform/organizations` dan
+  baru bisa login setelah disetujui. Penangguhan mengakhiri sesi mereka pada
+  request berikutnya.
+- Penagihan manual: catat "Dibayar sampai" dan catatan di halaman yang sama.
+  Tidak ada penangguhan otomatis saat jatuh tempo.
+- Belum ada verifikasi email pendaftar maupun reset password lewat email
+  (menunggu mailer); pembatas pendaftaran adalah 5 kali per 15 menit per alamat.
+
+## 8. Rollback
 
 ```bash
 bin/zahlungs eval "Release.rollback(Zahlungs.Repo, 20260701170000)"

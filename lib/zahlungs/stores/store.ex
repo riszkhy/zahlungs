@@ -15,6 +15,8 @@ defmodule Zahlungs.Stores.Store do
     field :longitude, :float
     field :active, :boolean, default: true
 
+    belongs_to :organization, Zahlungs.Organizations.Organization
+
     timestamps()
   end
 
@@ -44,8 +46,9 @@ defmodule Zahlungs.Stores.Store do
     |> validate_coordinates_together()
     # Checked here too, so a form can say "taken" before anything is saved; the
     # constraint below still guards against two saves racing each other.
+    |> Zahlungs.Organizations.put_organization()
     |> unsafe_validate_unique(:code, Zahlungs.Repo)
-    |> unique_constraint(:code)
+    |> unique_constraint(:code, name: :stores_organization_id_code_index)
   end
 
   # A latitude without a longitude (or the reverse) is not a location.

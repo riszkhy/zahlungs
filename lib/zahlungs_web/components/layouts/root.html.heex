@@ -24,7 +24,7 @@
           Zahlungs
         </a>
 
-        <.primary_nav :if={assigns[:current_user]} />
+        <.primary_nav :if={assigns[:current_user]} current_user={assigns[:current_user]} />
 
         <div class="ml-auto flex items-center gap-2">
           <.store_switcher :if={assigns[:current_scope]} scope={assigns[:current_scope]} />

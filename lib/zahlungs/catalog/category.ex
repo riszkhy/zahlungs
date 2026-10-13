@@ -8,6 +8,8 @@ defmodule Zahlungs.Catalog.Category do
 
     has_many :products, Zahlungs.Catalog.Product
 
+    belongs_to :organization, Zahlungs.Organizations.Organization
+
     timestamps()
   end
 
@@ -17,7 +19,8 @@ defmodule Zahlungs.Catalog.Category do
     |> cast(attrs, [:name])
     |> validate_required([:name])
     |> validate_length(:name, max: 160)
+    |> Zahlungs.Organizations.put_organization()
     |> unsafe_validate_unique(:name, Zahlungs.Repo)
-    |> unique_constraint(:name)
+    |> unique_constraint(:name, name: :categories_organization_id_name_index)
   end
 end

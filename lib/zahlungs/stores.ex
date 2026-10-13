@@ -29,6 +29,9 @@ defmodule Zahlungs.Stores do
 
   def get_store!(id), do: Repo.get!(Store, id)
 
+  @doc "The ids of every store of the current organization, active or not."
+  def store_ids, do: Repo.all(from s in Store, select: s.id)
+
   @doc "Gets an active store by id, or nil (also for a nil or unknown id)."
   def get_active_store(nil), do: nil
 

@@ -8,12 +8,14 @@ defmodule Zahlungs.CatalogFixtures do
   def unique_sku, do: "SKU-#{System.unique_integer([:positive])}"
 
   def category_fixture(attrs \\ %{}) do
+    Zahlungs.StoresFixtures.default_org()
     attrs = Enum.into(attrs, %{name: "Category #{System.unique_integer([:positive])}"})
     {:ok, category} = Catalog.create_category(attrs)
     category
   end
 
   def supplier_fixture(attrs \\ %{}) do
+    Zahlungs.StoresFixtures.default_org()
     attrs = Enum.into(attrs, %{name: "Supplier #{System.unique_integer([:positive])}"})
     {:ok, supplier} = Catalog.create_supplier(attrs)
     supplier

@@ -23,7 +23,8 @@ defmodule Zahlungs.Accounts do
 
   """
   def get_user_by_email(email) when is_binary(email) do
-    Repo.get_by(User, email: email)
+    # Before login there is no current organization: emails are unique across all.
+    Repo.get_by(User, [email: email], skip_org_id: true)
   end
 
   @doc """
@@ -40,7 +41,7 @@ defmodule Zahlungs.Accounts do
   """
   def get_user_by_email_and_password(email, password)
       when is_binary(email) and is_binary(password) do
-    user = Repo.get_by(User, email: email)
+    user = Repo.get_by(User, [email: email], skip_org_id: true)
     # A deactivated user cannot authenticate even with the correct password.
     if User.valid_password?(user, password) and user.active, do: user
   end
@@ -161,6 +162,7 @@ defmodule Zahlungs.Accounts do
     {latitude, longitude} = coordinates(position)
 
     Repo.insert(%UserLogin{
+      organization_id: user.organization_id,
       user_id: user.id,
       store_id: store && store.id,
       latitude: latitude,
@@ -229,7 +231,10 @@ defmodule Zahlungs.Accounts do
   @doc "Deletes login-log rows older than `days` days. Returns how many were removed."
   def prune_user_logins(days) when is_integer(days) and days > 0 do
     cutoff = NaiveDateTime.add(NaiveDateTime.utc_now(), -days * 86_400)
-    {count, _} = Repo.delete_all(from l in UserLogin, where: l.inserted_at < ^cutoff)
+    # Maintenance across every organization.
+    {count, _} =
+      Repo.delete_all(from(l in UserLogin, where: l.inserted_at < ^cutoff), skip_org_id: true)
+
     count
   end
 
@@ -244,9 +249,22 @@ defmodule Zahlungs.Accounts do
   def create_user(attrs) do
     now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
 
-    %User{}
+    %User{organization_id: Repo.get_org_id()}
     |> User.admin_changeset(attrs)
     |> Ecto.Changeset.put_change(:confirmed_at, now)
+    |> Repo.insert()
+  end
+
+  @doc """
+  Creates a platform operator (role `superadmin`): confirmed, and belonging to
+  no organization. For seeds and the console - there is no screen for it.
+  """
+  def create_platform_admin(attrs) do
+    now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+
+    %User{organization_id: nil}
+    |> User.registration_changeset(attrs)
+    |> Ecto.Changeset.change(role: "superadmin", confirmed_at: now)
     |> Repo.insert()
   end
 
@@ -265,7 +283,7 @@ defmodule Zahlungs.Accounts do
 
   """
   def register_user(attrs) do
-    %User{}
+    %User{organization_id: Repo.get_org_id()}
     |> User.registration_changeset(attrs)
     |> Repo.insert()
   end

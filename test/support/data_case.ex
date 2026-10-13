@@ -34,6 +34,10 @@ defmodule Zahlungs.DataCase do
       Ecto.Adapters.SQL.Sandbox.mode(Zahlungs.Repo, {:shared, self()})
     end
 
+    # Context functions need a current organization (see Zahlungs.Repo): every
+    # test starts inside an organization of its own.
+    Zahlungs.StoresFixtures.default_org()
+
     :ok
   end
 

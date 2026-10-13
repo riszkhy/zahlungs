@@ -21,6 +21,7 @@ defmodule Zahlungs.Catalog.Product do
 
     belongs_to :category, Zahlungs.Catalog.Category
     belongs_to :supplier, Zahlungs.Catalog.Supplier
+    belongs_to :organization, Zahlungs.Organizations.Organization
 
     timestamps()
   end
@@ -58,9 +59,10 @@ defmodule Zahlungs.Catalog.Product do
     |> validate_number(:margin_percent, greater_than_or_equal_to: 0)
     |> validate_number(:price, greater_than_or_equal_to: 0)
     |> validate_number(:stock, greater_than_or_equal_to: 0)
+    |> Zahlungs.Organizations.put_organization()
     |> unsafe_validate_unique(:sku, Zahlungs.Repo)
-    |> unique_constraint(:sku)
-    |> unique_constraint(:barcode)
+    |> unique_constraint(:sku, name: :products_organization_id_sku_index)
+    |> unique_constraint(:barcode, name: :products_organization_id_barcode_index)
     |> assoc_constraint(:category)
     |> assoc_constraint(:supplier)
   end

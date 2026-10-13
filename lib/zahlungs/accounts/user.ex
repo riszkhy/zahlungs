@@ -15,6 +15,8 @@ defmodule Zahlungs.Accounts.User do
 
     # The store a cashier works in. Admins (the owner) may have none.
     belongs_to :store, Zahlungs.Stores.Store
+    # nil only for the platform operator (role "superadmin").
+    belongs_to :organization, Zahlungs.Organizations.Organization
 
     timestamps()
   end
@@ -56,7 +58,8 @@ defmodule Zahlungs.Accounts.User do
     |> validate_required([:email])
     |> validate_format(:email, ~r/^[^\s]+@[^\s]+$/, message: "must have the @ sign and no spaces")
     |> validate_length(:email, max: 160)
-    |> unsafe_validate_unique(:email, Zahlungs.Repo)
+    # One email, one account, across every organization.
+    |> unsafe_validate_unique(:email, Zahlungs.Repo, repo_opts: [skip_org_id: true])
     |> unique_constraint(:email)
   end
 

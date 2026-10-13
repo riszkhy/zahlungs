@@ -1,62 +1,107 @@
 defmodule Zahlungs.Scope do
   @moduledoc """
-  Who is acting, and in which store.
+  Who is acting, for which organization, and in which store.
 
-  Every context function that reads or writes per-store data (stock, sales,
-  shifts) takes a scope, so the store never comes from request params and a
-  query can't forget to filter by it.
+  Building a scope for a user also makes that user's organization the current
+  one for the process (`Zahlungs.Repo.put_org_id/1`), so every query on an
+  owned table that follows is confined to it. Context functions that read or
+  write per-store data (stock, sales, shifts) take the scope too, so the store
+  never comes from request params.
 
     * A **cashier** is bound to their own store. Without an active one they have
-      no usable scope (`store: nil`) and are not let in.
-    * An **admin** works in the store they picked (kept in the session), or in
-      none at all — "all stores" — which reports and lists treat as no filter.
+      no usable scope and are not let in.
+    * An **admin** (an owner or their staff) works in the store they picked
+      (kept in the session), or in none — "all stores" — which lists and
+      reports treat as every store of their organization.
+    * A **platform admin** (role `superadmin`) belongs to no organization and
+      has no store: they only use the `/platform` pages.
+
+  A scope is only usable while the organization is `active`.
   """
 
   alias Zahlungs.Accounts.User
+  alias Zahlungs.Organizations
+  alias Zahlungs.Organizations.Organization
+  alias Zahlungs.Repo
   alias Zahlungs.Stores
   alias Zahlungs.Stores.Store
 
-  defstruct user: nil, store: nil
+  defstruct user: nil, organization: nil, store: nil
 
   @doc """
-  Builds the scope for a user. `chosen` is the admin's store choice from the
-  session: a store id, `"all"`, or nil for the default. It is ignored for
-  cashiers.
+  Builds the scope for a user and enters their organization. `chosen` is the
+  admin's store choice from the session: a store id, `"all"`, or nil for the
+  default. It is ignored for cashiers.
   """
   def for_user(user, chosen \\ nil)
 
   def for_user(nil, _chosen), do: nil
 
-  def for_user(%User{role: "admin"} = user, "all"), do: %__MODULE__{user: user, store: nil}
-
-  def for_user(%User{role: "admin"} = user, chosen) do
-    store =
-      Stores.get_active_store(chosen) || Stores.get_active_store(user.store_id) ||
-        Stores.default_store()
-
-    %__MODULE__{user: user, store: store}
+  def for_user(%User{role: "superadmin"} = user, _chosen) do
+    Repo.put_org_id(nil)
+    %__MODULE__{user: user}
   end
 
-  def for_user(%User{} = user, _chosen) do
-    %__MODULE__{user: user, store: Stores.get_active_store(user.store_id)}
+  def for_user(%User{} = user, chosen) do
+    Repo.put_org_id(user.organization_id)
+
+    %__MODULE__{
+      user: user,
+      organization: Organizations.get_organization(user.organization_id),
+      store: store_for(user, chosen)
+    }
   end
 
-  @doc "A scope for a store with no acting user (seeds, background work, tests)."
-  def for_store(%Store{} = store), do: %__MODULE__{store: store}
+  defp store_for(%User{role: "admin"}, "all"), do: nil
 
-  @doc "True when the scope's user is an admin."
+  defp store_for(%User{role: "admin"} = user, chosen) do
+    Stores.get_active_store(chosen) || Stores.get_active_store(user.store_id) ||
+      Stores.default_store()
+  end
+
+  defp store_for(%User{} = user, _chosen), do: Stores.get_active_store(user.store_id)
+
+  @doc """
+  A scope for a store with no acting user (seeds, background work, tests).
+  Enters the store's organization.
+  """
+  def for_store(%Store{} = store) do
+    Repo.put_org_id(store.organization_id)
+    %__MODULE__{store: store}
+  end
+
+  @doc "True when the scope's user is an admin of their organization."
   def admin?(%__MODULE__{user: %User{role: "admin"}}), do: true
   def admin?(%__MODULE__{}), do: false
 
-  @doc "True when the scope can be used at all: it has a store, or is an admin's."
-  def usable?(%__MODULE__{store: %Store{}}), do: true
-  def usable?(%__MODULE__{} = scope), do: admin?(scope)
-  def usable?(nil), do: false
+  @doc "True for the platform operator."
+  def platform_admin?(%__MODULE__{user: %User{role: "superadmin"}}), do: true
+  def platform_admin?(_scope), do: false
 
   @doc """
-  The id to filter per-store data by, or nil for an admin looking at all stores.
-  Raises for a non-admin without a store, so a missing store can never widen a
-  query to everything.
+  Why this scope can't use the application, or nil when it can:
+  `:pending`, `:rejected` or `:suspended` (the organization's status),
+  `:no_organization`, or `:no_store` (a cashier without an active store).
+  """
+  def block_reason(nil), do: :no_organization
+
+  def block_reason(%__MODULE__{user: nil, store: %Store{}}), do: nil
+
+  def block_reason(%__MODULE__{} = scope) do
+    case scope.organization do
+      nil -> :no_organization
+      %Organization{status: "active"} -> if scope.store || admin?(scope), do: nil, else: :no_store
+      %Organization{status: status} -> String.to_existing_atom(status)
+    end
+  end
+
+  @doc "True when the scope can be used: an active organization, and a store or an admin."
+  def usable?(scope), do: block_reason(scope) == nil
+
+  @doc """
+  The id to filter per-store data by, or nil for an admin looking at all the
+  stores of their organization. Raises for a non-admin without a store, so a
+  missing store can never widen a query.
   """
   def store_id(%__MODULE__{store: %Store{id: id}}), do: id
 

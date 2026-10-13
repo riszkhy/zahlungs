@@ -64,7 +64,7 @@ defmodule Zahlungs.Sales.Sale do
     |> validate_number(:discount, greater_than_or_equal_to: 0)
     |> validate_number(:tax, greater_than_or_equal_to: 0)
     |> validate_number(:total, greater_than_or_equal_to: 0)
-    |> unique_constraint(:code)
+    |> unique_constraint(:code, name: :sales_store_id_code_index)
   end
 
   @doc "Changeset used only to set the human-readable code after the id is known."
@@ -72,7 +72,7 @@ defmodule Zahlungs.Sales.Sale do
     sale
     |> cast(%{code: code}, [:code])
     |> validate_required([:code])
-    |> unique_constraint(:code)
+    |> unique_constraint(:code, name: :sales_store_id_code_index)
   end
 
   @doc "Marks a sale as returned/refunded."

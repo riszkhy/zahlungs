@@ -12,7 +12,18 @@
 
 alias Zahlungs.Accounts
 alias Zahlungs.Accounts.User
+alias Zahlungs.Organizations.Organization
 alias Zahlungs.Repo
+
+import Ecto.Query, only: [from: 2]
+
+# Everything seeded below belongs to the first organization (created by the
+# migrations as "Organisasi Utama"; made here on a database that has none).
+seed_org =
+  Repo.one(from o in Organization, order_by: o.id, limit: 1) ||
+    Repo.insert!(%Organization{name: "Organisasi Utama", status: "active"})
+
+Repo.put_org_id(seed_org.id)
 
 defmodule Seeds do
   @doc "The store seeded cashiers and stock go into: the first active one, created if none exists."
@@ -67,7 +78,33 @@ seed_cashier = fn email, password, name ->
   Seeds.ensure_user(email, password, "cashier", name)
 end
 
+# The platform operator (role superadmin): reviews sign-ups at /platform and
+# belongs to no organization.
+seed_platform_admin = fn email, password ->
+  case Accounts.get_user_by_email(email) do
+    nil ->
+      {:ok, _} =
+        Accounts.create_platform_admin(%{name: "Platform", email: email, password: password})
+
+      IO.puts("Seeded platform admin: #{email}")
+
+    _existing ->
+      IO.puts("Skipped (already exists): #{email}")
+  end
+end
+
 if env == :prod do
+  platform_email = System.get_env("SEED_PLATFORM_ADMIN_EMAIL")
+  platform_password = System.get_env("SEED_PLATFORM_ADMIN_PASSWORD")
+
+  if platform_email && platform_password do
+    seed_platform_admin.(platform_email, platform_password)
+  else
+    IO.puts(
+      "Skipped platform admin seed: set SEED_PLATFORM_ADMIN_EMAIL and SEED_PLATFORM_ADMIN_PASSWORD."
+    )
+  end
+
   admin_email = System.get_env("SEED_ADMIN_EMAIL")
   admin_password = System.get_env("SEED_ADMIN_PASSWORD")
 
@@ -86,6 +123,7 @@ if env == :prod do
 else
   seed_admin.("admin@zahlungs.test", "adminpassword123", "Administrator")
   seed_cashier.("cashier@zahlungs.test", "cashierpassword123", "Kasir Utama")
+  seed_platform_admin.("platform@zahlungs.test", "platformpassword123")
 end
 
 ## Sample catalog data (idempotent by name / SKU) — dev/test only, never prod.

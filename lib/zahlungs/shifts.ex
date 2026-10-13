@@ -172,15 +172,15 @@ defmodule Zahlungs.Shifts do
 
   # Cash movements made in the scope's store (a movement's store is its shift's).
   defp movements_query(scope) do
-    case Scope.store_id(scope) do
-      nil ->
-        CashMovement
+    store_ids =
+      case Scope.store_id(scope) do
+        nil -> Zahlungs.Stores.store_ids()
+        store_id -> [store_id]
+      end
 
-      store_id ->
-        from m in CashMovement,
-          join: sh in assoc(m, :shift),
-          where: sh.store_id == ^store_id
-    end
+    from m in CashMovement,
+      join: sh in assoc(m, :shift),
+      where: sh.store_id in ^store_ids
   end
 
   @doc "Lists the cash movements of a shift (most recent first), preloading supplier."
@@ -320,9 +320,11 @@ defmodule Zahlungs.Shifts do
   defp maybe_filter_user(query, nil), do: query
   defp maybe_filter_user(query, user_id), do: where(query, [s], s.user_id == ^user_id)
 
+  # One store, or — for an admin looking at all stores — every store of their
+  # organization. Never unfiltered: these tables are shared by all owners.
   defp for_store(query, scope) do
     case Scope.store_id(scope) do
-      nil -> query
+      nil -> where(query, [s], s.store_id in ^Zahlungs.Stores.store_ids())
       store_id -> where(query, [s], s.store_id == ^store_id)
     end
   end
