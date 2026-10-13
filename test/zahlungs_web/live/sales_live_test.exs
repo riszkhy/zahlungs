@@ -108,12 +108,13 @@ defmodule ZahlungsWeb.SalesLiveTest do
       assert socket.assigns.total == 26
       assert socket.assigns.total_pages == 2
       assert length(socket.assigns.sales) == 25
-      assert html(socket) =~ "Page 1 of 2"
+      assert html(socket) =~ "Menampilkan 1–25 dari 26 penjualan"
 
-      # The Prev/Next buttons push the page as a JSON number.
+      # The page buttons push the page as a JSON number.
       last = event(socket, "page", %{"to" => 2})
       assert last.assigns.page == 2
       assert length(last.assigns.sales) == 1
+      assert html(last) =~ "Menampilkan 26–26 dari 26 penjualan"
 
       assert event(last, "page", %{"to" => 99}).assigns.page == 2
       assert event(last, "page", %{"to" => "0"}).assigns.page == 1

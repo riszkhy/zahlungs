@@ -13,7 +13,7 @@ defmodule ZahlungsWeb.SalesLive.Index do
   def mount(_params, _session, socket) do
     {:ok,
      socket
-     |> assign(date: "", page: 1)
+     |> assign(date: "", page: 1, per_page: @per_page)
      |> assign(:voiding, nil)
      |> assign(:void_reason, "")
      |> load_sales()}
@@ -204,23 +204,7 @@ defmodule ZahlungsWeb.SalesLive.Index do
     </.table>
     </div>
 
-    <div :if={@total_pages > 1} class="mt-6 flex items-center justify-center gap-4">
-      <.button
-        phx-click={JS.push("page", value: %{to: @page - 1})}
-        disabled={@page <= 1}
-        class="!bg-gray-200 !text-gray-700"
-      >
-        Prev
-      </.button>
-      <span class="text-sm text-gray-600">Page {@page} of {@total_pages} · {@total} sales</span>
-      <.button
-        phx-click={JS.push("page", value: %{to: @page + 1})}
-        disabled={@page >= @total_pages}
-        class="!bg-gray-200 !text-gray-700"
-      >
-        Next
-      </.button>
-    </div>
+    <.pagination page={@page} per_page={@per_page} total={@total} noun="penjualan" />
 
     <.modal :if={@live_action == :show and @sale} id="sale-modal" show on_cancel={JS.patch(~p"/sales")}>
       <h3 class="text-lg font-semibold">Sale {@sale.code}</h3>

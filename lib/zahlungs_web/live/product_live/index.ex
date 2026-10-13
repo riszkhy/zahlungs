@@ -1,18 +1,21 @@
 defmodule ZahlungsWeb.ProductLive.Index do
   @moduledoc """
-  Admin product management (CRUD). Access is restricted to admins via the
-  `:ensure_admin` on_mount in the router's admin live_session.
+  Admin product management (CRUD), 25 products per page. Access is restricted
+  to admins via the `:ensure_admin` on_mount in the router's admin live_session.
   """
   use ZahlungsWeb, :live_view
 
   alias Zahlungs.Catalog
   alias Zahlungs.Catalog.Product
 
+  @per_page 25
+
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
      socket
      |> assign(search: "", category_id: "", active_filter: "", scanning: false)
+     |> assign(page: 1, per_page: @per_page)
      |> assign(:category_options, Catalog.category_options())
      |> load_products()}
   end
@@ -47,9 +50,14 @@ defmodule ZahlungsWeb.ProductLive.Index do
      |> assign(
        search: search,
        category_id: params["category_id"] || "",
-       active_filter: params["active"] || ""
+       active_filter: params["active"] || "",
+       page: 1
      )
      |> load_products()}
+  end
+
+  def handle_event("page", %{"to" => to}, socket) do
+    {:noreply, socket |> assign(:page, max(1, to_int(to))) |> load_products()}
   end
 
   # Hardware scanner sends the code + Enter (form submit); route it through scan.
@@ -60,7 +68,7 @@ defmodule ZahlungsWeb.ProductLive.Index do
   # Camera hook pushes `%{"q" => code}`. Use it as the search term (SKU/barcode)
   # and beep on hit/miss, like the cashier and catalog screens.
   def handle_event("scan", %{"q" => code}, socket) do
-    socket = socket |> assign(:search, String.trim(code)) |> load_products()
+    socket = socket |> assign(search: String.trim(code), page: 1) |> load_products()
 
     if socket.assigns.products == [] do
       {:noreply,
@@ -114,15 +122,33 @@ defmodule ZahlungsWeb.ProductLive.Index do
     {:noreply, load_products(socket)}
   end
 
+  # A page past the end (the last row of the last page was just deleted, or
+  # another admin removed products) falls back to the last one that exists.
   defp load_products(socket) do
-    opts = [
+    scope = socket.assigns.current_scope
+
+    filters = [
       search: socket.assigns.search,
       category_id: parse_category(socket.assigns.category_id),
       active: parse_active(socket.assigns.active_filter)
     ]
 
-    assign(socket, :products, Catalog.list_products(socket.assigns.current_scope, opts))
+    total = Catalog.count_products(scope, filters)
+    total_pages = max(1, ceil(total / @per_page))
+    page = min(socket.assigns.page, total_pages)
+
+    products =
+      Catalog.list_products(
+        scope,
+        filters ++ [limit: @per_page, offset: (page - 1) * @per_page]
+      )
+
+    assign(socket, products: products, total: total, total_pages: total_pages, page: page)
   end
+
+  # The page buttons use JS.push, which sends the page as a JSON number.
+  defp to_int(n) when is_integer(n), do: n
+  defp to_int(n) when is_binary(n), do: String.to_integer(n)
 
   defp parse_active("true"), do: true
   defp parse_active("false"), do: false
@@ -220,6 +246,8 @@ defmodule ZahlungsWeb.ProductLive.Index do
         </.link>
       </:action>
     </.table>
+
+    <.pagination page={@page} per_page={@per_page} total={@total} noun="produk" />
 
     <.modal
       :if={@live_action in [:new, :edit]}

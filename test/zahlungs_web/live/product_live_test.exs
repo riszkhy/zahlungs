@@ -115,4 +115,54 @@ defmodule ZahlungsWeb.ProductLiveTest do
       assert socket.assigns.product.id == product.id
     end
   end
+
+  describe "paging" do
+    setup do
+      label = "Paged #{System.unique_integer([:positive])}"
+      for n <- 1..26, do: product_fixture(name: "#{label} #{n}")
+
+      socket =
+        ProductLive.Index |> mount_live(admin_fixture()) |> event("filter", %{"search" => label})
+
+      %{label: label, socket: socket}
+    end
+
+    test "shows 25 per page and clamps out-of-range pages", %{socket: socket} do
+      assert socket.assigns.total == 26
+      assert socket.assigns.total_pages == 2
+      assert length(socket.assigns.products) == 25
+      assert html(socket) =~ "Menampilkan 1–25 dari 26 produk"
+
+      # The page buttons push the page as a JSON number.
+      last = event(socket, "page", %{"to" => 2})
+      assert last.assigns.page == 2
+      assert length(last.assigns.products) == 1
+      assert ids(last) -- ids(socket) == ids(last)
+      assert html(last) =~ "Menampilkan 26–26 dari 26 produk"
+
+      assert event(last, "page", %{"to" => "99"}).assigns.page == 2
+      assert event(last, "page", %{"to" => "0"}).assigns.page == 1
+    end
+
+    test "a new filter or scan goes back to the first page", %{socket: socket, label: label} do
+      last = event(socket, "page", %{"to" => 2})
+
+      assert event(last, "filter", %{"search" => label, "active" => "true"}).assigns.page == 1
+      assert event(last, "scan", %{"q" => label}).assigns.page == 1
+    end
+
+    test "row actions keep the page, unless it no longer exists", %{socket: socket} do
+      last = event(socket, "page", %{"to" => 2})
+      [only] = last.assigns.products
+
+      toggled = event(last, "toggle_active", %{"id" => only.id})
+      assert toggled.assigns.page == 2
+      assert ids(toggled) == [only.id]
+
+      deleted = event(toggled, "delete", %{"id" => only.id})
+      assert deleted.assigns.page == 1
+      assert deleted.assigns.total == 25
+      assert length(deleted.assigns.products) == 25
+    end
+  end
 end
