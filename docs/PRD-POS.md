@@ -42,7 +42,7 @@ dan sebagian **Profile**.
 
 ### Non-Goals (Di Luar Cakupan v1)
 - Integrasi pembayaran online / payment gateway.
-- Manajemen multi-cabang & multi-gudang.
+- Manajemen multi-gudang. (Multi-cabang sudah direncanakan: lihat `docs/SPRINT-multi-toko.md`.)
 - Laporan keuangan/akuntansi lengkap.
 - Aplikasi mobile native (cukup web responsif).
 - Pencetakan struk ke printer thermal (hanya tampilan/preview struk).

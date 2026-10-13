@@ -10,6 +10,8 @@ defmodule Zahlungs.Catalog.Supplier do
 
     has_many :products, Zahlungs.Catalog.Product
 
+    belongs_to :organization, Zahlungs.Organizations.Organization
+
     timestamps()
   end
 
@@ -21,5 +23,6 @@ defmodule Zahlungs.Catalog.Supplier do
     |> validate_length(:name, max: 160)
     |> validate_length(:phone, max: 40)
     |> validate_length(:note, max: 255)
+    |> Zahlungs.Organizations.put_organization()
   end
 end

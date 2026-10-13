@@ -49,6 +49,9 @@ Aturan akses berlapis (router):
     ├── /categories             Manajemen kategori (+ /new, /:id/edit)
     ├── /admin/users            Manajemen user (list, buat, ubah role,
     │                           reset password)
+    ├── /admin/stores           Manajemen toko/cabang (ubah, aktif/nonaktif)
+    ├── /admin/stores/register  Daftar cabang: wizard 2 langkah (data toko, kasir pertama opsional)
+    ├── /admin/logins           Riwayat login + lokasi (filter toko & user)
     ├── /admin/suppliers        Manajemen supplier/consignor (+ /new, /:id/edit)
     ├── /reports/sales          Laporan penjualan (ringkasan, harian, per kasir,
     │                           per kategori, produk terlaris)
@@ -72,6 +75,7 @@ Urutan link disesuaikan peran:
 | Products    |   –   |    –    |   ✓   | `/products`            |
 | Categories  |   –   |    –    |   ✓   | `/categories`          |
 | Users       |   –   |    –    |   ✓   | `/admin/users`         |
+| Stores      |   –   |    –    |   ✓   | `/admin/stores`        |
 | Suppliers   |   –   |    –    |   ✓   | `/admin/suppliers`     |
 | Reports     |   –   |    –    |   ✓   | `/reports/sales`       |
 | Stock       |   –   |    –    |   ✓   | `/reports/stock`       |
@@ -173,3 +177,50 @@ Kelola user (admin):
 - `docs/SPRINT-konsinyasi.md` — sprint konsinyasi (Model A)
 - `docs/SPRINT-cash-movements.md` — sprint kas laci + bayar konsinyasi
 - `docs/SPRINT-void-koreksi.md` — sprint void/koreksi invoice
+
+## Multi-toko
+
+- **Toko aktif.** Kasir terikat ke tokonya (nama toko tampil di navbar). Admin
+  memilih toko lewat pemilih di navbar, termasuk **"Semua toko"**; pilihan
+  disimpan di session.
+- **Per toko:** stok, shift, gerakan kas, penjualan, struk. Katalog, kategori,
+  supplier, dan user dikelola terpusat.
+- **Kasir hanya melihat tokonya sendiri**: `/sales`, `/sales/:id`, struk,
+  `/shifts/:id`, dan stok di `/catalog` serta `/cashier`. Data toko lain = 404.
+- **"Semua toko" (admin):** laporan dan daftar digabung, laporan penjualan
+  menambah rincian per toko, stok tampil sebagai jumlah semua toko. Tidak bisa
+  membuka shift atau mengubah stok — pilih satu toko dulu.
+- **Layar kasir** selalu memakai toko dari shift yang sedang terbuka, walaupun
+  admin sudah memindahkan pemilih toko.
+- **Login:** lokasi (lat/long) dari browser dicatat bila diizinkan; tidak
+  pernah menolak login. Lima kali salah password untuk email yang sama menahan
+  login 15 menit.
+
+## Tampilan tablet (kasir)
+
+- **Bar atas:** Cashier, Sales, Shifts, Catalog selalu satu ketukan; toko aktif;
+  tombol **Menu** membuka laci berisi semua link, dikelompokkan *Kasir* / *Admin*
+  / *Akun* (Profile, Log out).
+- **/cashier, mendatar** (lebar >= 1024, atau >= 768 posisi landscape): produk
+  di kiri, keranjang + pembayaran di kanan dan tetap terlihat saat digulir.
+- **/cashier, tegak:** produk memenuhi layar; bilah bawah menampilkan jumlah
+  item + total dan tombol **Bayar** yang membuka panel keranjang.
+- **Kotak produk:** hingga 24 produk berstok tampil tanpa mencari; ketuk untuk
+  menambah. Chip kategori dan kotak cari mempersempitnya.
+- **Nominal cepat:** "Uang pas" dan pecahan (5/10/20/50/100 ribu) yang cukup
+  menutup total.
+- **/sales dan /shifts:** di bawah lebar 1024 tiap baris menjadi kartu yang bisa
+  diketuk; di atasnya tetap tabel.
+- **Tabel lain** digulir ke samping di dalam kotaknya bila lebih lebar dari layar.
+- Target sentuh minimal 44 px; input 16 px pada layar sentuh.
+
+## SaaS (banyak pemilik)
+
+- **/signup** (tamu): daftar bisnis baru -> organisasi berstatus menunggu,
+  "Toko Utama", dan akun pemilik. **/signup/pending**: konfirmasi.
+- **/platform/organizations** (hanya `superadmin`): daftar organisasi + pemilik,
+  filter status, Setujui / Tolak / Tangguhkan / Aktifkan lagi, catatan, dan
+  catatan tagihan manual.
+- `superadmin` tidak punya menu kasir maupun admin toko; membuka halaman itu
+  mengembalikannya ke `/platform/organizations`.
+- Semua halaman lain hanya menampilkan data organisasi user yang login.

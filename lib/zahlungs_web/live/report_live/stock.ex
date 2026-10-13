@@ -15,7 +15,7 @@ defmodule ZahlungsWeb.ReportLive.Stock do
      socket
      |> assign(:page_title, "Stock Report")
      |> assign(:threshold, @threshold)
-     |> assign(:report, Catalog.stock_report(@threshold))}
+     |> assign(:report, Catalog.stock_report(socket.assigns.current_scope, @threshold))}
   end
 
   @impl true

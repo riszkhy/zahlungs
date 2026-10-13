@@ -8,7 +8,7 @@ defmodule ZahlungsWeb.ReceiptController do
   triggers the browser print dialog on load.
   """
   def show(conn, %{"id" => id}) do
-    sale = Sales.get_sale!(id)
+    sale = Sales.get_sale!(conn.assigns.current_scope, id)
 
     conn
     |> put_root_layout(html: false)

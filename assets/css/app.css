@@ -107,3 +107,127 @@
   display: block;
   margin: -1rem 0 2rem;
 }
+
+/* ---- Touch-first cashier (tablet) ---------------------------------------- */
+
+/* A finger needs about 44px; inputs at 16px stop tablets zooming in on focus. */
+.touch-target {
+  @apply inline-flex items-center justify-center;
+  min-height: 44px;
+  min-width: 44px;
+}
+
+@media (pointer: coarse) {
+  .form-control,
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="number"],
+  input[type="date"],
+  select {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .btn,
+  button[type="submit"] {
+    min-height: 44px;
+  }
+}
+
+.chip {
+  @apply inline-flex shrink-0 items-center rounded-full border border-gray-300 bg-white px-4 text-sm text-gray-700;
+  min-height: 44px;
+}
+
+.chip-active {
+  @apply border-green-700 bg-green-700 text-white;
+}
+
+.product-tile {
+  @apply rounded-lg border border-gray-200 bg-white p-3 text-left text-sm shadow-sm;
+  min-height: 88px;
+}
+
+.product-tile:active {
+  @apply border-green-600 bg-green-50;
+}
+
+.qty-button {
+  @apply inline-flex items-center justify-center rounded border border-gray-300 text-lg;
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.cart-panel {
+  @apply rounded-lg border border-gray-200 bg-white p-4 shadow-sm;
+}
+
+/* Portrait: the cart slides over the tiles, above the bar pinned at the bottom. */
+.cart-panel-open {
+  @apply fixed inset-x-0 z-20 overflow-y-auto rounded-b-none border-x-0 shadow-lg;
+  bottom: 72px;
+  max-height: calc(100vh - 150px);
+}
+
+.cart-bar {
+  @apply fixed inset-x-0 bottom-0 z-20 flex items-center gap-4 border-t border-gray-300 bg-white px-4;
+  min-height: 72px;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+@media (min-width: 1024px), (min-width: 768px) and (orientation: landscape) {
+  /* Side by side: the cart stays in view, and scrolls on its own, while the
+     product tiles scroll. */
+  .cart-panel {
+    position: sticky;
+    top: 5rem;
+    max-height: calc(100vh - 6rem);
+    overflow-y: auto;
+    align-self: start;
+  }
+
+  .cart-panel-open {
+    position: sticky;
+    top: 5rem;
+    bottom: auto;
+    max-height: none;
+    @apply rounded-lg border-x shadow-sm;
+  }
+}
+
+/* ---- Navigation ----------------------------------------------------------- */
+
+[x-cloak] {
+  display: none !important;
+}
+
+.nav-tap {
+  @apply inline-flex items-center justify-center gap-2 rounded px-3 text-sm font-medium text-white/90;
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.nav-tap:hover,
+.nav-tap:focus-visible {
+  @apply bg-white/15 text-white;
+}
+
+.drawer-link {
+  @apply flex w-full items-center rounded px-3 text-base text-gray-800;
+  min-height: 44px;
+}
+
+.drawer-link:hover,
+.drawer-link:focus-visible {
+  @apply bg-gray-100;
+}
+
+.list-card {
+  @apply flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm;
+  min-height: 64px;
+}
+
+.list-card:active {
+  @apply bg-gray-50;
+}

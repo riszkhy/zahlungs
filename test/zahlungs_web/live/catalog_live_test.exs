@@ -116,8 +116,9 @@ defmodule ZahlungsWeb.CatalogLiveTest do
       assert socket.assigns.total == 13
       assert socket.assigns.total_pages == 2
       assert length(socket.assigns.products) == 12
+      assert html(socket) =~ "Menampilkan 1–12 dari 13 produk"
 
-      # The Prev/Next buttons push the page as a JSON number.
+      # The page buttons push the page as a JSON number.
       assert event(socket, "page", %{"to" => 2}).assigns.page == 2
 
       last = event(socket, "page", %{"to" => "99"})

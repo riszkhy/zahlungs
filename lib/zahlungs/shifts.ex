@@ -11,6 +11,7 @@ defmodule Zahlungs.Shifts do
   alias Zahlungs.Repo
 
   alias Zahlungs.Accounts.User
+  alias Zahlungs.Scope
   alias Zahlungs.Sales.Sale
   alias Zahlungs.Shifts.{Shift, CashMovement}
 
@@ -20,13 +21,17 @@ defmodule Zahlungs.Shifts do
   end
 
   @doc """
-  Opens a shift for the user with the given opening cash float.
-  Returns `{:error, :already_open}` if the user already has an open shift.
+  Opens a shift for the scope's user in the scope's store, with the given
+  opening cash float. Returns `{:error, :already_open}` if the user already has
+  an open shift (in any store), or `{:error, :no_store}` for an admin who is
+  looking at all stores and so has no drawer to open.
 
   The user row is locked for the duration, so two concurrent calls for the same
   user can't both pass the "no open shift" check.
   """
-  def open_shift(%User{} = user, opening_cash) do
+  def open_shift(%Scope{store: nil}, _opening_cash), do: {:error, :no_store}
+
+  def open_shift(%Scope{user: %User{} = user, store: store}, opening_cash) do
     Repo.transaction(fn ->
       Repo.one!(from u in User, where: u.id == ^user.id, select: u.id, lock: "FOR UPDATE")
 
@@ -36,6 +41,7 @@ defmodule Zahlungs.Shifts do
         %Shift{}
         |> Shift.open_changeset(%{
           user_id: user.id,
+          store_id: store.id,
           opening_cash: to_decimal(opening_cash),
           opened_at: now(),
           status: "open"
@@ -129,13 +135,14 @@ defmodule Zahlungs.Shifts do
   @doc """
   Total consignment payments (cash-out) per supplier within the date range,
   as a map `%{supplier_id => Decimal}`. Used by the settlement report to show
-  how much has already been paid vs the payable amount.
+  how much has already been paid vs the payable amount. Limited to payments
+  made from the scope's store.
   """
-  def consignment_payments_by_supplier(%Date{} = date_from, %Date{} = date_to) do
-    {start, finish} = Zahlungs.LocalTime.day_range(date_from, date_to)
+  def consignment_payments_by_supplier(%Scope{} = scope, %Date{} = date_from, %Date{} = date_to) do
+    {start, finish} = Zahlungs.LocalTime.day_range(date_from, date_to, scope.store)
 
     Repo.all(
-      from m in CashMovement,
+      from m in movements_query(scope),
         where:
           m.category == "consignment_payment" and not is_nil(m.supplier_id) and
             m.inserted_at >= ^start and m.inserted_at <= ^finish,
@@ -150,17 +157,30 @@ defmodule Zahlungs.Shifts do
   `%{supplier_id => %{supplier: name, paid: Decimal}}`. Used for the balance
   still owed to a supplier as of a date.
   """
-  def consignment_payments_to_date(%Date{} = date_to) do
-    {_start, finish} = Zahlungs.LocalTime.day_range(date_to, date_to)
+  def consignment_payments_to_date(%Scope{} = scope, %Date{} = date_to) do
+    {_start, finish} = Zahlungs.LocalTime.day_range(date_to, date_to, scope.store)
 
     Repo.all(
-      from m in CashMovement,
+      from m in movements_query(scope),
         join: sup in assoc(m, :supplier),
         where: m.category == "consignment_payment" and m.inserted_at <= ^finish,
         group_by: [sup.id, sup.name],
         select: {sup.id, %{supplier: sup.name, paid: coalesce(sum(m.amount), 0)}}
     )
     |> Map.new(fn {id, row} -> {id, %{row | paid: to_decimal(row.paid)}} end)
+  end
+
+  # Cash movements made in the scope's store (a movement's store is its shift's).
+  defp movements_query(scope) do
+    store_ids =
+      case Scope.store_id(scope) do
+        nil -> Zahlungs.Stores.store_ids()
+        store_id -> [store_id]
+      end
+
+    from m in CashMovement,
+      join: sh in assoc(m, :shift),
+      where: sh.store_id in ^store_ids
   end
 
   @doc "Lists the cash movements of a shift (most recent first), preloading supplier."
@@ -280,25 +300,39 @@ defmodule Zahlungs.Shifts do
   end
 
   @doc """
-  Lists shifts (most recent first), preloading the cashier.
+  Lists the shifts of the scope's store (most recent first), preloading the
+  cashier and store.
 
   Options: `:limit` (default 50), `:user_id` (restrict to one cashier).
   """
-  def list_shifts(opts \\ []) do
+  def list_shifts(%Scope{} = scope, opts \\ []) do
     limit = opts[:limit] || 50
 
     Shift
+    |> for_store(scope)
     |> maybe_filter_user(opts[:user_id])
-    |> order_by(desc: :opened_at)
+    |> order_by(desc: :opened_at, desc: :id)
     |> limit(^limit)
-    |> preload(:user)
+    |> preload([:user, :store])
     |> Repo.all()
   end
 
   defp maybe_filter_user(query, nil), do: query
   defp maybe_filter_user(query, user_id), do: where(query, [s], s.user_id == ^user_id)
 
-  def get_shift!(id), do: Shift |> Repo.get!(id) |> Repo.preload(:user)
+  # One store, or — for an admin looking at all stores — every store of their
+  # organization. Never unfiltered: these tables are shared by all owners.
+  defp for_store(query, scope) do
+    case Scope.store_id(scope) do
+      nil -> where(query, [s], s.store_id in ^Zahlungs.Stores.store_ids())
+      store_id -> where(query, [s], s.store_id == ^store_id)
+    end
+  end
+
+  @doc "Gets a shift of the scope's store (raises if it is another store's)."
+  def get_shift!(%Scope{} = scope, id) do
+    Shift |> for_store(scope) |> Repo.get!(id) |> Repo.preload([:user, :store])
+  end
 
   @doc "Lists the sales recorded during a shift (most recent first), with items."
   def shift_sales(%Shift{} = shift) do

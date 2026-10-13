@@ -13,7 +13,7 @@ defmodule ZahlungsWeb.SalesLive.Index do
   def mount(_params, _session, socket) do
     {:ok,
      socket
-     |> assign(date: "", page: 1)
+     |> assign(date: "", page: 1, per_page: @per_page)
      |> assign(:voiding, nil)
      |> assign(:void_reason, "")
      |> load_sales()}
@@ -33,7 +33,7 @@ defmodule ZahlungsWeb.SalesLive.Index do
   defp apply_action(socket, :show, %{"id" => id}) do
     socket
     |> assign(:page_title, "Sale detail")
-    |> assign(:sale, Sales.get_sale!(id))
+    |> assign(:sale, Sales.get_sale!(socket.assigns.current_scope, id))
   end
 
   @impl true
@@ -47,7 +47,7 @@ defmodule ZahlungsWeb.SalesLive.Index do
 
   def handle_event("return", %{"id" => id}, socket) do
     if socket.assigns.current_user.role == "admin" do
-      sale = Sales.get_sale!(id)
+      sale = Sales.get_sale!(socket.assigns.current_scope, id)
 
       case Sales.return_sale(sale, socket.assigns.current_user) do
         {:ok, _returned} ->
@@ -69,7 +69,8 @@ defmodule ZahlungsWeb.SalesLive.Index do
   end
 
   def handle_event("prompt_void", %{"id" => id}, socket) do
-    {:noreply, assign(socket, voiding: Sales.get_sale!(id), void_reason: "")}
+    {:noreply,
+     assign(socket, voiding: Sales.get_sale!(socket.assigns.current_scope, id), void_reason: "")}
   end
 
   def handle_event("cancel_void", _params, socket) do
@@ -123,12 +124,13 @@ defmodule ZahlungsWeb.SalesLive.Index do
   end
 
   defp load_sales(socket) do
+    scope = socket.assigns.current_scope
     date = parse_date(socket.assigns.date)
-    total = Sales.count_sales(date: date)
+    total = Sales.count_sales(scope, date: date)
     total_pages = max(1, ceil(total / @per_page))
     page = min(socket.assigns.page, total_pages)
 
-    sales = Sales.list_sales(date: date, limit: @per_page, offset: (page - 1) * @per_page)
+    sales = Sales.list_sales(scope, date: date, limit: @per_page, offset: (page - 1) * @per_page)
 
     assign(socket, sales: sales, total: total, total_pages: total_pages, page: page)
   end
@@ -162,9 +164,32 @@ defmodule ZahlungsWeb.SalesLive.Index do
       </label>
     </form>
 
+    <%!-- Below landscape-tablet width a row doesn't fit: one tappable card per sale. --%>
+    <div class="mt-4 space-y-2 lg:hidden">
+      <.link :for={sale <- @sales} id={"sale-card-#{sale.id}"} patch={~p"/sales/#{sale}"} class="list-card">
+        <span class="min-w-0 flex-1">
+          <span class="block truncate font-medium">{sale.code}</span>
+          <span class="block text-xs text-gray-500">
+            {Calendar.strftime(Zahlungs.LocalTime.to_local(sale.inserted_at, sale.store), "%d %b %Y %H:%M")}
+            · {length(sale.items)} item
+            <span :if={is_nil(@current_scope.store)}>· {sale.store.name}</span>
+          </span>
+        </span>
+        <span class="text-right">
+          <span class="block font-semibold">{format_money(sale.total)}</span>
+          <span class={["inline-block rounded-full px-2 py-0.5 text-xs", status_badge_class(sale.status)]}>
+            {sale.status}
+          </span>
+        </span>
+      </.link>
+      <p :if={@sales == []} class="text-sm text-gray-500">Belum ada penjualan.</p>
+    </div>
+
+    <div class="hidden lg:block">
     <.table id="sales" rows={@sales}>
       <:col :let={sale} label="Code">{sale.code}</:col>
-      <:col :let={sale} label="Date">{Calendar.strftime(Zahlungs.LocalTime.to_local(sale.inserted_at), "%d %b %Y %H:%M")}</:col>
+      <:col :let={sale} label="Date">{Calendar.strftime(Zahlungs.LocalTime.to_local(sale.inserted_at, sale.store), "%d %b %Y %H:%M")}</:col>
+      <:col :let={sale} :if={is_nil(@current_scope.store)} label="Store">{sale.store.name}</:col>
       <:col :let={sale} label="Cashier">{sale.user && sale.user.email}</:col>
       <:col :let={sale} label="Items">{length(sale.items)}</:col>
       <:col :let={sale} label="Total">{format_money(sale.total)}</:col>
@@ -177,24 +202,9 @@ defmodule ZahlungsWeb.SalesLive.Index do
         <.link patch={~p"/sales/#{sale}"}>View</.link>
       </:action>
     </.table>
-
-    <div :if={@total_pages > 1} class="mt-6 flex items-center justify-center gap-4">
-      <.button
-        phx-click={JS.push("page", value: %{to: @page - 1})}
-        disabled={@page <= 1}
-        class="!bg-gray-200 !text-gray-700"
-      >
-        Prev
-      </.button>
-      <span class="text-sm text-gray-600">Page {@page} of {@total_pages} · {@total} sales</span>
-      <.button
-        phx-click={JS.push("page", value: %{to: @page + 1})}
-        disabled={@page >= @total_pages}
-        class="!bg-gray-200 !text-gray-700"
-      >
-        Next
-      </.button>
     </div>
+
+    <.pagination page={@page} per_page={@per_page} total={@total} noun="penjualan" />
 
     <.modal :if={@live_action == :show and @sale} id="sale-modal" show on_cancel={JS.patch(~p"/sales")}>
       <h3 class="text-lg font-semibold">Sale {@sale.code}</h3>

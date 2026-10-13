@@ -13,43 +13,62 @@
     </script>
   </head>
   <body class="flex flex-col h-full pt-16 text-base-content">
-    <header
-      class="fixed top-0 left-0 right-0 z-30 shadow-md bg-green-700 text-white"
-      x-data="{ open: false }"
-    >
-      <div class="container mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-y-2">
-        <a href={~p"/home"} title="Zahlungs Home" class="text-xl font-bold text-white">
+    <%!--
+      One slim bar: the cashier's four screens one tap away, the store, and a
+      Menu button. Everything else lives in a drawer, so nothing runs off the
+      edge of a tablet.
+    --%>
+    <header class="fixed top-0 left-0 right-0 z-30 bg-green-700 text-white shadow-md" x-data="{ open: false }">
+      <div class="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4">
+        <a href={~p"/home"} title="Zahlungs Home" class="shrink-0 text-xl font-bold text-white">
           Zahlungs
         </a>
 
-        <button
-          type="button"
-          class="md:hidden p-1 -mr-1 text-white"
-          @click="open = !open"
-          aria-label="Toggle menu"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="26"
-            height="26"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
-          >
-            <line x1="3" y1="12" x2="21" y2="12"></line>
-            <line x1="3" y1="6" x2="21" y2="6"></line>
-            <line x1="3" y1="18" x2="21" y2="18"></line>
-          </svg>
-        </button>
+        <.primary_nav :if={assigns[:current_user]} current_user={assigns[:current_user]} />
 
-        <nav class="w-full md:w-auto hidden md:block" x-bind:class="{ hidden: !open }">
-          <.user_menu current_user={assigns[:current_user]} />
-        </nav>
+        <div class="ml-auto flex items-center gap-2">
+          <.store_switcher :if={assigns[:current_scope]} scope={assigns[:current_scope]} />
+
+          <button
+            :if={assigns[:current_user]}
+            type="button"
+            class="nav-tap"
+            @click="open = true"
+            aria-label="Buka menu"
+            aria-controls="menu-drawer"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              aria-hidden="true"
+            >
+              <line x1="3" y1="12" x2="21" y2="12"></line>
+              <line x1="3" y1="6" x2="21" y2="6"></line>
+              <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+            <span class="hidden sm:inline">Menu</span>
+          </button>
+
+          <.link :if={is_nil(assigns[:current_user])} href={~p"/users/log_in"} class="nav-tap">
+            Log in
+          </.link>
+        </div>
       </div>
+
+      <div :if={assigns[:current_user]} x-show="open" x-cloak class="fixed inset-0 z-40 bg-black/40" @click="open = false">
+      </div>
+
+      <.menu_drawer
+        :if={assigns[:current_user]}
+        current_user={assigns[:current_user]}
+        current_scope={assigns[:current_scope]}
+      />
     </header>
 
     {@inner_content}

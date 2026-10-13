@@ -13,6 +13,8 @@ defmodule Zahlungs.Shifts.Shift do
     field :note, :string
 
     belongs_to :user, Zahlungs.Accounts.User
+    # The store whose cash drawer this shift is.
+    belongs_to :store, Zahlungs.Stores.Store
     has_many :sales, Zahlungs.Sales.Sale
     has_many :cash_movements, Zahlungs.Shifts.CashMovement
 
@@ -22,8 +24,8 @@ defmodule Zahlungs.Shifts.Shift do
   @doc "Changeset for opening a shift (starting cash float)."
   def open_changeset(shift, attrs) do
     shift
-    |> cast(attrs, [:user_id, :opening_cash, :opened_at, :status])
-    |> validate_required([:user_id, :opening_cash, :opened_at, :status])
+    |> cast(attrs, [:user_id, :store_id, :opening_cash, :opened_at, :status])
+    |> validate_required([:user_id, :store_id, :opening_cash, :opened_at, :status])
     |> validate_number(:opening_cash, greater_than_or_equal_to: 0)
   end
 

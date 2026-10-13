@@ -6,7 +6,7 @@ defmodule Zahlungs.Accounts do
   import Ecto.Query, warn: false
   alias Zahlungs.Repo
 
-  alias Zahlungs.Accounts.{User, UserToken, UserNotifier}
+  alias Zahlungs.Accounts.{User, UserToken, UserNotifier, UserLogin}
 
   ## Database getters
 
@@ -23,7 +23,8 @@ defmodule Zahlungs.Accounts do
 
   """
   def get_user_by_email(email) when is_binary(email) do
-    Repo.get_by(User, email: email)
+    # Before login there is no current organization: emails are unique across all.
+    Repo.get_by(User, [email: email], skip_org_id: true)
   end
 
   @doc """
@@ -40,7 +41,7 @@ defmodule Zahlungs.Accounts do
   """
   def get_user_by_email_and_password(email, password)
       when is_binary(email) and is_binary(password) do
-    user = Repo.get_by(User, email: email)
+    user = Repo.get_by(User, [email: email], skip_org_id: true)
     # A deactivated user cannot authenticate even with the correct password.
     if User.valid_password?(user, password) and user.active, do: user
   end
@@ -131,9 +132,110 @@ defmodule Zahlungs.Accounts do
 
   ## Admin user management
 
-  @doc "Lists all users, ordered by email."
+  @doc "Lists all users with their store, ordered by email."
   def list_users do
-    Repo.all(from u in User, order_by: u.email)
+    Repo.all(from u in User, order_by: u.email, preload: :store)
+  end
+
+  @doc """
+  Moves a user to another store (admin-only). A cashier must always have one;
+  an admin may be given none (`nil`).
+  """
+  def set_user_store(%User{} = user, store_id) do
+    user
+    |> User.store_changeset(%{store_id: store_id})
+    |> Repo.update()
+  end
+
+  ## Login log
+
+  @doc """
+  Records a successful login and where it was made from. Pure bookkeeping: it
+  never decides whether the login is allowed, and callers ignore its result.
+
+  `position` holds `"latitude"`, `"longitude"` and `"accuracy"` as sent by the
+  browser (strings or numbers); anything missing or out of range is stored as
+  unknown. `meta` may carry `:ip` and `:user_agent`.
+  """
+  def record_login(%User{} = user, position \\ %{}, meta \\ %{}) do
+    store = Zahlungs.Stores.get_active_store(user.store_id)
+    {latitude, longitude} = coordinates(position)
+
+    Repo.insert(%UserLogin{
+      organization_id: user.organization_id,
+      user_id: user.id,
+      store_id: store && store.id,
+      latitude: latitude,
+      longitude: longitude,
+      accuracy_m: latitude && non_negative(position["accuracy"]),
+      distance_m: distance_to_store(store, latitude, longitude),
+      ip: meta[:ip],
+      user_agent: meta[:user_agent] && String.slice(meta[:user_agent], 0, 255)
+    })
+  end
+
+  defp coordinates(position) do
+    with latitude when is_float(latitude) <- to_float(position["latitude"]),
+         longitude when is_float(longitude) <- to_float(position["longitude"]),
+         true <- abs(latitude) <= 90 and abs(longitude) <= 180 do
+      {latitude, longitude}
+    else
+      _ -> {nil, nil}
+    end
+  end
+
+  defp distance_to_store(%{latitude: slat, longitude: slng}, lat, lng)
+       when is_float(slat) and is_float(slng) and is_float(lat) and is_float(lng) do
+    Zahlungs.Geo.distance_m({slat, slng}, {lat, lng})
+  end
+
+  defp distance_to_store(_store, _lat, _lng), do: nil
+
+  defp non_negative(value) do
+    case to_float(value) do
+      n when is_float(n) and n >= 0 -> n
+      _ -> nil
+    end
+  end
+
+  defp to_float(n) when is_float(n), do: n
+  defp to_float(n) when is_integer(n), do: n * 1.0
+
+  defp to_float(s) when is_binary(s) do
+    case Float.parse(String.trim(s)) do
+      {n, ""} -> n
+      _ -> nil
+    end
+  end
+
+  defp to_float(_), do: nil
+
+  @doc """
+  Lists the login log, most recent first, with user and store preloaded.
+
+  Options: `:user_id`, `:store_id` (filters), `:limit` (default 100).
+  """
+  def list_user_logins(opts \\ []) do
+    UserLogin
+    |> filter_login(:user_id, opts[:user_id])
+    |> filter_login(:store_id, opts[:store_id])
+    |> order_by(desc: :inserted_at, desc: :id)
+    |> limit(^(opts[:limit] || 100))
+    |> preload([:user, :store])
+    |> Repo.all()
+  end
+
+  defp filter_login(query, _field, nil), do: query
+  defp filter_login(query, field, value), do: where(query, [l], field(l, ^field) == ^value)
+
+  @doc "Deletes login-log rows older than `days` days. Returns how many were removed."
+  def prune_user_logins(days) when is_integer(days) and days > 0 do
+    cutoff = NaiveDateTime.add(NaiveDateTime.utc_now(), -days * 86_400)
+    # Maintenance across every organization.
+    {count, _} =
+      Repo.delete_all(from(l in UserLogin, where: l.inserted_at < ^cutoff), skip_org_id: true)
+
+    count
   end
 
   @doc "Returns a changeset for an admin creating a user (no password hashing)."
@@ -147,9 +249,22 @@ defmodule Zahlungs.Accounts do
   def create_user(attrs) do
     now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
 
-    %User{}
+    %User{organization_id: Repo.get_org_id()}
     |> User.admin_changeset(attrs)
     |> Ecto.Changeset.put_change(:confirmed_at, now)
+    |> Repo.insert()
+  end
+
+  @doc """
+  Creates a platform operator (role `superadmin`): confirmed, and belonging to
+  no organization. For seeds and the console - there is no screen for it.
+  """
+  def create_platform_admin(attrs) do
+    now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+
+    %User{organization_id: nil}
+    |> User.registration_changeset(attrs)
+    |> Ecto.Changeset.change(role: "superadmin", confirmed_at: now)
     |> Repo.insert()
   end
 
@@ -168,7 +283,7 @@ defmodule Zahlungs.Accounts do
 
   """
   def register_user(attrs) do
-    %User{}
+    %User{organization_id: Repo.get_org_id()}
     |> User.registration_changeset(attrs)
     |> Repo.insert()
   end

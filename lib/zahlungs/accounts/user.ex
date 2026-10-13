@@ -13,6 +13,11 @@ defmodule Zahlungs.Accounts.User do
     field :role, :string, default: "cashier"
     field :active, :boolean, default: true
 
+    # The store a cashier works in. Admins (the owner) may have none.
+    belongs_to :store, Zahlungs.Stores.Store
+    # nil only for the platform operator (role "superadmin").
+    belongs_to :organization, Zahlungs.Organizations.Organization
+
     timestamps()
   end
 
@@ -53,7 +58,8 @@ defmodule Zahlungs.Accounts.User do
     |> validate_required([:email])
     |> validate_format(:email, ~r/^[^\s]+@[^\s]+$/, message: "must have the @ sign and no spaces")
     |> validate_length(:email, max: 160)
-    |> unsafe_validate_unique(:email, Zahlungs.Repo)
+    # One email, one account, across every organization.
+    |> unsafe_validate_unique(:email, Zahlungs.Repo, repo_opts: [skip_org_id: true])
     |> unique_constraint(:email)
   end
 
@@ -146,9 +152,27 @@ defmodule Zahlungs.Accounts.User do
   def admin_changeset(user, attrs, opts \\ []) do
     user
     |> registration_changeset(attrs, opts)
-    |> cast(attrs, [:role])
+    |> cast(attrs, [:role, :store_id])
     |> validate_required([:role])
     |> validate_inclusion(:role, @roles)
+    |> validate_cashier_store()
+  end
+
+  @doc "Changeset for an admin moving a user to another store (or none, for admins)."
+  def store_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:store_id])
+    |> validate_cashier_store()
+  end
+
+  # A cashier always works in a store; only an admin may be without one.
+  defp validate_cashier_store(changeset) do
+    changeset =
+      if get_field(changeset, :role) == "cashier",
+        do: validate_required(changeset, [:store_id], message: "kasir harus punya toko"),
+        else: changeset
+
+    assoc_constraint(changeset, :store)
   end
 
   @doc """

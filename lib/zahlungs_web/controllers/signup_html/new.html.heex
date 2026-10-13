@@ -1,0 +1,24 @@
+<h3 class="text-xl text-center text-gray-600 dark:text-gray-200">Daftarkan bisnis Anda</h3>
+<p class="mt-1 text-center text-xs text-gray-500 dark:text-gray-400">
+  Akun aktif setelah pendaftaran diverifikasi.
+</p>
+
+<.form :let={f} for={@changeset} as={:signup} action={~p"/signup"} id="signup-form">
+  <div :if={@error_message} class="alert alert-danger">
+    <small>{@error_message}</small>
+  </div>
+
+  <.input field={f[:business_name]} type="text" label="Nama bisnis / toko" required />
+  <.input field={f[:phone]} type="text" label="Nomor telepon" />
+  <.input field={f[:name]} type="text" label="Nama Anda" required />
+  <.input field={f[:email]} type="email" label="Email" required />
+  <.input field={f[:password]} type="password" label="Password (minimal 12 karakter)" required />
+
+  <div class="mt-8">
+    <.button class="w-full">Daftar</.button>
+  </div>
+</.form>
+
+<p class="mt-6 text-center text-xs text-gray-500 dark:text-gray-400">
+  Sudah punya akun? <.link href={~p"/users/log_in"} class="underline">Log in</.link>
+</p>

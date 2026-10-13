@@ -9,7 +9,7 @@ defmodule ZahlungsWeb.ReportLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    today = Zahlungs.LocalTime.today()
+    today = Zahlungs.LocalTime.today(socket.assigns.current_scope.store)
     from = Date.beginning_of_month(today)
 
     {:ok,
@@ -25,17 +25,27 @@ defmodule ZahlungsWeb.ReportLive.Index do
   end
 
   defp load_report(socket) do
+    scope = socket.assigns.current_scope
+
     with {:ok, from} <- Date.from_iso8601(socket.assigns.from),
          {:ok, to} <- Date.from_iso8601(socket.assigns.to) do
       socket
-      |> assign(:report, Sales.sales_report(from, to))
-      |> assign(:top_products, Sales.top_products(from, to))
-      |> assign(:by_day, Sales.sales_by_day(from, to))
-      |> assign(:by_cashier, Sales.sales_by_cashier(from, to))
-      |> assign(:by_category, Sales.sales_by_category(from, to))
+      |> assign(:report, Sales.sales_report(scope, from, to))
+      |> assign(:top_products, Sales.top_products(scope, from, to))
+      |> assign(:by_day, Sales.sales_by_day(scope, from, to))
+      |> assign(:by_cashier, Sales.sales_by_cashier(scope, from, to))
+      |> assign(:by_category, Sales.sales_by_category(scope, from, to))
+      |> assign(:by_store, if(scope.store, do: [], else: Sales.sales_by_store(scope, from, to)))
     else
       _ ->
-        assign(socket, report: nil, top_products: [], by_day: [], by_cashier: [], by_category: [])
+        assign(socket,
+          report: nil,
+          top_products: [],
+          by_day: [],
+          by_cashier: [],
+          by_category: [],
+          by_store: []
+        )
     end
   end
 
@@ -88,6 +98,15 @@ defmodule ZahlungsWeb.ReportLive.Index do
       <:col :let={row} label="Transactions">{row.transactions}</:col>
       <:col :let={row} label="Revenue">{format_money(row.revenue)}</:col>
     </.table>
+
+    <div :if={@by_store != []}>
+      <h3 class="mt-10 font-semibold text-gray-700">Sales by store</h3>
+      <.table id="by-store" rows={@by_store}>
+        <:col :let={row} label="Store">{row.store}</:col>
+        <:col :let={row} label="Transactions">{row.transactions}</:col>
+        <:col :let={row} label="Revenue">{format_money(row.revenue)}</:col>
+      </.table>
+    </div>
 
     <h3 class="mt-10 font-semibold text-gray-700">Sales by category</h3>
     <.table id="by-category" rows={@by_category}>

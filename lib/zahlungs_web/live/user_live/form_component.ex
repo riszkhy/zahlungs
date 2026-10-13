@@ -19,6 +19,13 @@ defmodule ZahlungsWeb.UserLive.FormComponent do
           label="Role"
           options={[{"Cashier", "cashier"}, {"Admin", "admin"}]}
         />
+        <.input
+          field={@form[:store_id]}
+          type="select"
+          label="Store (wajib untuk kasir)"
+          prompt="—"
+          options={Zahlungs.Stores.store_options()}
+        />
 
         <div class="mt-6">
           <.button phx-disable-with="Saving...">Create User</.button>

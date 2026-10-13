@@ -23,6 +23,8 @@ defmodule Zahlungs.Sales.Sale do
 
     belongs_to :user, Zahlungs.Accounts.User
     belongs_to :shift, Zahlungs.Shifts.Shift
+    # Always the store of the shift the sale was recorded on.
+    belongs_to :store, Zahlungs.Stores.Store
     belongs_to :voided_by, Zahlungs.Accounts.User
     has_many :items, Zahlungs.Sales.SaleItem
 
@@ -39,6 +41,7 @@ defmodule Zahlungs.Sales.Sale do
       :code,
       :user_id,
       :shift_id,
+      :store_id,
       :subtotal,
       :discount,
       :tax,
@@ -48,12 +51,20 @@ defmodule Zahlungs.Sales.Sale do
       :status,
       :payment_method
     ])
-    |> validate_required([:subtotal, :total, :amount_paid, :change_due, :status, :payment_method])
+    |> validate_required([
+      :store_id,
+      :subtotal,
+      :total,
+      :amount_paid,
+      :change_due,
+      :status,
+      :payment_method
+    ])
     |> validate_inclusion(:payment_method, @payment_methods)
     |> validate_number(:discount, greater_than_or_equal_to: 0)
     |> validate_number(:tax, greater_than_or_equal_to: 0)
     |> validate_number(:total, greater_than_or_equal_to: 0)
-    |> unique_constraint(:code)
+    |> unique_constraint(:code, name: :sales_store_id_code_index)
   end
 
   @doc "Changeset used only to set the human-readable code after the id is known."
@@ -61,7 +72,7 @@ defmodule Zahlungs.Sales.Sale do
     sale
     |> cast(%{code: code}, [:code])
     |> validate_required([:code])
-    |> unique_constraint(:code)
+    |> unique_constraint(:code, name: :sales_store_id_code_index)
   end
 
   @doc "Marks a sale as returned/refunded."

@@ -10,6 +10,7 @@ defmodule ZahlungsWeb.UserAuth do
   import Phoenix.Controller
 
   alias Zahlungs.Accounts
+  alias Zahlungs.Scope
 
   # Make the remember me cookie valid for 60 days.
   # If you want bump or reduce this value, also change
@@ -39,7 +40,7 @@ defmodule ZahlungsWeb.UserAuth do
     |> put_session(:user_token, token)
     |> put_session(:live_socket_id, "users_sessions:#{Base.url_encode64(token)}")
     |> maybe_write_remember_me_cookie(token, params)
-    |> redirect(to: user_return_to || signed_in_path(conn))
+    |> redirect(to: user_return_to || signed_in_path(user))
   end
 
   defp maybe_write_remember_me_cookie(conn, token, %{"remember_me" => "true"}) do
@@ -97,7 +98,10 @@ defmodule ZahlungsWeb.UserAuth do
   def fetch_current_user(conn, _opts) do
     {user_token, conn} = ensure_user_token(conn)
     user = user_token && Accounts.get_user_by_session_token(user_token)
-    assign(conn, :current_user, user)
+
+    conn
+    |> assign(:current_user, user)
+    |> assign(:current_scope, Scope.for_user(user, get_session(conn, :store_id)))
   end
 
   defp ensure_user_token(conn) do
@@ -120,7 +124,7 @@ defmodule ZahlungsWeb.UserAuth do
   def redirect_if_user_is_authenticated(conn, _opts) do
     if conn.assigns[:current_user] do
       conn
-      |> redirect(to: signed_in_path(conn))
+      |> redirect(to: signed_in_path(conn.assigns.current_user))
       |> halt()
     else
       conn
@@ -134,14 +138,76 @@ defmodule ZahlungsWeb.UserAuth do
   they use the application at all, here would be a good place.
   """
   def require_authenticated_user(conn, _opts) do
-    if conn.assigns[:current_user] do
-      conn
+    if user = conn.assigns[:current_user] do
+      require_usable_scope(conn, conn.assigns[:current_scope] || Scope.for_user(user))
     else
       conn
       |> put_flash(:error, "You must log in to access this page.")
       |> maybe_store_return_to()
       |> redirect(to: ~p"/users/log_in")
       |> halt()
+    end
+  end
+
+  defp require_usable_scope(conn, scope) do
+    cond do
+      # The point of sale belongs to organizations; the operator has none.
+      Scope.platform_admin?(scope) ->
+        conn |> redirect(to: ~p"/platform/organizations") |> halt()
+
+      # An organization that isn't (or is no longer) approved, or a cashier
+      # without an active store: end the session instead of showing pages
+      # that can't work.
+      reason = Scope.block_reason(scope) ->
+        user_token = get_session(conn, :user_token)
+        user_token && Accounts.delete_session_token(user_token)
+
+        conn
+        |> renew_session()
+        |> delete_resp_cookie(@remember_me_cookie)
+        |> put_flash(:error, block_message(reason))
+        |> redirect(to: ~p"/users/log_in")
+        |> halt()
+
+      true ->
+        conn
+    end
+  end
+
+  @doc "What to tell someone who can't use the application, by `Scope.block_reason/1`."
+  def block_message(:pending),
+    do: "Pendaftaran Anda sedang menunggu verifikasi. Anda bisa masuk setelah disetujui."
+
+  def block_message(:rejected),
+    do: "Pendaftaran Anda tidak disetujui. Hubungi kami untuk informasi lebih lanjut."
+
+  def block_message(:suspended),
+    do: "Akun bisnis Anda sedang ditangguhkan. Hubungi kami untuk mengaktifkannya kembali."
+
+  def block_message(:no_store), do: no_store_message()
+  def block_message(_reason), do: "Akun Anda tidak terhubung ke bisnis mana pun. Hubungi kami."
+
+  @doc "Shown to a cashier who has no active store to work in."
+  def no_store_message, do: "Akun Anda belum ditempatkan di toko aktif. Hubungi admin."
+
+  @doc "Used for the platform operator's routes."
+  def require_platform_admin(conn, _opts) do
+    cond do
+      is_nil(conn.assigns[:current_user]) ->
+        conn
+        |> put_flash(:error, "You must log in to access this page.")
+        |> maybe_store_return_to()
+        |> redirect(to: ~p"/users/log_in")
+        |> halt()
+
+      Scope.platform_admin?(conn.assigns[:current_scope]) ->
+        conn
+
+      true ->
+        conn
+        |> put_flash(:error, "You do not have permission to access this page.")
+        |> redirect(to: ~p"/")
+        |> halt()
     end
   end
 
@@ -179,15 +245,40 @@ defmodule ZahlungsWeb.UserAuth do
   def on_mount(:ensure_authenticated, _params, session, socket) do
     socket = mount_current_user(socket, session)
 
-    if socket.assigns.current_user do
+    cond do
+      is_nil(socket.assigns.current_user) ->
+        socket =
+          socket
+          |> Phoenix.LiveView.put_flash(:error, "You must log in to access this page.")
+          |> Phoenix.LiveView.redirect(to: ~p"/users/log_in")
+
+        {:halt, socket}
+
+      Scope.platform_admin?(socket.assigns.current_scope) ->
+        {:halt, Phoenix.LiveView.redirect(socket, to: ~p"/platform/organizations")}
+
+      # The plug ends the session on the next full request; here it is enough
+      # to not mount a view that can't work.
+      reason = Scope.block_reason(socket.assigns.current_scope) ->
+        socket =
+          socket
+          |> Phoenix.LiveView.put_flash(:error, block_message(reason))
+          |> Phoenix.LiveView.redirect(to: ~p"/users/log_in")
+
+        {:halt, socket}
+
+      true ->
+        {:cont, socket}
+    end
+  end
+
+  def on_mount(:ensure_platform_admin, _params, session, socket) do
+    socket = mount_current_user(socket, session)
+
+    if Scope.platform_admin?(socket.assigns.current_scope) do
       {:cont, socket}
     else
-      socket =
-        socket
-        |> Phoenix.LiveView.put_flash(:error, "You must log in to access this page.")
-        |> Phoenix.LiveView.redirect(to: ~p"/users/log_in")
-
-      {:halt, socket}
+      {:halt, Phoenix.LiveView.redirect(socket, to: ~p"/users/log_in")}
     end
   end
 
@@ -214,10 +305,15 @@ defmodule ZahlungsWeb.UserAuth do
   end
 
   defp mount_current_user(socket, session) do
-    Phoenix.Component.assign_new(socket, :current_user, fn ->
-      if user_token = session["user_token"] do
-        Accounts.get_user_by_session_token(user_token)
-      end
+    socket =
+      Phoenix.Component.assign_new(socket, :current_user, fn ->
+        if user_token = session["user_token"] do
+          Accounts.get_user_by_session_token(user_token)
+        end
+      end)
+
+    Phoenix.Component.assign_new(socket, :current_scope, fn ->
+      Scope.for_user(socket.assigns.current_user, session["store_id"])
     end)
   end
 
@@ -243,7 +339,9 @@ defmodule ZahlungsWeb.UserAuth do
 
   defp maybe_store_return_to(conn), do: conn
 
-  defp signed_in_path(_conn), do: ~p"/home"
+  # The platform operator has no point of sale to land on.
+  defp signed_in_path(%{role: "superadmin"}), do: ~p"/platform/organizations"
+  defp signed_in_path(_user), do: ~p"/home"
 
   def put_session_layout(conn, _opts) do
     conn

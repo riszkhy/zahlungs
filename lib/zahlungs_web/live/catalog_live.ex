@@ -1,7 +1,7 @@
 defmodule ZahlungsWeb.CatalogLive do
   @moduledoc """
   Read-only product catalog: browse active products with search, category and
-  in-stock filters, plus simple pagination. Available to any authenticated user.
+  in-stock filters, 12 per page. Available to any authenticated user.
   """
   use ZahlungsWeb, :live_view
 
@@ -14,7 +14,7 @@ defmodule ZahlungsWeb.CatalogLive do
     {:ok,
      socket
      |> assign(page_title: "Catalog", search: "", category_id: "", in_stock: false, page: 1)
-     |> assign(:scanning, false)
+     |> assign(scanning: false, per_page: @per_page)
      |> assign(:category_options, Catalog.category_options())
      |> load_products()}
   end
@@ -88,12 +88,15 @@ defmodule ZahlungsWeb.CatalogLive do
       active: true
     ]
 
-    total = Catalog.count_products(filters)
+    total = Catalog.count_products(socket.assigns.current_scope, filters)
     total_pages = max(1, ceil(total / @per_page))
     page = min(socket.assigns.page, total_pages)
 
     products =
-      Catalog.list_products(filters ++ [limit: @per_page, offset: (page - 1) * @per_page])
+      Catalog.list_products(
+        socket.assigns.current_scope,
+        filters ++ [limit: @per_page, offset: (page - 1) * @per_page]
+      )
 
     assign(socket, products: products, total: total, total_pages: total_pages, page: page)
   end
@@ -194,23 +197,7 @@ defmodule ZahlungsWeb.CatalogLive do
       </div>
     </div>
 
-    <div :if={@total_pages > 1} class="mt-8 flex items-center justify-center gap-4">
-      <.button
-        phx-click={JS.push("page", value: %{to: @page - 1})}
-        disabled={@page <= 1}
-        class="!bg-gray-200 !text-gray-700"
-      >
-        Prev
-      </.button>
-      <span class="text-sm text-gray-600">Page {@page} of {@total_pages}</span>
-      <.button
-        phx-click={JS.push("page", value: %{to: @page + 1})}
-        disabled={@page >= @total_pages}
-        class="!bg-gray-200 !text-gray-700"
-      >
-        Next
-      </.button>
-    </div>
+    <.pagination page={@page} per_page={@per_page} total={@total} noun="produk" />
     """
   end
 end

@@ -366,8 +366,8 @@ defmodule ZahlungsWeb.CoreComponents do
 
   def table(assigns) do
     ~H"""
-    <div id={@id} class="overflow-y-auto px-4 sm:overflow-visible sm:px-0">
-      <table class="w-[40rem] mt-6 sm:w-full">
+    <div id={@id} class="overflow-x-auto">
+      <table class="mt-6 w-full min-w-[40rem]">
         <thead class="text-sm text-left leading-6 text-gray-500">
           <tr>
             <th :for={col <- @col} class="p-2 pb-4 pr-6 font-normal">{col[:label]}</th>
@@ -392,6 +392,99 @@ defmodule ZahlungsWeb.CoreComponents do
       <p :if={@rows == []} class="mt-6 text-sm text-gray-500">No records found.</p>
     </div>
     """
+  end
+
+  @doc """
+  Page controls for a paged list: which rows are shown out of how many, and
+  Sebelumnya / numbered / Berikutnya buttons.
+
+  The buttons push `event` with `%{"to" => page}`. The page arrives as a JSON
+  number, and may be out of range (page 0 from a stale screen), so the handler
+  clamps it.
+
+  ## Examples
+
+      <.pagination page={@page} per_page={25} total={@total} noun="produk" />
+  """
+  attr :page, :integer, required: true
+  attr :per_page, :integer, required: true
+  attr :total, :integer, required: true, doc: "rows in the whole list, not on this page"
+  attr :noun, :string, default: "data", doc: "what the rows are, for the count"
+  attr :event, :string, default: "page"
+
+  def pagination(assigns) do
+    total_pages = max(1, ceil(assigns.total / assigns.per_page))
+
+    assigns =
+      assign(assigns,
+        total_pages: total_pages,
+        first: (assigns.page - 1) * assigns.per_page + 1,
+        last: min(assigns.page * assigns.per_page, assigns.total),
+        links: page_links(assigns.page, total_pages)
+      )
+
+    ~H"""
+    <nav
+      :if={@total > 0}
+      class="mt-6 flex flex-wrap items-center justify-between gap-3"
+      aria-label="Halaman"
+    >
+      <p class="text-sm text-gray-600">Menampilkan {@first}–{@last} dari {@total} {@noun}</p>
+
+      <div :if={@total_pages > 1} class="flex items-center gap-1">
+        <button
+          type="button"
+          class="chip disabled:opacity-40"
+          phx-click={JS.push(@event, value: %{to: @page - 1})}
+          disabled={@page <= 1}
+        >
+          Sebelumnya
+        </button>
+
+        <%!-- A row of numbers doesn't fit a phone or a portrait tablet. --%>
+        <span class="px-2 text-sm text-gray-600 md:hidden">{@page} / {@total_pages}</span>
+
+        <span class="hidden items-center gap-1 md:flex">
+          <%= for link <- @links do %>
+            <span :if={link == :gap} class="px-1 text-gray-400">…</span>
+            <button
+              :if={link != :gap}
+              type="button"
+              class={["chip min-w-[44px] justify-center", link == @page && "chip-active"]}
+              aria-current={link == @page && "page"}
+              phx-click={JS.push(@event, value: %{to: link})}
+            >
+              {link}
+            </button>
+          <% end %>
+        </span>
+
+        <button
+          type="button"
+          class="chip disabled:opacity-40"
+          phx-click={JS.push(@event, value: %{to: @page + 1})}
+          disabled={@page >= @total_pages}
+        >
+          Berikutnya
+        </button>
+      </div>
+    </nav>
+    """
+  end
+
+  # The first and last page, the current one and its neighbours; `:gap` where
+  # two or more pages are left out (a single one is shown instead).
+  defp page_links(page, total_pages) do
+    [1, total_pages, page - 1, page, page + 1]
+    |> Enum.filter(&(&1 in 1..total_pages))
+    |> Enum.uniq()
+    |> Enum.sort()
+    |> Enum.chunk_every(2, 1)
+    |> Enum.flat_map(fn
+      [a, b] when b - a == 2 -> [a, a + 1]
+      [a, b] when b - a > 2 -> [a, :gap]
+      [a | _] -> [a]
+    end)
   end
 
   @doc """
@@ -506,8 +599,9 @@ defmodule ZahlungsWeb.CoreComponents do
 
   def sale_receipt(assigns) do
     ~H"""
+    <p :if={match?(%{name: _}, @sale.store)} class="text-sm font-medium text-gray-700">{@sale.store.name}</p>
     <p class="text-xs text-gray-400">
-      {Calendar.strftime(Zahlungs.LocalTime.to_local(@sale.inserted_at), "%d %b %Y %H:%M")} · {@sale.user && @sale.user.email}
+      {Calendar.strftime(Zahlungs.LocalTime.to_local(@sale.inserted_at, @sale.store), "%d %b %Y %H:%M")} · {@sale.user && @sale.user.email}
     </p>
 
     <table class="w-full mt-4 text-sm">

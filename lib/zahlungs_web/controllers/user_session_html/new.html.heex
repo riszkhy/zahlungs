@@ -1,6 +1,10 @@
 <h3 class="text-xl text-center text-gray-600 dark:text-gray-200">Log in</h3>
 
-<.form :let={f} for={%{}} as={:user} action={~p"/users/log_in"}>
+<.form :let={f} for={%{}} as={:user} action={~p"/users/log_in"} id="login-form">
+  <%!-- Filled in by assets/js/app.js from the browser's location, when allowed. --%>
+  <input type="hidden" name="user[latitude]" id="login-latitude" />
+  <input type="hidden" name="user[longitude]" id="login-longitude" />
+  <input type="hidden" name="user[accuracy]" id="login-accuracy" />
   <div :if={@error_message} class="alert alert-danger">
     <small>{@error_message}</small>
   </div>
@@ -30,3 +34,11 @@
     <.button class="w-full">Log in</.button>
   </div>
 </.form>
+
+<p class="mt-6 text-center text-xs text-gray-500 dark:text-gray-400">
+  Lokasi login dicatat untuk keperluan audit toko.
+</p>
+
+<p class="mt-3 text-center text-xs text-gray-500 dark:text-gray-400">
+  Belum punya akun? <.link href={~p"/signup"} class="underline">Daftarkan bisnis Anda</.link>
+</p>

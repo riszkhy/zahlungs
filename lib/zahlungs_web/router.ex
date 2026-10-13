@@ -52,6 +52,9 @@ defmodule ZahlungsWeb.Router do
   scope "/", ZahlungsWeb do
     pipe_through [:browser, :redirect_if_user_is_authenticated, :put_session_layout]
 
+    get "/signup", SignupController, :new
+    post "/signup", SignupController, :create
+    get "/signup/pending", SignupController, :pending
     get "/users/log_in", UserSessionController, :new
     post "/users/log_in", UserSessionController, :create
     get "/users/reset_password", UserResetPasswordController, :new
@@ -81,10 +84,23 @@ defmodule ZahlungsWeb.Router do
     get "/users/settings/confirm_email/:token", UserSettingsController, :confirm_email
   end
 
+  ## Platform operator routes (role superadmin: belongs to no organization)
+
+  scope "/platform", ZahlungsWeb do
+    pipe_through [:browser, :require_platform_admin]
+
+    live_session :require_platform_admin,
+      on_mount: [{ZahlungsWeb.UserAuth, :ensure_platform_admin}] do
+      live "/organizations", PlatformLive.Organizations, :index
+    end
+  end
+
   ## Admin-only routes
 
   scope "/", ZahlungsWeb do
     pipe_through [:browser, :require_authenticated_user, :require_admin_user]
+
+    post "/stores/select", StoreSelectionController, :update
 
     live_session :require_admin_user,
       on_mount: [{ZahlungsWeb.UserAuth, :ensure_admin}] do
@@ -98,6 +114,11 @@ defmodule ZahlungsWeb.Router do
 
       live "/admin/users", UserLive.Index, :index
       live "/admin/users/new", UserLive.Index, :new
+
+      live "/admin/stores", StoreLive.Index, :index
+      live "/admin/stores/register", StoreLive.Register, :new
+      live "/admin/stores/:id/edit", StoreLive.Index, :edit
+      live "/admin/logins", LoginLive.Index, :index
 
       live "/admin/suppliers", SupplierLive.Index, :index
       live "/admin/suppliers/new", SupplierLive.Index, :new

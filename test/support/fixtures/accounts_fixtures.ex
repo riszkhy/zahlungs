@@ -14,11 +14,37 @@ defmodule Zahlungs.AccountsFixtures do
     })
   end
 
+  @doc """
+  A cashier in the test's default store. Pass `store_id:` for another store, or
+  `store_id: nil` for a user without one.
+  """
   def user_fixture(attrs \\ %{}) do
+    Zahlungs.StoresFixtures.default_org()
+
+    {store_id, attrs} =
+      attrs
+      |> Map.new()
+      |> Map.pop_lazy(:store_id, fn -> Zahlungs.StoresFixtures.default_store().id end)
+
     {:ok, user} =
       attrs
       |> valid_user_attributes()
       |> Zahlungs.Accounts.register_user()
+
+    if store_id do
+      {:ok, user} = Zahlungs.Accounts.set_user_store(user, store_id)
+      user
+    else
+      user
+    end
+  end
+
+  @doc "The platform operator: belongs to no organization."
+  def superadmin_fixture(attrs \\ %{}) do
+    {:ok, user} =
+      attrs
+      |> valid_user_attributes()
+      |> Zahlungs.Accounts.create_platform_admin()
 
     user
   end

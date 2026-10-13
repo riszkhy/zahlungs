@@ -1,15 +1,24 @@
 defmodule Zahlungs.Catalog do
   @moduledoc """
-  The Catalog context: products and categories.
+  The Catalog context: products, categories and suppliers.
 
   This is the public API for everything product-related. LiveViews and tests call
   these functions, never the schemas directly.
+
+  ## Stock is per store
+
+  The catalog itself is shared by all stores, but stock is not: it lives in
+  `product_stocks`, one row per store and product (no row means zero).
+  Functions that read or write stock take a `Zahlungs.Scope` and fill the
+  product's `stock` field with the units in that scope's store — or the sum over
+  all stores for an admin looking at all of them.
   """
 
   import Ecto.Query, warn: false
   alias Zahlungs.Repo
 
-  alias Zahlungs.Catalog.{Category, Product, Supplier}
+  alias Zahlungs.Catalog.{Category, Product, ProductStock, Supplier}
+  alias Zahlungs.Scope
 
   ## Products
 
@@ -27,22 +36,53 @@ defmodule Zahlungs.Catalog do
 
   Results preload the associated category.
   """
-  def list_products(opts \\ []) do
-    opts
-    |> base_query()
+  def list_products(%Scope{} = scope, opts \\ []) do
+    scope
+    |> base_query(opts)
     |> order_by(^(opts[:order_by] || :name))
     |> maybe_limit(opts[:limit])
     |> maybe_offset(opts[:offset])
+    |> with_stock()
     |> preload(:category)
     |> Repo.all()
   end
 
-  defp base_query(opts) do
-    from(p in Product, where: is_nil(p.deleted_at))
+  defp base_query(scope, opts) do
+    scope
+    |> products_query()
     |> filter_search(opts[:search])
     |> filter_category(opts[:category_id])
     |> filter_active(opts[:active])
     |> filter_in_stock(opts[:in_stock])
+  end
+
+  # Non-deleted products joined with their stock in the scope's store, as the
+  # named binding `:stock` (nil when the store has no row for the product).
+  defp products_query(scope) do
+    from p in Product,
+      left_join: st in subquery(stock_query(scope)),
+      as: :stock,
+      on: st.product_id == p.id,
+      where: is_nil(p.deleted_at)
+  end
+
+  defp stock_query(scope) do
+    case Scope.store_id(scope) do
+      nil ->
+        from ps in ProductStock,
+          group_by: ps.product_id,
+          select: %{product_id: ps.product_id, stock: sum(ps.stock)}
+
+      store_id ->
+        from ps in ProductStock,
+          where: ps.store_id == ^store_id,
+          select: %{product_id: ps.product_id, stock: ps.stock}
+    end
+  end
+
+  # Fills the virtual `stock` field from the joined stock.
+  defp with_stock(query) do
+    select_merge(query, [stock: st], %{stock: type(coalesce(st.stock, 0), :integer)})
   end
 
   defp maybe_limit(query, nil), do: query
@@ -52,7 +92,7 @@ defmodule Zahlungs.Catalog do
   defp maybe_offset(query, 0), do: query
   defp maybe_offset(query, n), do: offset(query, ^n)
 
-  defp filter_in_stock(query, true), do: where(query, [p], p.stock > 0)
+  defp filter_in_stock(query, true), do: where(query, [stock: st], coalesce(st.stock, 0) > 0)
   defp filter_in_stock(query, _), do: query
 
   defp filter_search(query, term) when is_binary(term) do
@@ -87,8 +127,10 @@ defmodule Zahlungs.Catalog do
   defp filter_active(query, _), do: query
 
   @doc "Gets a single (non-deleted) product (raises if not found). Preloads category."
-  def get_product!(id) do
-    from(p in Product, where: is_nil(p.deleted_at))
+  def get_product!(%Scope{} = scope, id) do
+    scope
+    |> products_query()
+    |> with_stock()
     |> Repo.get!(id)
     |> Repo.preload(:category)
   end
@@ -98,18 +140,17 @@ defmodule Zahlungs.Catalog do
   (used by the cashier barcode scanner). Returns the product (category preloaded)
   or `nil`.
   """
-  def get_product_by_code(code) when is_binary(code) do
+  def get_product_by_code(%Scope{} = scope, code) when is_binary(code) do
     trimmed = String.trim(code)
 
     if trimmed == "" do
       nil
     else
-      from(p in Product,
-        where:
-          is_nil(p.deleted_at) and p.active == true and
-            (p.barcode == ^trimmed or p.sku == ^trimmed),
-        limit: 1
-      )
+      scope
+      |> products_query()
+      |> where([p], p.active == true and (p.barcode == ^trimmed or p.sku == ^trimmed))
+      |> limit(1)
+      |> with_stock()
       |> Repo.all()
       |> List.first()
       |> case do
@@ -119,20 +160,22 @@ defmodule Zahlungs.Catalog do
     end
   end
 
-  def get_product_by_code(_), do: nil
+  def get_product_by_code(%Scope{}, _), do: nil
 
-  @doc "Counts products matching the given options (same filters as `list_products/1`)."
-  def count_products(opts \\ []) do
-    opts
-    |> base_query()
+  @doc "Counts products matching the given options (same filters as `list_products/2`)."
+  def count_products(%Scope{} = scope, opts \\ []) do
+    scope
+    |> base_query(opts)
     |> Repo.aggregate(:count)
   end
 
   @doc "Lists products whose stock is at or below the given threshold."
-  def list_low_stock_products(threshold \\ 5) do
-    Product
-    |> where([p], is_nil(p.deleted_at) and p.active == true and p.stock <= ^threshold)
-    |> order_by([p], asc: p.stock)
+  def list_low_stock_products(%Scope{} = scope, threshold \\ 5) do
+    scope
+    |> products_query()
+    |> where([p, stock: st], p.active == true and coalesce(st.stock, 0) <= ^threshold)
+    |> order_by([stock: st], asc: coalesce(st.stock, 0))
+    |> with_stock()
     |> Repo.all()
   end
 
@@ -140,27 +183,33 @@ defmodule Zahlungs.Catalog do
   Current inventory snapshot for active products: counts, stock value at cost and
   retail (potential profit), plus low-stock and out-of-stock product lists.
   """
-  def stock_report(threshold \\ 5) do
-    base = from(p in Product, where: is_nil(p.deleted_at) and p.active == true)
+  def stock_report(%Scope{} = scope, threshold \\ 5) do
+    base = scope |> products_query() |> where([p], p.active == true)
 
     summary =
       Repo.one(
-        from p in base,
+        from [p, stock: st] in base,
           select: %{
             products: count(p.id),
-            units: coalesce(sum(p.stock), 0),
-            cost_value: coalesce(sum(fragment("? * ?", p.purchase_price, p.stock)), 0),
-            retail_value: coalesce(sum(fragment("? * ?", p.price, p.stock)), 0)
+            units: coalesce(sum(st.stock), 0),
+            cost_value: coalesce(sum(fragment("? * ?", p.purchase_price, st.stock)), 0),
+            retail_value: coalesce(sum(fragment("? * ?", p.price, st.stock)), 0)
           }
       )
 
     low =
-      from(p in base, where: p.stock > 0 and p.stock <= ^threshold, order_by: [asc: p.stock])
+      base
+      |> where([stock: st], st.stock > 0 and st.stock <= ^threshold)
+      |> order_by([stock: st], asc: st.stock)
+      |> with_stock()
       |> Repo.all()
       |> Repo.preload(:category)
 
     out =
-      from(p in base, where: p.stock <= 0, order_by: [asc: p.name])
+      base
+      |> where([stock: st], coalesce(st.stock, 0) <= 0)
+      |> order_by([p], asc: p.name)
+      |> with_stock()
       |> Repo.all()
       |> Repo.preload(:category)
 
@@ -169,7 +218,7 @@ defmodule Zahlungs.Catalog do
 
     %{
       products: summary.products,
-      units: summary.units,
+      units: to_integer(summary.units),
       cost_value: cost,
       retail_value: retail,
       potential_profit: Decimal.sub(retail, cost),
@@ -178,10 +227,49 @@ defmodule Zahlungs.Catalog do
     }
   end
 
-  def create_product(attrs \\ %{}) do
+  @doc """
+  Creates a product. A `stock` attribute becomes the stock in the scope's
+  store; the product starts at zero everywhere else.
+  """
+  def create_product(%Scope{} = scope, attrs \\ %{}) do
     %Product{}
     |> Product.changeset(maybe_put_sku(attrs))
-    |> Repo.insert()
+    |> save_with_stock(scope, &Repo.insert/1)
+  end
+
+  # Saves the product and, when the changeset sets `stock`, writes it for the
+  # scope's store — both or neither.
+  defp save_with_stock(changeset, scope, save) do
+    Repo.transaction(fn ->
+      with {:ok, product} <- save.(changeset),
+           :ok <- put_stock(scope, product, changeset) do
+        product
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+  end
+
+  defp put_stock(scope, product, changeset) do
+    case {Ecto.Changeset.fetch_change(changeset, :stock), scope.store} do
+      {:error, _store} ->
+        :ok
+
+      # Stock belongs to a store; an admin looking at all stores must pick one.
+      {{:ok, _stock}, nil} ->
+        {:error, Ecto.Changeset.add_error(changeset, :stock, "pilih toko untuk mengubah stok")}
+
+      {{:ok, stock}, store} ->
+        set_stock(store.id, product.id, stock)
+    end
+  end
+
+  defp set_stock(store_id, product_id, stock) do
+    Repo.insert!(%ProductStock{store_id: store_id, product_id: product_id, stock: stock},
+      on_conflict: [set: [stock: stock, updated_at: now()]]
+    )
+
+    :ok
   end
 
   # Auto-generates the SKU when none is supplied (the normal case from the form).
@@ -201,10 +289,14 @@ defmodule Zahlungs.Catalog do
   defp blank?(value) when is_binary(value), do: String.trim(value) == ""
   defp blank?(_), do: false
 
-  def update_product(%Product{} = product, attrs) do
+  @doc """
+  Updates a product. Changing `stock` sets the stock in the scope's store, so
+  `product` must have been loaded with the same scope.
+  """
+  def update_product(%Scope{} = scope, %Product{} = product, attrs) do
     product
     |> Product.changeset(attrs)
-    |> Repo.update()
+    |> save_with_stock(scope, &Repo.update/1)
   end
 
   @doc "Soft-deletes a product (sets `deleted_at`); the row is kept for history."
@@ -413,23 +505,29 @@ defmodule Zahlungs.Catalog do
   Current on-hand consignment stock per product (units still in the shop that
   could be returned to the consignor), valued at the consignment (purchase) price.
   """
-  def consignment_stock_on_hand do
+  def consignment_stock_on_hand(%Scope{} = scope) do
     Repo.all(
-      from p in Product,
+      from [p, stock: st] in products_query(scope),
         join: sup in assoc(p, :supplier),
-        where: is_nil(p.deleted_at) and p.consignment == true and p.stock > 0,
+        where: p.consignment == true and st.stock > 0,
         order_by: [sup.name, p.name],
         select: %{
           supplier_id: sup.id,
           supplier: sup.name,
           product: p.name,
           sku: p.sku,
-          units: p.stock,
-          cost_value: fragment("? * ?", p.purchase_price, p.stock)
+          units: st.stock,
+          cost_value: fragment("? * ?", p.purchase_price, st.stock)
         }
     )
-    |> Enum.map(fn row -> %{row | cost_value: to_decimal(row.cost_value)} end)
+    |> Enum.map(fn row ->
+      %{row | units: to_integer(row.units), cost_value: to_decimal(row.cost_value)}
+    end)
   end
+
+  # SUM() over all stores comes back as a Decimal.
+  defp to_integer(%Decimal{} = d), do: Decimal.to_integer(d)
+  defp to_integer(n) when is_integer(n), do: n
 
   def create_supplier(attrs \\ %{}) do
     %Supplier{}

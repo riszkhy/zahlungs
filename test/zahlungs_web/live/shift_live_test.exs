@@ -6,6 +6,7 @@ defmodule ZahlungsWeb.ShiftLiveTest do
   use ZahlungsWeb.ConnCase, async: true
 
   import Zahlungs.AccountsFixtures
+  import Zahlungs.StoresFixtures
   import Zahlungs.CatalogFixtures
   import Zahlungs.ShiftsFixtures
   import ZahlungsWeb.LiveDriver
@@ -27,7 +28,7 @@ defmodule ZahlungsWeb.ShiftLiveTest do
       user = user_fixture()
       {:ok, _} = Zahlungs.Accounts.update_user_name(user, %{name: "Budi Kasir"})
       user = Zahlungs.Accounts.get_user!(user.id)
-      {:ok, shift} = Shifts.open_shift(user, 100_000)
+      {:ok, shift} = Shifts.open_shift(scope(user), 100_000)
 
       conn = conn |> log_in_user(user) |> get("/shifts")
       response = html_response(conn, 200)
@@ -51,6 +52,20 @@ defmodule ZahlungsWeb.ShiftLiveTest do
       admin_ids = Enum.map(as_admin.assigns.shifts, & &1.id)
       assert mine.id in admin_ids
       assert theirs.id in admin_ids
+    end
+  end
+
+  describe "narrow screens" do
+    test "each shift is also a card that opens its detail" do
+      cashier = user_fixture()
+      shift = shift_fixture(cashier, "100000")
+
+      rendered = ShiftLive.Index |> mount_live(cashier) |> html()
+
+      [_, card] = Regex.run(~r{<a[^>]*id="shift-card-#{shift.id}"[^>]*>(.*?)</a>}s, rendered)
+
+      assert rendered =~ ~s(href="/shifts/#{shift.id}")
+      assert card =~ "open"
     end
   end
 
