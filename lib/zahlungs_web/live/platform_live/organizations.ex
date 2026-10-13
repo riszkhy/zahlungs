@@ -3,6 +3,10 @@ defmodule ZahlungsWeb.PlatformLive.Organizations do
   The platform operator's review page: every organization that signed up, with
   its owner and size. Approve or reject a pending one, suspend or reactivate an
   active one, and keep the manual billing record (paid-until date and a note).
+
+  How many are waiting for approval is shown on the status chips and in the
+  browser tab's title, and follows sign-ups as they happen: the page listens
+  to `Organizations.subscribe/0`.
   """
   use ZahlungsWeb, :live_view
 
@@ -10,7 +14,9 @@ defmodule ZahlungsWeb.PlatformLive.Organizations do
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, socket |> assign(page_title: "Organisasi", status: "") |> load()}
+    if connected?(socket), do: Organizations.subscribe()
+
+    {:ok, socket |> assign(:status, "") |> load()}
   end
 
   @impl true
@@ -51,9 +57,41 @@ defmodule ZahlungsWeb.PlatformLive.Organizations do
     end
   end
 
-  defp load(socket) do
-    assign(socket, :rows, Organizations.list_organizations(status: socket.assigns.status))
+  # A business signed up, or another operator reviewed one.
+  @impl true
+  def handle_info({:organizations_changed, _organization_id}, socket) do
+    {:noreply, load(socket)}
   end
+
+  defp load(socket) do
+    counts = Organizations.count_by_status()
+
+    assign(socket,
+      rows: Organizations.list_organizations(status: socket.assigns.status),
+      counts: counts,
+      page_title: page_title(counts["pending"])
+    )
+  end
+
+  # The count leads the tab's title, so it shows while another tab is in front.
+  defp page_title(0), do: "Organisasi"
+  defp page_title(waiting), do: "(#{waiting}) Organisasi"
+
+  # The status filter as {value, element id, label}; "" is every status.
+  defp filters do
+    [{"", "all", "Semua"}] ++
+      for status <- Organizations.Organization.statuses() do
+        {status, status, status_label(status)}
+      end
+  end
+
+  defp count(counts, ""), do: counts |> Map.values() |> Enum.sum()
+  defp count(counts, status), do: counts[status]
+
+  # Organizations waiting for approval stand out until there are none.
+  defp count_class("pending", waiting, _chosen?) when waiting > 0, do: "bg-amber-500 text-white"
+  defp count_class(_status, _count, true), do: "bg-white/20 text-white"
+  defp count_class(_status, _count, false), do: "bg-gray-100 text-gray-600"
 
   defp blank_to_nil(value) when value in [nil, ""], do: nil
   defp blank_to_nil(value), do: value
@@ -93,17 +131,25 @@ defmodule ZahlungsWeb.PlatformLive.Organizations do
       </:subtitle>
     </.header>
 
-    <form phx-change="filter" class="mt-6">
-      <label class="text-sm">
-        Status
-        <select name="status" class="form-control">
-          <option value="" selected={@status == ""}>Semua</option>
-          <option :for={status <- Organizations.Organization.statuses()} value={status} selected={@status == status}>
-            {status_label(status)}
-          </option>
-        </select>
-      </label>
-    </form>
+    <div class="mt-6 flex flex-wrap gap-2" role="group" aria-label="Saring menurut status">
+      <button
+        :for={{value, id, label} <- filters()}
+        id={"status-#{id}"}
+        type="button"
+        phx-click="filter"
+        phx-value-status={value}
+        aria-pressed={to_string(@status == value)}
+        class={["chip gap-2", @status == value && "chip-active"]}
+      >
+        {label}
+        <span class={[
+          "rounded-full px-2 py-0.5 text-xs font-semibold",
+          count_class(value, count(@counts, value), @status == value)
+        ]}>
+          {count(@counts, value)}
+        </span>
+      </button>
+    </div>
 
     <div class="mt-4 space-y-4">
       <div :for={row <- @rows} id={"organization-#{row.organization.id}"} class="rounded-lg border border-gray-200 p-4">

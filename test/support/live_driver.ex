@@ -1,7 +1,7 @@
 defmodule ZahlungsWeb.LiveDriver do
   @moduledoc """
   Drives a LiveView through its own callbacks — `mount/3`, `handle_params/3`,
-  `handle_event/3`, `render/1` — on a hand-built socket.
+  `handle_event/3`, `handle_info/2`, `render/1` — on a hand-built socket.
 
   `Phoenix.LiveViewTest.live/2` needs the `lazy_html` package, which this
   project doesn't have yet. Until it does, this is how the behaviour behind a
@@ -26,10 +26,14 @@ defmodule ZahlungsWeb.LiveDriver do
 
   @doc """
   Mounts `view` as `user`. Options: `:action` (the live action, default
-  `:index`), `:params` (default `%{}`) and `:store` (an admin's store choice: a
-  store id or `"all"`; default is the user's own store).
+  `:index`), `:params` (default `%{}`), `:store` (an admin's store choice: a
+  store id or `"all"`; default is the user's own store) and `:connected`
+  (`true` mounts as over the websocket, so `connected?/1` holds and the view
+  subscribes to whatever it listens to — in the test process).
   """
   def mount_live(view, user, opts \\ []) do
+    transport_pid = if Keyword.get(opts, :connected, false), do: self()
+
     assigns = %{
       __changed__: %{},
       flash: %{},
@@ -39,7 +43,11 @@ defmodule ZahlungsWeb.LiveDriver do
     }
 
     {:ok, socket} =
-      view.mount(Keyword.get(opts, :params, %{}), %{}, %Socket{view: view, assigns: assigns})
+      view.mount(Keyword.get(opts, :params, %{}), %{}, %Socket{
+        view: view,
+        assigns: assigns,
+        transport_pid: transport_pid
+      })
 
     handle_params(socket, Keyword.get(opts, :params, %{}))
   end
@@ -47,6 +55,12 @@ defmodule ZahlungsWeb.LiveDriver do
   @doc "Sends an event, as a `phx-click`/`phx-submit`/`phx-change` would."
   def event(%Socket{view: view} = socket, name, params \\ %{}) do
     {:noreply, socket} = view.handle_event(name, params, reset_transient(socket))
+    socket
+  end
+
+  @doc "Delivers a message, as a PubSub broadcast or `send/2` to the view would."
+  def info(%Socket{view: view} = socket, message) do
+    {:noreply, socket} = view.handle_info(message, reset_transient(socket))
     socket
   end
 

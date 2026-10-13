@@ -159,4 +159,81 @@ defmodule ZahlungsWeb.PlatformLiveTest do
       assert html(socket) =~ "Transfer 6 bulan"
     end
   end
+
+  describe "organizations waiting for approval" do
+    setup do
+      Map.put(pending_org(), :operator, superadmin_fixture())
+    end
+
+    defp title(0), do: "Organisasi"
+    defp title(waiting), do: "(#{waiting}) Organisasi"
+
+    defp chip(socket, status) do
+      [tag] = Regex.run(~r{<button[^>]*id="status-#{status}"[^>]*>.*?</button>}s, html(socket))
+      tag
+    end
+
+    defp approve(socket, org) do
+      event(socket, "set_status", %{
+        "organization_id" => org.id,
+        "status" => "active",
+        "note" => ""
+      })
+    end
+
+    test "are counted on the page and in the tab title", ctx do
+      socket = mount_live(PlatformLive.Organizations, ctx.operator)
+      waiting = socket.assigns.counts["pending"]
+
+      assert waiting >= 1
+      assert socket.assigns.page_title == title(waiting)
+      assert chip(socket, "pending") =~ "Menunggu"
+      assert chip(socket, "pending") =~ ~r/>\s*#{waiting}\s*</
+
+      approved = approve(socket, ctx.org)
+
+      assert approved.assigns.counts["pending"] == waiting - 1
+      assert approved.assigns.page_title == title(waiting - 1)
+      assert chip(approved, "pending") =~ ~r/>\s*#{waiting - 1}\s*</
+    end
+
+    test "the status chips filter the list and show which one is chosen", ctx do
+      socket = mount_live(PlatformLive.Organizations, ctx.operator)
+
+      assert chip(socket, "all") =~ "chip-active"
+      refute chip(socket, "pending") =~ "chip-active"
+
+      pending = event(socket, "filter", %{"status" => "pending"})
+
+      assert chip(pending, "pending") =~ "chip-active"
+      refute chip(pending, "all") =~ "chip-active"
+      assert Enum.all?(pending.assigns.rows, &(&1.organization.status == "pending"))
+
+      # The counts are of every organization, whatever the list is filtered to.
+      assert pending.assigns.counts == socket.assigns.counts
+    end
+
+    test "a sign-up while the page is open appears without a reload", ctx do
+      socket = mount_live(PlatformLive.Organizations, ctx.operator, connected: true)
+      waiting = socket.assigns.counts["pending"]
+
+      %{org: new} = pending_org()
+      new_id = new.id
+      assert_receive {:organizations_changed, ^new_id}
+
+      socket = info(socket, {:organizations_changed, new_id})
+
+      assert socket.assigns.counts["pending"] == waiting + 1
+      assert socket.assigns.page_title == title(waiting + 1)
+      assert new_id in Enum.map(socket.assigns.rows, & &1.organization.id)
+    end
+
+    test "the first, static render does not subscribe", ctx do
+      mount_live(PlatformLive.Organizations, ctx.operator)
+
+      %{org: new} = pending_org()
+      new_id = new.id
+      refute_receive {:organizations_changed, ^new_id}, 50
+    end
+  end
 end

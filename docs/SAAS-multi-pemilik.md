@@ -55,6 +55,9 @@ login pemilik saat pending/rejected/suspended → ditolak dengan pesan yang sesu
 /platform/organizations (superadmin)
          → Setujui / Tolak / Tangguhkan / Aktifkan lagi, + catatan
          → "Dibayar sampai" + catatan tagihan
+         → jumlah per status di chip filter; yang menunggu juga tampil di
+           judul tab, "(2) Organisasi", dan bertambah sendiri saat ada
+           pendaftar baru (halaman tidak perlu dimuat ulang)
 penangguhan → sesi yang sedang terbuka berakhir pada request berikutnya
 ```
 

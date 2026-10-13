@@ -277,6 +277,38 @@ defmodule Zahlungs.OrganizationsTest do
       assert {org.paid_until, org.billing_note} == {~D[2027-01-31], "Transfer BCA 3 bulan"}
     end
 
+    test "counts organizations by status, with every status present", ctx do
+      before = Organizations.count_by_status()
+
+      assert Enum.sort(Map.keys(before)) == Enum.sort(Organization.statuses())
+      assert before["pending"] >= 1
+
+      {:ok, _} = Organizations.set_status(ctx.org, "active", ctx.operator)
+      later = Organizations.count_by_status()
+
+      assert later["pending"] == before["pending"] - 1
+      assert later["active"] == before["active"] + 1
+      assert later["suspended"] == before["suspended"]
+    end
+
+    test "sign-ups and reviews are announced to whoever subscribed", ctx do
+      :ok = Organizations.subscribe()
+
+      {:ok, %{organization: new}} =
+        Organizations.register(Map.put(@valid, "email", unique_user_email()))
+
+      new_id = new.id
+      assert_receive {:organizations_changed, ^new_id}
+
+      reviewed_id = ctx.org.id
+      {:ok, _} = Organizations.set_status(ctx.org, "rejected", ctx.operator)
+      assert_receive {:organizations_changed, ^reviewed_id}
+
+      # A change that was refused is not news.
+      {:error, :invalid_transition} = Organizations.set_status(new, "suspended", ctx.operator)
+      refute_receive {:organizations_changed, ^new_id}, 50
+    end
+
     test "the operator's list shows each organization's owner and size", ctx do
       row =
         Enum.find(Organizations.list_organizations(status: "pending"), fn row ->

@@ -72,7 +72,7 @@ Several owners share one database; full notes in `docs/SAAS-multi-pemilik.md`.
 - **"All stores"** means every store of the admin's organization (`Stores.store_ids/0`), never an unfiltered query — sales and shifts are shared tables.
 - **Uniqueness is per organization** for SKU, barcode, category name and store code (invoice codes per store). Email is unique across all organizations (`unsafe_validate_unique(..., repo_opts: [skip_org_id: true])`).
 - **Roles:** `superadmin` (platform operator: no organization, only `/platform`, created by seeds via `Accounts.create_platform_admin/1`), `admin` (an organization's owner/staff), `cashier`. `Scope.block_reason/1` says why a scope can't use the app (`:pending`, `:rejected`, `:suspended`, `:no_store`, `:no_organization`); the login controller and `UserAuth` act on it.
-- **Sign-up** (`/signup`, public, rate-limited) creates a pending organization, a first store and the owner via `Organizations.register/1`; the operator reviews at `/platform/organizations`. Billing is a manual record (`paid_until`, `billing_note`).
+- **Sign-up** (`/signup`, public, rate-limited) creates a pending organization, a first store and the owner via `Organizations.register/1`; the operator reviews at `/platform/organizations`. Billing is a manual record (`paid_until`, `billing_note`). Sign-ups and status changes are broadcast (`Organizations.subscribe/0` → `{:organizations_changed, id}`); the operator's page listens, so its pending count stays current.
 - **Tests** start inside a default organization (`DataCase`, `StoresFixtures.default_org/0`); use `organization_fixture/1` + `in_org/2` for a second one.
 
 ### Multi-store

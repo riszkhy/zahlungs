@@ -49,11 +49,15 @@ defmodule Zahlungs.Organizations do
       # leaving it as the caller's current one.
       previous = Repo.get_org_id()
 
-      try do
-        Repo.transaction(fn -> insert_all(signup, changeset) end)
-      after
-        Repo.put_org_id(previous)
-      end
+      result =
+        try do
+          Repo.transaction(fn -> insert_all(signup, changeset) end)
+        after
+          Repo.put_org_id(previous)
+        end
+
+      # After the commit, so a listener that reloads finds the new rows.
+      announce(result, & &1.organization)
     end
   end
 
@@ -81,6 +85,25 @@ defmodule Zahlungs.Organizations do
         Repo.rollback(Signup.copy_errors(changeset, user_changeset))
     end
   end
+
+  ## Announcing changes
+
+  @topic "organizations"
+
+  @doc """
+  Subscribes the calling process to `{:organizations_changed, organization_id}`,
+  sent when a business signs up or an organization's status changes. The
+  platform operator's page uses it to show new sign-ups as they arrive.
+  """
+  def subscribe, do: Phoenix.PubSub.subscribe(Zahlungs.PubSub, @topic)
+
+  defp announce({:ok, result}, organization) do
+    message = {:organizations_changed, organization.(result).id}
+    Phoenix.PubSub.broadcast(Zahlungs.PubSub, @topic, message)
+    {:ok, result}
+  end
+
+  defp announce(error, _organization), do: error
 
   ## Reading
 
@@ -129,6 +152,19 @@ defmodule Zahlungs.Organizations do
     end)
   end
 
+  @doc """
+  How many organizations are in each status, as `%{status => count}` with
+  every status present. `counts["pending"]` is what waits for the operator.
+  """
+  def count_by_status do
+    counts =
+      Map.new(
+        Repo.all(from o in Organization, group_by: o.status, select: {o.status, count(o.id)})
+      )
+
+    Map.new(Organization.statuses(), &{&1, Map.get(counts, &1, 0)})
+  end
+
   defp filter_status(query, status) when status in [nil, ""], do: query
   defp filter_status(query, status), do: where(query, [o], o.status == ^status)
 
@@ -164,6 +200,7 @@ defmodule Zahlungs.Organizations do
       organization
       |> Organization.review_changeset(status, reviewer.id, note)
       |> Repo.update()
+      |> announce(& &1)
     else
       {:error, :invalid_transition}
     end
