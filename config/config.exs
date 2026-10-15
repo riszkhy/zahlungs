@@ -71,6 +71,12 @@ config :phoenix, :json_library, Jason
 
 config :zahlungs, :env, Mix.env()
 
+# Where the landing page (`/`) tells visitors to reach us. `whatsapp` is the
+# number in international form without the plus sign.
+config :zahlungs, :contact,
+  email: "riszkhy@gmail.com",
+  whatsapp: "628978844555"
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"
