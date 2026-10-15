@@ -1,0 +1,301 @@
+<header class="sticky top-0 z-30 border-b border-gray-200 bg-white/95 backdrop-blur">
+  <div class="mx-auto flex h-16 max-w-6xl items-center gap-4 px-4">
+    <a href={~p"/"} class="text-xl font-bold text-green-800">Zahlungs</a>
+
+    <nav class="ml-6 hidden items-center gap-1 text-sm md:flex" aria-label="Halaman ini">
+      <a href="#fitur" class="inline-flex min-h-[44px] items-center rounded px-3 text-gray-600 hover:bg-gray-100">Fitur</a>
+      <a href="#cara-mulai" class="inline-flex min-h-[44px] items-center rounded px-3 text-gray-600 hover:bg-gray-100">Cara mulai</a>
+      <a href="#harga" class="inline-flex min-h-[44px] items-center rounded px-3 text-gray-600 hover:bg-gray-100">Harga</a>
+      <a href="#faq" class="inline-flex min-h-[44px] items-center rounded px-3 text-gray-600 hover:bg-gray-100">Pertanyaan</a>
+    </nav>
+
+    <div class="ml-auto flex items-center gap-2">
+      <.link href={~p"/users/log_in"} class="inline-flex min-h-[44px] items-center rounded px-3 text-sm font-medium text-gray-700 hover:bg-gray-100">
+        Masuk
+      </.link>
+      <.link href={~p"/signup"} class="btn btn-primary inline-flex min-h-[44px] items-center !px-4 !py-1.5 !text-sm">
+        Daftar
+      </.link>
+    </div>
+  </div>
+</header>
+
+<main>
+  <%!-- Hero --%>
+  <section class="bg-green-50">
+    <div class="mx-auto grid max-w-6xl items-center gap-10 px-4 py-12 lg:grid-cols-2 lg:py-20">
+      <div>
+        <h1 class="text-4xl font-bold leading-tight text-gray-900 sm:text-5xl">
+          Kasir dan stok toko, rapi dalam satu layar
+        </h1>
+        <p class="mt-5 text-lg text-gray-600">
+          Catat penjualan, tutup kas tanpa selisih, dan pantau stok semua cabang.
+          Cukup dari tablet atau ponsel.
+        </p>
+        <div class="mt-8 flex flex-wrap items-center gap-3">
+          <.link href={~p"/signup"} class="btn btn-primary inline-flex min-h-[48px] items-center">
+            Daftarkan toko Anda
+          </.link>
+          <.link
+            href={~p"/users/log_in"}
+            class="inline-flex min-h-[48px] items-center rounded border border-gray-300 bg-white px-6 text-lg text-gray-700 hover:bg-gray-50"
+          >
+            Masuk
+          </.link>
+        </div>
+        <p class="mt-4 text-sm text-gray-500">
+          Pendaftaran diverifikasi dulu sebelum akun aktif.
+        </p>
+      </div>
+
+      <.cashier_mock />
+    </div>
+  </section>
+
+  <%!-- Masalah --%>
+  <section class="mx-auto max-w-6xl px-4 py-14">
+    <h2 class="text-2xl font-bold text-gray-900">Yang sering terjadi di toko</h2>
+    <div class="mt-8 grid gap-5 md:grid-cols-3">
+      <div class="rounded-lg border border-gray-200 p-5">
+        <h3 class="font-semibold text-gray-900">Kas tidak cocok di akhir hari</h3>
+        <p class="mt-2 text-sm text-gray-600">
+          Kas dibuka dan ditutup per shift, jadi selisih terlihat saat itu juga,
+          bukan seminggu kemudian.
+        </p>
+      </div>
+      <div class="rounded-lg border border-gray-200 p-5">
+        <h3 class="font-semibold text-gray-900">Stok di catatan beda dengan di rak</h3>
+        <p class="mt-2 text-sm text-gray-600">
+          Setiap penjualan mengurangi stok, dan barang tidak bisa terjual
+          melebihi yang ada.
+        </p>
+      </div>
+      <div class="rounded-lg border border-gray-200 p-5">
+        <h3 class="font-semibold text-gray-900">Hasil titipan supplier dihitung manual</h3>
+        <p class="mt-2 text-sm text-gray-600">
+          Barang konsinyasi dicatat bersama pemasoknya, lalu rekap yang harus
+          dibayar ke tiap supplier tersedia otomatis.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <%!-- Fitur --%>
+  <section id="fitur" class="bg-gray-50">
+    <div class="mx-auto max-w-6xl px-4 py-14">
+      <h2 class="text-2xl font-bold text-gray-900">Apa yang bisa dilakukan</h2>
+      <div class="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        <div class="rounded-lg bg-white p-5 shadow-sm">
+          <h3 class="font-semibold text-green-800">Kasir cepat</h3>
+          <p class="mt-2 text-sm text-gray-600">
+            Scan barcode dengan kamera atau scanner USB, atau cari produk
+            dari nama dan SKU. Pembayaran tunai, QRIS, kartu, dan transfer
+            dicatat per transaksi.
+          </p>
+        </div>
+        <div class="rounded-lg bg-white p-5 shadow-sm">
+          <h3 class="font-semibold text-green-800">Shift dan kas</h3>
+          <p class="mt-2 text-sm text-gray-600">
+            Buka shift dengan kas awal, catat setoran dan pengeluaran, lalu
+            tutup dengan menghitung kas. Retur dan pembatalan tercatat dengan
+            alasannya.
+          </p>
+        </div>
+        <div class="rounded-lg bg-white p-5 shadow-sm">
+          <h3 class="font-semibold text-green-800">Stok per cabang</h3>
+          <p class="mt-2 text-sm text-gray-600">
+            Satu katalog untuk semua cabang, dengan stok terpisah di tiap
+            toko. Pemilik bisa melihat satu cabang atau semuanya.
+          </p>
+        </div>
+        <div class="rounded-lg bg-white p-5 shadow-sm">
+          <h3 class="font-semibold text-green-800">Konsinyasi</h3>
+          <p class="mt-2 text-sm text-gray-600">
+            Barang titipan supplier ditandai, dan rekap penjualannya per
+            pemasok siap untuk dibayarkan.
+          </p>
+        </div>
+        <div class="rounded-lg bg-white p-5 shadow-sm">
+          <h3 class="font-semibold text-green-800">Laporan</h3>
+          <p class="mt-2 text-sm text-gray-600">
+            Penjualan per hari atau periode, produk terlaris, dan laporan stok
+            produk yang perlu diisi ulang.
+          </p>
+        </div>
+        <div class="rounded-lg bg-white p-5 shadow-sm">
+          <h3 class="font-semibold text-green-800">Nyaman di tablet</h3>
+          <p class="mt-2 text-sm text-gray-600">
+            Layar kasir dua panel dengan tombol besar, untuk tablet tegak
+            maupun mendatar. Bisa juga dari ponsel atau komputer.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <%!-- Cara mulai --%>
+  <section id="cara-mulai" class="mx-auto max-w-6xl px-4 py-14">
+    <h2 class="text-2xl font-bold text-gray-900">Cara mulai</h2>
+    <ol class="mt-8 grid gap-5 md:grid-cols-3">
+      <li class="rounded-lg border border-gray-200 p-5">
+        <span class="flex h-9 w-9 items-center justify-center rounded-full bg-green-700 font-bold text-white">1</span>
+        <h3 class="mt-3 font-semibold text-gray-900">Daftarkan bisnis Anda</h3>
+        <p class="mt-2 text-sm text-gray-600">
+          Isi nama toko, nama Anda, email, dan password. Toko pertama dan
+          akun pemilik dibuat sekaligus.
+        </p>
+      </li>
+      <li class="rounded-lg border border-gray-200 p-5">
+        <span class="flex h-9 w-9 items-center justify-center rounded-full bg-green-700 font-bold text-white">2</span>
+        <h3 class="mt-3 font-semibold text-gray-900">Kami verifikasi pendaftaran</h3>
+        <p class="mt-2 text-sm text-gray-600">
+          Tim kami meninjau pendaftaran secara manual. Setelah disetujui,
+          Anda bisa masuk dengan email dan password tadi.
+        </p>
+      </li>
+      <li class="rounded-lg border border-gray-200 p-5">
+        <span class="flex h-9 w-9 items-center justify-center rounded-full bg-green-700 font-bold text-white">3</span>
+        <h3 class="mt-3 font-semibold text-gray-900">Isi produk, buka shift</h3>
+        <p class="mt-2 text-sm text-gray-600">
+          Tambahkan produk dan kasir, buka shift dengan kas awal, lalu
+          mulai berjualan.
+        </p>
+      </li>
+    </ol>
+  </section>
+
+  <%!-- Untuk siapa --%>
+  <section class="bg-green-50">
+    <div class="mx-auto max-w-6xl px-4 py-14">
+      <h2 class="text-2xl font-bold text-gray-900">Cocok untuk</h2>
+      <ul class="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <li class="rounded-lg bg-white p-4 text-center font-medium text-gray-700 shadow-sm">Warung dan toko kelontong</li>
+        <li class="rounded-lg bg-white p-4 text-center font-medium text-gray-700 shadow-sm">Toko ritel</li>
+        <li class="rounded-lg bg-white p-4 text-center font-medium text-gray-700 shadow-sm">Kafe dan kedai</li>
+        <li class="rounded-lg bg-white p-4 text-center font-medium text-gray-700 shadow-sm">Satu pemilik, beberapa cabang</li>
+      </ul>
+    </div>
+  </section>
+
+  <%!-- Harga --%>
+  <section id="harga" class="mx-auto max-w-6xl px-4 py-14">
+    <div class="rounded-xl border border-gray-200 p-8 text-center">
+      <h2 class="text-2xl font-bold text-gray-900">Harga</h2>
+      <p class="mx-auto mt-3 max-w-xl text-gray-600">
+        Kami sedang menyiapkan paketnya. Hubungi kami untuk mengetahui harga
+        dan ketentuannya.
+      </p>
+      <div class="mt-6 flex flex-wrap justify-center gap-3">
+        <a
+          href={whatsapp_url("Halo, saya ingin tahu harga Zahlungs.")}
+          class="btn btn-primary inline-flex min-h-[48px] items-center"
+        >
+          Tanya lewat WhatsApp
+        </a>
+        <a
+          href={"mailto:#{contact_email()}"}
+          class="inline-flex min-h-[48px] items-center rounded border border-gray-300 px-6 text-lg text-gray-700 hover:bg-gray-50"
+        >
+          Kirim email
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <%!-- Pertanyaan --%>
+  <section id="faq" class="bg-gray-50">
+    <div class="mx-auto max-w-3xl px-4 py-14">
+      <h2 class="text-2xl font-bold text-gray-900">Pertanyaan yang sering muncul</h2>
+      <div class="mt-6 divide-y divide-gray-200 rounded-lg bg-white shadow-sm">
+        <details class="group p-5">
+          <summary class="cursor-pointer font-medium text-gray-900">Perlu internet?</summary>
+          <p class="mt-3 text-sm text-gray-600">
+            Ya. Zahlungs berjalan di server pusat, jadi perangkat kasir harus
+            tersambung ke internet. Saat ini belum ada mode offline.
+          </p>
+        </details>
+        <details class="group p-5">
+          <summary class="cursor-pointer font-medium text-gray-900">Perangkat apa yang dibutuhkan?</summary>
+          <p class="mt-3 text-sm text-gray-600">
+            Tablet, ponsel, atau komputer dengan browser. Untuk scan barcode
+            bisa memakai kamera perangkat atau scanner USB.
+          </p>
+        </details>
+        <details class="group p-5">
+          <summary class="cursor-pointer font-medium text-gray-900">Bagaimana dengan QRIS dan kartu?</summary>
+          <p class="mt-3 text-sm text-gray-600">
+            Pembayaran non-tunai dicatat di Zahlungs, tetapi tidak diproses
+            lewat Zahlungs. Uangnya tetap masuk lewat QRIS atau mesin EDC
+            milik toko Anda.
+          </p>
+        </details>
+        <details class="group p-5">
+          <summary class="cursor-pointer font-medium text-gray-900">Bisa cetak struk?</summary>
+          <p class="mt-3 text-sm text-gray-600">
+            Struk bisa dicetak dari browser. Sambungan langsung ke printer
+            thermal belum tersedia.
+          </p>
+        </details>
+        <details class="group p-5">
+          <summary class="cursor-pointer font-medium text-gray-900">Apakah data toko saya terlihat toko lain?</summary>
+          <p class="mt-3 text-sm text-gray-600">
+            Tidak. Setiap pemilik hanya melihat data tokonya sendiri.
+          </p>
+        </details>
+        <details class="group p-5">
+          <summary class="cursor-pointer font-medium text-gray-900">Berapa lama verifikasi pendaftaran?</summary>
+          <p class="mt-3 text-sm text-gray-600">
+            Pendaftaran ditinjau secara manual oleh tim kami. Kalau perlu
+            lebih cepat, hubungi kami lewat WhatsApp.
+          </p>
+        </details>
+        <details class="group p-5">
+          <summary class="cursor-pointer font-medium text-gray-900">Bagaimana jika lupa password?</summary>
+          <p class="mt-3 text-sm text-gray-600">
+            Admin toko dapat mengatur ulang password kasir. Untuk akun
+            pemilik, hubungi kami.
+          </p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <%!-- Ajakan terakhir --%>
+  <section class="bg-green-700">
+    <div class="mx-auto max-w-6xl px-4 py-12 text-center">
+      <h2 class="text-2xl font-bold text-white">Siap merapikan kasir toko Anda?</h2>
+      <.link
+        href={~p"/signup"}
+        class="mt-6 inline-flex min-h-[48px] items-center rounded bg-white px-6 text-lg font-medium text-green-800 hover:bg-green-50"
+      >
+        Daftarkan toko Anda
+      </.link>
+    </div>
+  </section>
+</main>
+
+<footer id="kontak" class="bg-gray-800">
+  <div class="mx-auto flex max-w-6xl flex-wrap items-start justify-between gap-6 px-4 py-10 text-sm text-gray-300">
+    <div>
+      <p class="text-lg font-bold text-white">Zahlungs</p>
+      <p class="mt-1">Kasir dan stok untuk toko Anda.</p>
+    </div>
+    <div class="space-y-1">
+      <p class="font-semibold text-white">Hubungi kami</p>
+      <p>
+        <a href={whatsapp_url()} class="hover:underline">WhatsApp {whatsapp_label()}</a>
+      </p>
+      <p>
+        <a href={"mailto:#{contact_email()}"} class="hover:underline">{contact_email()}</a>
+      </p>
+    </div>
+    <div class="space-y-1">
+      <p class="font-semibold text-white">Akun</p>
+      <p><.link href={~p"/users/log_in"} class="hover:underline">Masuk</.link></p>
+      <p><.link href={~p"/signup"} class="hover:underline">Daftarkan bisnis</.link></p>
+    </div>
+  </div>
+  <div class="border-t border-gray-700 py-4 text-center text-xs text-gray-400">
+    &copy; {DateTime.utc_now().year} Zahlungs
+  </div>
+</footer>

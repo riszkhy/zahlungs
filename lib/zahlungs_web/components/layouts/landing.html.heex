@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="id" data-theme="light" class="scroll-smooth bg-white">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="csrf-token" content={get_csrf_token()} />
+    <title>{assigns[:page_title]}</title>
+    <meta
+      name="description"
+      content="Zahlungs adalah aplikasi kasir dan stok berbasis web untuk warung, toko ritel, dan kafe: scan barcode, tutup kas per shift, stok per cabang, dan rekap konsinyasi."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="id_ID" />
+    <meta property="og:site_name" content="Zahlungs" />
+    <meta property="og:title" content="Zahlungs — Kasir dan stok toko dalam satu layar" />
+    <meta
+      property="og:description"
+      content="Catat penjualan, tutup kas tanpa selisih, dan pantau stok semua cabang dari tablet atau ponsel."
+    />
+    <link phx-track-static rel="stylesheet" href={~p"/assets/app.css"} />
+  </head>
+  <%!--
+    No script on this page: it is read on a phone, often on a slow connection,
+    and everything on it works as plain HTML (the FAQ is <details>).
+  --%>
+  <body class="text-gray-800 antialiased">
+    {@inner_content}
+  </body>
+</html>
