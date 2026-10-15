@@ -262,8 +262,8 @@ Urutan:
 
 ## Pekerjaan dan dampak
 
-- Branch `feat/kasir-tahan-putus`, dipotong dari `feat/saas-multi-owner`
-  (database dev sudah berskema multi-pemilik).
+- Branch `feat/kasir-tahan-putus`, dipotong dari `master` di `13de279`
+  (sudah berisi SaaS multi-pemilik lewat PR #1, sesuai skema database dev).
 - Satu migrasi (`sales.client_ref` + indeks); dijalankan di database dev
   bersama.
 - Tidak ada dependency baru.

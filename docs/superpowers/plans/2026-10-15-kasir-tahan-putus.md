@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Branch `feat/kasir-tahan-putus` (already created from `feat/saas-multi-owner`; the dev DB is multi-tenant).
+- Branch `feat/kasir-tahan-putus` (already created from `master` at `13de279`, which includes the multi-tenant work merged in PR #1; the dev DB is multi-tenant).
 - No new dependencies. LiveView behaviour is tested through `ZahlungsWeb.LiveDriver` (`mount_live/3`, `event/3`, `html/1`, `flash/2`, `pushed_events/1`); `Phoenix.LiveViewTest.live/2` is not available. There is no JS test tooling: hooks are checked in the browser.
 - Tests share a database with real rows: never assert a table is empty; find rows by id, unique SKU or `client_ref`.
 - The copy from the tablet is untrusted: only ids, quantities and the amount strings are read; prices charged always come from the database; every amount goes through `assign_totals/1` and `Sales.create_sale/3` as today.
