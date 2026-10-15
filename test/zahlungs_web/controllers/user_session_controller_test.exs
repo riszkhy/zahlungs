@@ -11,9 +11,32 @@ defmodule ZahlungsWeb.UserSessionControllerTest do
     test "renders log in page", %{conn: conn} do
       conn = get(conn, Routes.user_session_path(conn, :new))
       response = html_response(conn, 200)
-      assert response =~ "Log in</h3>"
+      assert response =~ "Masuk</h3>"
       refute response =~ "Register"
-      assert response =~ "Forgot password?"
+      assert response =~ "Lupa password?"
+      assert response =~ "Ingat saya"
+      refute response =~ "Forgot password?"
+      refute response =~ "Keep me logged in"
+    end
+
+    test "has the app's own look: no stock photo, titled for the app", %{conn: conn} do
+      response = conn |> get(Routes.user_session_path(conn, :new)) |> html_response(200)
+
+      # The photo came from another site, so it was missing on a shop's LAN
+      # without internet.
+      refute response =~ "unsplash"
+      refute response =~ "background-image"
+      refute response =~ "Phoenix Framework"
+      assert response =~ ~r{<title[^>]*>\s*Masuk\s*· Zahlungs</title>}
+      assert response =~ ~s(lang="id")
+      assert response =~ "Kasir &amp; stok untuk toko Anda"
+    end
+
+    test "stays light when the device prefers a dark theme", %{conn: conn} do
+      response = conn |> get(Routes.user_session_path(conn, :new)) |> html_response(200)
+
+      # DaisyUI follows the device's dark preference unless a theme is pinned.
+      assert response =~ ~s(data-theme="light")
     end
 
     test "redirects if already logged in", %{conn: conn, user: user} do
@@ -42,7 +65,7 @@ defmodule ZahlungsWeb.UserSessionControllerTest do
       conn = get(conn, "/home")
       response = html_response(conn, 200)
       assert response =~ user.email
-      assert response =~ "Profile</a>"
+      assert response =~ "Profile"
       assert response =~ "Log out"
     end
 
@@ -81,8 +104,8 @@ defmodule ZahlungsWeb.UserSessionControllerTest do
         })
 
       response = html_response(conn, 200)
-      assert response =~ "Log in</h3>"
-      assert response =~ "Invalid email or password"
+      assert response =~ "Masuk</h3>"
+      assert response =~ "Email atau password salah"
     end
   end
 

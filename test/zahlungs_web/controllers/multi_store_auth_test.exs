@@ -97,7 +97,7 @@ defmodule ZahlungsWeb.MultiStoreAuthTest do
 
       conn = log_in(conn, cashier, %{"password" => "not the password"})
 
-      assert html_response(conn, 200) =~ "Invalid email or password"
+      assert html_response(conn, 200) =~ "Email atau password salah"
       assert Accounts.list_user_logins(user_id: cashier.id) == []
     end
   end
@@ -109,7 +109,7 @@ defmodule ZahlungsWeb.MultiStoreAuthTest do
 
       for _ <- 1..5 do
         assert conn |> log_in(cashier, %{"password" => "wrong"}) |> html_response(200) =~
-                 "Invalid email or password"
+                 "Email atau password salah"
       end
 
       blocked = log_in(conn, cashier)

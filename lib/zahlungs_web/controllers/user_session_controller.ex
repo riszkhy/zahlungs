@@ -7,6 +7,10 @@ defmodule ZahlungsWeb.UserSessionController do
   alias Zahlungs.Scope
   alias ZahlungsWeb.{LoginThrottle, UserAuth}
 
+  plug :put_page_title
+
+  defp put_page_title(conn, _opts), do: assign(conn, :page_title, "Masuk")
+
   def new(conn, _params) do
     render(conn, :new, error_message: nil)
   end
@@ -33,7 +37,7 @@ defmodule ZahlungsWeb.UserSessionController do
         LoginThrottle.record_failure(email, ip)
 
         # In order to prevent user enumeration attacks, don't disclose whether the email is registered.
-        render(conn, :new, error_message: "Invalid email or password")
+        render(conn, :new, error_message: "Email atau password salah")
 
       {:blocked, reason} ->
         render(conn, :new, error_message: UserAuth.block_message(reason))

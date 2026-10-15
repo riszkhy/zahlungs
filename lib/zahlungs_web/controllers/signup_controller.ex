@@ -8,6 +8,15 @@ defmodule ZahlungsWeb.SignupController do
   alias Zahlungs.Organizations
   alias ZahlungsWeb.LoginThrottle
 
+  plug :put_page_title
+
+  defp put_page_title(conn, _opts) do
+    case action_name(conn) do
+      :pending -> assign(conn, :page_title, "Pendaftaran diterima")
+      _form -> assign(conn, :page_title, "Daftar")
+    end
+  end
+
   def new(conn, _params) do
     render(conn, :new, changeset: Organizations.change_signup(), error_message: nil)
   end

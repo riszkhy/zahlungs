@@ -3,7 +3,15 @@ defmodule ZahlungsWeb.UserResetPasswordController do
 
   alias Zahlungs.Accounts
 
+  plug :put_page_title
   plug :get_user_by_reset_password_token when action in [:edit, :update]
+
+  defp put_page_title(conn, _opts) do
+    case action_name(conn) do
+      action when action in [:edit, :update] -> assign(conn, :page_title, "Reset password")
+      _request -> assign(conn, :page_title, "Lupa password")
+    end
+  end
 
   def new(conn, _params) do
     render(conn, :new)
