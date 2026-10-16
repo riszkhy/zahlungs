@@ -244,6 +244,12 @@ saldo, penolakan tutup shift).
 ## Tidak termasuk Fase 0
 
 - API agregator, callback, sinkron daftar harga.
+- Lebih dari satu vendor. Arahnya bila nanti dibutuhkan: tabel `ppob_vendors`
+  (platform), `deposit_accounts.vendor_id`, sumber per produk
+  (`service_product_sources`: akun, modal, prioritas, toko opsional) yang
+  menggantikan `service_products.cost` dan `stores.deposit_account_id`, serta
+  `service_attempts` per percobaan ke vendor. Transaksi Fase 0 sudah menyalin
+  akun dan modal, jadi riwayatnya tidak perlu diubah saat migrasi.
 - Barang dan layanan dalam satu struk.
 - Membalik transaksi yang sudah berhasil.
 - Notifikasi saldo menipis, layanan di angka Home.
