@@ -126,6 +126,10 @@ defmodule ZahlungsWeb.Router do
       live "/admin/suppliers/new", SupplierLive.Index, :new
       live "/admin/suppliers/:id/edit", SupplierLive.Index, :edit
 
+      live "/admin/services", ServiceProductLive.Index, :index
+      live "/admin/services/new", ServiceProductLive.Index, :new
+      live "/admin/services/:id/edit", ServiceProductLive.Index, :edit
+
       live "/reports/sales", ReportLive.Index, :index
       live "/reports/stock", ReportLive.Stock, :index
       live "/reports/consignment", ReportLive.Consignment, :index
