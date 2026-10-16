@@ -174,6 +174,19 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       assert flash(again, :error) == "Transaksi ini sudah ditandai."
     end
 
+    test "a successful service links to its receipt; one still processing doesn't", ctx do
+      done = service_fixture(ctx.cashier, ctx.product)
+      waiting = service_fixture(ctx.cashier, ctx.product)
+
+      rendered =
+        ctx.socket
+        |> event("mark_success", %{"transaction_id" => done.id, "token_sn" => ""})
+        |> html()
+
+      assert rendered =~ ~s(href="/services/#{done.id}/receipt")
+      refute rendered =~ ~s(href="/services/#{waiting.id}/receipt")
+    end
+
     test "the record button can't be pressed twice", ctx do
       rendered = ctx.socket |> event("select", %{"id" => ctx.product.id}) |> html()
 

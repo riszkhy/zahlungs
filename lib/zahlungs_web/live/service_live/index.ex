@@ -332,6 +332,9 @@ defmodule ZahlungsWeb.ServiceLive.Index do
           <span class="block truncate font-medium">{tx.product_name} · {group_digits(tx.customer_ref)}</span>
           <span :if={tx.token_sn} class="block text-xs text-gray-500">Token / SN: {tx.token_sn}</span>
           <span :if={tx.failure_reason} class="block text-xs text-gray-500">{tx.failure_reason}</span>
+          <.link :if={tx.status == "success"} href={~p"/services/#{tx.id}/receipt"} target="_blank" class="text-xs text-blue-600 hover:underline">
+            Cetak struk
+          </.link>
         </span>
         <span class="text-right">
           <span class="block font-semibold">{format_money(tx.price)}</span>

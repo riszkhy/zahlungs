@@ -225,7 +225,9 @@ defmodule Zahlungs.Services do
 
   @doc "Gets a service of the scope's store(s); another store's raises `Ecto.NoResultsError`."
   def get_transaction!(%Scope{} = scope, id) do
-    Repo.one!(from t in for_store(Transaction, scope), where: t.id == ^id)
+    Repo.one!(
+      from t in for_store(Transaction, scope), where: t.id == ^id, preload: [:store, :user]
+    )
   end
 
   @doc "The services recorded on a shift, newest first."
