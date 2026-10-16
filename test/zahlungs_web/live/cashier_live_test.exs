@@ -9,6 +9,7 @@ defmodule ZahlungsWeb.CashierLiveTest do
   import Zahlungs.StoresFixtures
   import Zahlungs.CatalogFixtures
   import Zahlungs.ShiftsFixtures
+  import Zahlungs.ServicesFixtures
   import ZahlungsWeb.LiveDriver
 
   alias Zahlungs.{Catalog, Sales, Shifts}
@@ -489,6 +490,36 @@ defmodule ZahlungsWeb.CashierLiveTest do
                Shifts.get_shift!(store_scope(), shift.id).counted_cash,
                Decimal.new("100000")
              )
+    end
+  end
+
+  describe "services when closing the shift" do
+    setup do
+      assign_account(default_store(), deposit_account_fixture())
+      user = user_on_shift_fixture()
+      %{user: user, socket: mount_live(CashierLive, user)}
+    end
+
+    test "the summary shows the service cash", %{socket: socket, user: user} do
+      tx = service_fixture(user, service_product_fixture())
+      {:ok, _} = Zahlungs.Services.mark_success(tx, user, nil)
+
+      rendered = socket |> event("toggle_close") |> html()
+
+      assert rendered =~ ~r{Layanan tunai</dt>\s*<dd>Rp 12\.000,00}
+    end
+
+    test "closing waits for services still processing", %{socket: socket, user: user} do
+      service_fixture(user, service_product_fixture())
+
+      socket =
+        socket
+        |> event("toggle_close")
+        |> event("close_shift", %{"counted_cash" => "12000", "note" => ""})
+
+      assert flash(socket, :error) == "Selesaikan dulu 1 layanan yang masih diproses."
+      assert html(socket) =~ ~s(href="/services")
+      assert Shifts.current_shift(user)
     end
   end
 end

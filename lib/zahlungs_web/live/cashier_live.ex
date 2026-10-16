@@ -15,6 +15,7 @@ defmodule ZahlungsWeb.CashierLive do
      |> assign(category_id: nil, cart_open: false)
      |> assign(:category_options, Zahlungs.Catalog.category_options())
      |> assign(opening_cash: "", closing: false, counted_cash: "", close_note: "", summary: nil)
+     |> assign(:services_processing, 0)
      |> assign(
        movement_open: false,
        mv_category: "expense",
@@ -134,6 +135,14 @@ defmodule ZahlungsWeb.CashierLive do
          |> assign(closing: false)
          |> refresh_shift()
          |> put_flash(:error, "Shift ini sudah ditutup.")}
+
+      {:error, :services_processing} ->
+        count = Zahlungs.Services.count_processing(socket.assigns.shift)
+
+        {:noreply,
+         socket
+         |> assign(:services_processing, count)
+         |> put_flash(:error, "Selesaikan dulu #{count} layanan yang masih diproses.")}
 
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Could not close the shift.")}
@@ -835,10 +844,19 @@ defmodule ZahlungsWeb.CashierLive do
     <.modal :if={@closing and @summary} id="close-shift-modal" show on_cancel={JS.push("toggle_close")}>
       <h3 class="text-lg font-semibold">Close shift</h3>
 
+      <p :if={@services_processing > 0} class="mt-3 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+        Masih ada {@services_processing} layanan berstatus diproses. Tandai hasilnya dulu di
+        <.link navigate={~p"/services"} class="font-medium underline">Layanan</.link>.
+      </p>
+
       <dl class="mt-4 space-y-1 text-sm">
         <div class="flex justify-between"><dt>Opening cash</dt><dd>{format_money(@summary.opening_cash)}</dd></div>
         <div class="flex justify-between"><dt>Transactions</dt><dd>{@summary.transactions}</dd></div>
         <div class="flex justify-between"><dt>Cash sales</dt><dd>{format_money(@summary.cash_total)}</dd></div>
+        <div :if={@summary.service_count > 0} class="flex justify-between">
+          <dt>Layanan tunai</dt>
+          <dd>{format_money(@summary.service_cash_total)}</dd>
+        </div>
         <div class="flex justify-between text-gray-500">
           <dt>Non-cash sales (QRIS/kartu/transfer)</dt><dd>{format_money(@summary.noncash_total)}</dd>
         </div>
