@@ -16,6 +16,8 @@ defmodule Zahlungs.Stores.Store do
     field :active, :boolean, default: true
 
     belongs_to :organization, Zahlungs.Organizations.Organization
+    # The deposit account the store sells PPOB services from (see Zahlungs.Deposits).
+    belongs_to :deposit_account, Zahlungs.Deposits.Account
 
     timestamps()
   end
@@ -31,7 +33,8 @@ defmodule Zahlungs.Stores.Store do
       :utc_offset_hours,
       :latitude,
       :longitude,
-      :active
+      :active,
+      :deposit_account_id
     ])
     |> update_change(:code, &(&1 |> String.trim() |> String.upcase()))
     |> validate_required([:name, :code, :utc_offset_hours])
@@ -44,11 +47,18 @@ defmodule Zahlungs.Stores.Store do
     |> validate_number(:latitude, greater_than_or_equal_to: -90, less_than_or_equal_to: 90)
     |> validate_number(:longitude, greater_than_or_equal_to: -180, less_than_or_equal_to: 180)
     |> validate_coordinates_together()
+    |> validate_change(:deposit_account_id, &active_deposit_account/2)
     # Checked here too, so a form can say "taken" before anything is saved; the
     # constraint below still guards against two saves racing each other.
     |> Zahlungs.Organizations.put_organization()
     |> unsafe_validate_unique(:code, Zahlungs.Repo)
     |> unique_constraint(:code, name: :stores_organization_id_code_index)
+  end
+
+  # An inactive account, or one of another organization (invisible to the
+  # Repo guard), can't be the one a store sells from.
+  defp active_deposit_account(field, id) do
+    if Zahlungs.Deposits.active_account?(id), do: [], else: [{field, "akun deposit tidak aktif"}]
   end
 
   # A latitude without a longitude (or the reverse) is not a location.
