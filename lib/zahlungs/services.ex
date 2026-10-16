@@ -25,7 +25,8 @@ defmodule Zahlungs.Services do
   alias Zahlungs.Repo
 
   alias Zahlungs.Accounts.User
-  alias Zahlungs.{Deposits, LocalTime, Shifts, Stores}
+  alias Zahlungs.{Deposits, LocalTime, Scope, Shifts, Stores}
+  alias Zahlungs.Shifts.Shift
   alias Zahlungs.Services.{Product, Transaction}
 
   @category_labels [
@@ -167,6 +168,87 @@ defmodule Zahlungs.Services do
       |> Repo.insert()
     end
   end
+
+  ## Results
+
+  @doc """
+  Marks a processing service done, with the token or serial number from the
+  provider's app (optional). See `mark_failed/3` for who may mark and what is
+  refused.
+  """
+  def mark_success(%Transaction{} = transaction, %User{} = user, token_sn) do
+    resolve(transaction, user, %{status: "success", token_sn: token_sn})
+  end
+
+  @doc """
+  Marks a processing service failed; the reason is required and the money goes
+  back to the customer.
+
+  Only the cashier who recorded it, or an admin, may mark a service. The row is
+  locked and its status read from the database, so a stale struct (another tab)
+  can't mark it a second time. Returns `{:ok, transaction}` or
+  `{:error, :forbidden | :not_processing | changeset}`.
+  """
+  def mark_failed(%Transaction{} = transaction, %User{} = user, reason) do
+    resolve(transaction, user, %{status: "failed", failure_reason: reason})
+  end
+
+  defp resolve(%Transaction{id: id}, user, attrs) do
+    Repo.transaction(fn ->
+      locked = Repo.one!(from t in Transaction, where: t.id == ^id, lock: "FOR UPDATE")
+
+      cond do
+        locked.user_id != user.id and user.role != "admin" ->
+          Repo.rollback(:forbidden)
+
+        locked.status != "processing" ->
+          Repo.rollback(:not_processing)
+
+        true ->
+          locked
+          |> Transaction.resolve_changeset(attrs)
+          |> Ecto.Changeset.change(resolved_by_id: user.id, resolved_at: now())
+          |> Repo.update()
+          |> case do
+            {:ok, transaction} -> transaction
+            {:error, changeset} -> Repo.rollback(changeset)
+          end
+      end
+    end)
+  end
+
+  ## Reading
+
+  @doc "Gets a service of the scope's store(s); another store's raises `Ecto.NoResultsError`."
+  def get_transaction!(%Scope{} = scope, id) do
+    Repo.one!(from t in for_store(Transaction, scope), where: t.id == ^id)
+  end
+
+  @doc "The services recorded on a shift, newest first."
+  def list_shift_transactions(%Shift{id: shift_id}) do
+    Repo.all(
+      from t in Transaction,
+        where: t.shift_id == ^shift_id,
+        order_by: [desc: t.inserted_at, desc: t.id]
+    )
+  end
+
+  @doc "How many services of a shift are still processing."
+  def count_processing(%Shift{id: shift_id}) do
+    Repo.aggregate(
+      from(t in Transaction, where: t.shift_id == ^shift_id and t.status == "processing"),
+      :count
+    )
+  end
+
+  defp for_store(query, scope) do
+    case Scope.store_id(scope) do
+      nil -> where(query, [t], t.store_id in ^Stores.store_ids())
+      store_id -> where(query, [t], t.store_id == ^store_id)
+    end
+  end
+
+  defp now, do: NaiveDateTime.truncate(NaiveDateTime.utc_now(), :second)
 
   defp store_account(%{deposit_account_id: id}) do
     if Deposits.active_account?(id), do: {:ok, id}, else: {:error, :no_deposit_account}

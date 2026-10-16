@@ -54,4 +54,24 @@ defmodule Zahlungs.Services.Transaction do
     |> validate_inclusion(:payment_method, Zahlungs.Sales.Sale.payment_methods())
     |> unique_constraint(:code, name: :service_transactions_store_id_code_index)
   end
+
+  @doc """
+  The result: `success` with an optional token or serial number, or `failed`
+  with the reason. `resolved_by_id` and `resolved_at` are set by the context.
+  """
+  def resolve_changeset(%__MODULE__{} = transaction, attrs) do
+    transaction
+    |> cast(attrs, [:status, :token_sn, :failure_reason])
+    |> update_change(:token_sn, &String.trim/1)
+    |> validate_inclusion(:status, ~w(success failed))
+    |> validate_length(:token_sn, max: 64)
+    |> validate_length(:failure_reason, max: 255)
+    |> require_reason_when_failed()
+  end
+
+  defp require_reason_when_failed(changeset) do
+    if get_field(changeset, :status) == "failed",
+      do: validate_required(changeset, [:failure_reason], message: "isi alasan gagal"),
+      else: changeset
+  end
 end

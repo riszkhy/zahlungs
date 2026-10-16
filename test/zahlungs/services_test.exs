@@ -203,6 +203,94 @@ defmodule Zahlungs.ServicesTest do
     end
   end
 
+  describe "marking the result" do
+    setup do
+      store = assign_account(default_store(), deposit_account_fixture())
+      cashier = user_on_shift_fixture()
+
+      %{store: store, cashier: cashier, product: service_product_fixture()}
+    end
+
+    defp status_of(tx), do: Repo.get!(Services.Transaction, tx.id).status
+
+    test "success keeps the token; failure needs a reason", ctx do
+      tx = service_fixture(ctx.cashier, ctx.product)
+      token = "5821 0344 9917 2268 4410"
+
+      assert {:ok, done} = Services.mark_success(tx, ctx.cashier, token)
+
+      assert {done.status, done.token_sn, done.resolved_by_id} ==
+               {"success", token, ctx.cashier.id}
+
+      assert done.resolved_at
+
+      tx = service_fixture(ctx.cashier, ctx.product)
+      assert {:error, changeset} = Services.mark_failed(tx, ctx.cashier, "")
+      assert errors_on(changeset)[:failure_reason]
+      assert status_of(tx) == "processing"
+
+      assert {:ok, failed} = Services.mark_failed(tx, ctx.cashier, "nomor tidak aktif")
+      assert {failed.status, failed.failure_reason} == {"failed", "nomor tidak aktif"}
+
+      tx = service_fixture(ctx.cashier, ctx.product)
+
+      assert {:error, changeset} =
+               Services.mark_success(tx, ctx.cashier, String.duplicate("1", 65))
+
+      assert errors_on(changeset)[:token_sn]
+    end
+
+    test "a token is optional", ctx do
+      tx = service_fixture(ctx.cashier, ctx.product)
+
+      assert {:ok, done} = Services.mark_success(tx, ctx.cashier, "")
+      assert {done.status, done.token_sn} == {"success", nil}
+    end
+
+    test "a result is final", ctx do
+      tx = service_fixture(ctx.cashier, ctx.product)
+      {:ok, done} = Services.mark_success(tx, ctx.cashier, nil)
+
+      assert Services.mark_success(done, ctx.cashier, nil) == {:error, :not_processing}
+      assert Services.mark_failed(done, ctx.cashier, "salah") == {:error, :not_processing}
+    end
+
+    test "a stale struct cannot win twice", ctx do
+      tx = service_fixture(ctx.cashier, ctx.product)
+      other_tab = tx
+
+      assert {:ok, _} = Services.mark_success(tx, ctx.cashier, nil)
+      assert Services.mark_failed(other_tab, ctx.cashier, "gagal") == {:error, :not_processing}
+      assert status_of(tx) == "success"
+    end
+
+    test "only the cashier who recorded it, or an admin, may mark it", ctx do
+      tx = service_fixture(ctx.cashier, ctx.product)
+
+      assert Services.mark_success(tx, user_fixture(), nil) == {:error, :forbidden}
+      assert status_of(tx) == "processing"
+
+      {:ok, admin} = Zahlungs.Accounts.set_user_role(user_fixture(), "admin")
+      assert {:ok, _} = Services.mark_failed(tx, admin, "dibatalkan pelanggan")
+    end
+
+    test "is fetched only from its own store; listed and counted per shift", ctx do
+      first = service_fixture(ctx.cashier, ctx.product)
+      second = service_fixture(ctx.cashier, ctx.product)
+      {:ok, _} = Services.mark_success(first, ctx.cashier, nil)
+      shift = Zahlungs.Shifts.current_shift(ctx.cashier)
+
+      assert Services.get_transaction!(store_scope(), first.id).id == first.id
+
+      assert_raise Ecto.NoResultsError, fn ->
+        Services.get_transaction!(store_scope(store_fixture()), first.id)
+      end
+
+      assert Enum.map(Services.list_shift_transactions(shift), & &1.id) == [second.id, first.id]
+      assert Services.count_processing(shift) == 1
+    end
+  end
+
   describe "products" do
     test "validates the category, the margin and the cost" do
       assert {:error, changeset} =

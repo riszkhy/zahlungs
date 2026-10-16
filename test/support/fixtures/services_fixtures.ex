@@ -36,6 +36,32 @@ defmodule Zahlungs.ServicesFixtures do
     product
   end
 
+  @doc """
+  A service recorded by `user` (who must be on a shift, in a store with a
+  deposit account): to 081234567890, paid in exact cash, unless `attrs` (string
+  keys, as `Services.record/3` takes them) say otherwise.
+  """
+  def service_fixture(user, product, attrs \\ %{}) do
+    attrs = Map.new(attrs, fn {key, value} -> {to_string(key), value} end)
+    {:ok, %{price: price}} = Zahlungs.Services.price_for(product, attrs["bill_amount"])
+
+    {:ok, transaction} =
+      Zahlungs.Services.record(
+        user,
+        product.id,
+        Map.merge(
+          %{
+            "customer_ref" => "081234567890",
+            "payment_method" => "cash",
+            "amount_paid" => Decimal.to_string(price)
+          },
+          attrs
+        )
+      )
+
+    transaction
+  end
+
   @doc "Makes `account` the one `store` sells services from."
   def assign_account(store, account) do
     {:ok, store} = Stores.update_store(store, %{deposit_account_id: account.id})
