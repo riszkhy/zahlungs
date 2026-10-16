@@ -126,6 +126,7 @@ defmodule ZahlungsWeb.Layouts do
   defp cashier_links do
     [
       {"Cashier", ~p"/cashier"},
+      {"Layanan", ~p"/services"},
       {"Sales", ~p"/sales"},
       {"Shifts", ~p"/shifts"},
       {"Catalog", ~p"/catalog"}
