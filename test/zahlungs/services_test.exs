@@ -194,6 +194,18 @@ defmodule Zahlungs.ServicesTest do
       end
     end
 
+    test "refuses when the price is no longer the one the cashier quoted", ctx do
+      quoted = Map.put(cash("20000"), "expected_price", "12000")
+      {:ok, _} = Services.update_product(ctx.product, %{margin_value: "2850"})
+
+      assert Services.record(ctx.cashier, ctx.product.id, quoted) == {:error, :price_changed}
+      assert Services.list_shift_transactions(Zahlungs.Shifts.current_shift(ctx.cashier)) == []
+
+      requoted = Map.put(cash("20000"), "expected_price", "13000")
+      assert {:ok, tx} = Services.record(ctx.cashier, ctx.product.id, requoted)
+      assert Decimal.equal?(tx.change_due, d("7000"))
+    end
+
     test "the store comes from the shift, not from the caller", ctx do
       other = store_fixture()
       attrs = Map.put(cash("12000"), "store_id", other.id)

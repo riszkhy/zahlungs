@@ -187,6 +187,53 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       refute rendered =~ ~s(href="/services/#{waiting.id}/receipt")
     end
 
+    test "a price changed since the screen opened is not charged silently", ctx do
+      socket = event(ctx.socket, "select", %{"id" => ctx.product.id})
+      {:ok, _} = Services.update_product(ctx.product, %{margin_value: "2850"})
+
+      socket =
+        event(socket, "record", %{
+          "service" => %{
+            "customer_ref" => "081234567890",
+            "payment_method" => "cash",
+            "amount_paid" => "20.000"
+          }
+        })
+
+      assert flash(socket, :error) =~ "berubah"
+      assert flash(socket, :error) =~ "Rp 13.000,00"
+      assert Services.list_shift_transactions(ctx.shift) == []
+      assert html(socket) =~ "Rp 13.000,00"
+    end
+
+    test "a failed non-cash service is refunded outside the drawer", ctx do
+      qris = service_fixture(ctx.cashier, ctx.product, %{"payment_method" => "qris"})
+
+      socket =
+        event(ctx.socket, "mark_failed", %{"transaction_id" => qris.id, "reason" => "gagal"})
+
+      assert flash(socket, :info) ==
+               "Kembalikan Rp 12.000,00 ke pelanggan lewat QRIS, bukan dari laci."
+    end
+
+    test "amounts typed with a decimal comma keep their size", ctx do
+      bill =
+        service_product_fixture(%{category: "tagihan_pln", cost: "1500", margin_value: "3000"})
+
+      socket =
+        ctx.socket
+        |> event("set_category", %{"category" => "tagihan_pln"})
+        |> sell(bill, %{
+          "customer_ref" => "530011223344",
+          "bill_amount" => "245.000,00",
+          "payment_method" => "qris"
+        })
+
+      assert flash(socket, :info) =~ "Dicatat"
+      assert [tx] = Services.list_shift_transactions(ctx.shift)
+      assert Decimal.equal?(tx.bill_amount, money("245000"))
+    end
+
     test "the record button can't be pressed twice", ctx do
       rendered = ctx.socket |> event("select", %{"id" => ctx.product.id}) |> html()
 

@@ -12,6 +12,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
 
   alias Zahlungs.{Deposits, Services, Shifts, Stores}
   alias Zahlungs.Services.Product
+  alias ZahlungsWeb.AmountInput
 
   @blank_form %{
     "customer_ref" => "",
@@ -61,13 +62,16 @@ defmodule ZahlungsWeb.ServiceLive.Index do
         {:noreply, put_flash(socket, :error, "Pilih produk dulu.")}
 
       product ->
-        case Services.record(socket.assigns.current_user, product.id, form) do
+        case Services.record(socket.assigns.current_user, product.id, quoted(form, socket)) do
           {:ok, _transaction} ->
             {:noreply,
              socket
              |> put_flash(:info, "Dicatat. Proses di aplikasi penyedia, lalu tandai hasilnya.")
              |> assign(form: @blank_form, preview: nil)
              |> load_transactions()}
+
+          {:error, :price_changed} ->
+            {:noreply, socket |> assign(:form, form) |> price_changed(product)}
 
           {:error, reason} ->
             {:noreply, socket |> assign(:form, form) |> put_flash(:error, error_message(reason))}
@@ -86,7 +90,45 @@ defmodule ZahlungsWeb.ServiceLive.Index do
     socket
     |> transaction!(id)
     |> Services.mark_failed(socket.assigns.current_user, params["reason"])
-    |> after_marking(socket, &"Kembalikan #{format_money(&1.price)} ke pelanggan.")
+    |> after_marking(socket, &refund_message/1)
+  end
+
+  # Cash comes back out of the drawer; other payments are refunded the way
+  # they were paid, and never from the drawer (they never went into it).
+  defp refund_message(%{payment_method: "cash", price: price}),
+    do: "Kembalikan #{format_money(price)} ke pelanggan."
+
+  defp refund_message(%{payment_method: method, price: price}),
+    do:
+      "Kembalikan #{format_money(price)} ke pelanggan lewat #{payment_label(method)}, bukan dari laci."
+
+  defp payment_label("qris"), do: "QRIS"
+  defp payment_label("card"), do: "kartu"
+  defp payment_label("transfer"), do: "transfer"
+  defp payment_label(other), do: other
+
+  # The price on screen goes along, so a price changed meanwhile is refused.
+  defp quoted(form, %{assigns: %{preview: %{price: price}}}),
+    do: Map.put(form, "expected_price", Decimal.to_string(price))
+
+  defp quoted(form, _socket), do: form
+
+  # Reloads the product so the screen shows what it costs now.
+  defp price_changed(socket, product) do
+    socket = load_products(socket)
+    fresh = Enum.find(socket.assigns.products, &(&1.id == product.id))
+    socket = socket |> assign(:selected, fresh) |> preview()
+
+    message =
+      case socket.assigns.preview do
+        %{price: price} ->
+          "Harga #{product.name} berubah menjadi #{format_money(price)}. Sampaikan ke pelanggan, lalu catat lagi."
+
+        nil ->
+          "Harga #{product.name} berubah. Pilih produknya lagi."
+      end
+
+    put_flash(socket, :error, message)
   end
 
   defp after_marking({:ok, transaction}, socket, message) do
@@ -146,15 +188,12 @@ defmodule ZahlungsWeb.ServiceLive.Index do
 
   defp change(_form, _price), do: nil
 
-  # Amounts arrive as typed ("245.000"): keep the digits only.
+  # Amounts arrive as typed ("245.000", "245.000,00").
   defp clean(params) do
     Map.merge(@blank_form, Map.take(params, Map.keys(@blank_form)))
-    |> Map.update!("bill_amount", &digits/1)
-    |> Map.update!("amount_paid", &digits/1)
+    |> Map.update!("bill_amount", &AmountInput.parse/1)
+    |> Map.update!("amount_paid", &AmountInput.parse/1)
   end
-
-  defp digits(value) when is_binary(value), do: String.replace(value, ~r/\D/, "")
-  defp digits(_value), do: ""
 
   @doc "A number in groups of four from the left, to read out: `0812 3456 7890`."
   def group_digits(number) when is_binary(number) do

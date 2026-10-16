@@ -79,6 +79,16 @@ defmodule ZahlungsWeb.DepositLiveTest do
       assert html(socket) =~ "transfer BCA"
     end
 
+    test "a top-up typed with a decimal comma keeps its size", %{admin: admin, account: account} do
+      admin
+      |> show(account)
+      |> event("topup", %{
+        "topup" => %{"amount" => "250.000,00", "source" => "outside", "note" => ""}
+      })
+
+      assert Decimal.equal?(Deposits.estimated_balance(account), Decimal.new("250000"))
+    end
+
     test "the drawer is offered only to an admin with an open shift", %{
       admin: admin,
       account: account

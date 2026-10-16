@@ -119,11 +119,13 @@ defmodule Zahlungs.Services do
   transaction.
 
   `attrs` (string keys): `"customer_ref"`, `"bill_amount"` (tagihan PLN only),
-  `"payment_method"` (default `"cash"`) and `"amount_paid"` (cash only).
+  `"payment_method"` (default `"cash"`), `"amount_paid"` (cash only) and
+  `"expected_price"`: the price the cashier quoted, when the screen knows it.
 
   Returns `{:ok, transaction}` or `{:error, reason}`: `:no_open_shift`,
   `:no_deposit_account`, `:product_unavailable`, `:bill_required`,
-  `:insufficient_payment`, or a changeset (the customer number).
+  `:insufficient_payment`, `:price_changed` (the product's price is no longer the
+  quoted one), or a changeset (the customer number).
   """
   def record(%User{} = user, product_id, attrs) do
     # The cashier decides whose products and stores these are.
@@ -145,6 +147,7 @@ defmodule Zahlungs.Services do
          {:ok, product} <- sellable_product(product_id),
          bill = bill_amount(product, attrs),
          {:ok, %{price: price, cost: cost}} <- price_for(product, bill),
+         :ok <- check_quoted_price(attrs["expected_price"], price),
          {:ok, payment} <- settle(attrs, price) do
       %Transaction{
         store_id: store.id,
@@ -362,6 +365,14 @@ defmodule Zahlungs.Services do
     else
       _ -> {:error, :product_unavailable}
     end
+  end
+
+  # A price changed while the screen was open must not be charged silently: the
+  # cashier quoted, and gave change for, the old one.
+  defp check_quoted_price(quoted, _price) when quoted in [nil, ""], do: :ok
+
+  defp check_quoted_price(quoted, price) do
+    if Decimal.equal?(to_decimal(quoted), price), do: :ok, else: {:error, :price_changed}
   end
 
   defp bill_amount(product, attrs) do

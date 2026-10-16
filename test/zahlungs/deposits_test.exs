@@ -29,6 +29,13 @@ defmodule Zahlungs.DepositsTest do
       assert renamed.name == name <> " baru"
     end
 
+    test "a name of spaces only is refused, not a crash" do
+      account = deposit_account_fixture()
+
+      assert {:error, changeset} = Deposits.update_account(account, %{name: "   "})
+      assert errors_on(changeset)[:name]
+    end
+
     test "another organization's accounts are invisible" do
       other = in_org(organization_fixture(), fn -> deposit_account_fixture() end)
 

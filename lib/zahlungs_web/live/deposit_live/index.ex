@@ -8,6 +8,7 @@ defmodule ZahlungsWeb.DepositLive.Index do
 
   alias Zahlungs.{Deposits, Shifts}
   alias Zahlungs.Deposits.Account
+  alias ZahlungsWeb.AmountInput
 
   @impl true
   def mount(_params, _session, socket) do
@@ -129,8 +130,8 @@ defmodule ZahlungsWeb.DepositLive.Index do
     )
   end
 
-  defp digits(value) when is_binary(value), do: String.replace(value, ~r/\D/, "")
-  defp digits(_value), do: ""
+  # Amounts arrive as typed ("250.000", "250.000,00").
+  defp digits(value), do: AmountInput.parse(value)
 
   defp entry_label(%{kind: "topup", source: "drawer"}), do: "Isi ulang (kas laci)"
   defp entry_label(%{kind: "topup"}), do: "Isi ulang (luar laci)"

@@ -20,7 +20,8 @@ defmodule Zahlungs.Deposits.Account do
   def changeset(account, attrs) do
     account
     |> cast(attrs, [:name, :active])
-    |> update_change(:name, &String.trim/1)
+    # Spaces only are cast to nil, which validate_required then reports.
+    |> update_change(:name, &(&1 && String.trim(&1)))
     |> validate_required([:name])
     |> validate_length(:name, max: 80)
     |> Zahlungs.Organizations.put_organization()
