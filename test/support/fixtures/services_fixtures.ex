@@ -18,6 +18,24 @@ defmodule Zahlungs.ServicesFixtures do
     account
   end
 
+  @doc "A service product: pulsa, cost 10.150, margin Rp 1.850 (price 12.000) unless told otherwise."
+  def service_product_fixture(attrs \\ %{}) do
+    Zahlungs.StoresFixtures.default_org()
+
+    {:ok, product} =
+      attrs
+      |> Enum.into(%{
+        name: "Pulsa #{System.unique_integer([:positive])}",
+        category: "pulsa",
+        cost: "10150",
+        margin_type: "amount",
+        margin_value: "1850"
+      })
+      |> Zahlungs.Services.create_product()
+
+    product
+  end
+
   @doc "Makes `account` the one `store` sells services from."
   def assign_account(store, account) do
     {:ok, store} = Stores.update_store(store, %{deposit_account_id: account.id})
