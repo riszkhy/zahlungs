@@ -237,6 +237,32 @@ defmodule Zahlungs.Services do
     )
   end
 
+  @doc """
+  What a shift's services add up to: `count`, `total` and `cash_total` (the
+  cash that went into the drawer). Processing and successful services count —
+  the money was taken; failed ones don't — it was handed back.
+  """
+  def shift_totals(%Shift{id: shift_id}) do
+    row =
+      Repo.one(
+        from t in Transaction,
+          where: t.shift_id == ^shift_id and t.status in ["processing", "success"],
+          select: %{
+            count: count(t.id),
+            total: coalesce(sum(t.price), 0),
+            cash_total:
+              coalesce(
+                sum(
+                  fragment("CASE WHEN ? = 'cash' THEN ? ELSE 0 END", t.payment_method, t.price)
+                ),
+                0
+              )
+          }
+      )
+
+    %{count: row.count, total: to_decimal(row.total), cash_total: to_decimal(row.cash_total)}
+  end
+
   @doc "How many services of a shift are still processing."
   def count_processing(%Shift{id: shift_id}) do
     Repo.aggregate(

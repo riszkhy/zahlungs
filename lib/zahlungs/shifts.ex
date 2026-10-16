@@ -54,7 +54,9 @@ defmodule Zahlungs.Shifts do
 
   @doc """
   Closes an open shift: computes expected cash and variance vs the counted cash.
-  Returns `{:error, :not_open}` if the shift is already closed.
+  Returns `{:error, :not_open}` if the shift is already closed, and
+  `{:error, :services_processing}` while a service of the shift is still
+  processing.
 
   The shift row is locked first, so the expected cash includes every sale and
   cash movement recorded on the shift and none can be added afterwards.
@@ -62,6 +64,7 @@ defmodule Zahlungs.Shifts do
   def close_shift(%Shift{} = shift, counted_cash, note \\ nil) do
     Repo.transaction(fn ->
       with_open_shift(shift, fn ->
+        refuse_while_services_processing(shift)
         expected = expected_cash(shift)
         counted = to_decimal(counted_cash)
 
@@ -118,6 +121,12 @@ defmodule Zahlungs.Shifts do
     else
       _ -> {:error, :no_open_shift}
     end
+  end
+
+  # A service still processing may yet be handed back: its result decides what
+  # the drawer should hold. Called under the shift's lock.
+  defp refuse_while_services_processing(shift) do
+    if Zahlungs.Services.count_processing(shift) > 0, do: Repo.rollback(:services_processing)
   end
 
   # Runs `fun` only if the shift is still open in the database (not just in the
@@ -196,7 +205,10 @@ defmodule Zahlungs.Shifts do
   @doc """
   Expected cash in the drawer for a shift:
 
-      opening float + completed cash sales + cash-in movements − cash-out movements
+      opening float + completed cash sales + cash services + cash-in movements − cash-out movements
+
+  Cash services count while processing or successful (see
+  `Zahlungs.Services.shift_totals/1`).
 
   Non-cash sales (QRIS/card/transfer) never enter the drawer, so they are
   excluded. Cash movements (setoran, pengeluaran, bayar konsinyasi, refund)
@@ -212,6 +224,7 @@ defmodule Zahlungs.Shifts do
 
     to_decimal(shift.opening_cash)
     |> Decimal.add(cash_sales_total(shift.id))
+    |> Decimal.add(Zahlungs.Services.shift_totals(shift).cash_total)
     |> Decimal.add(cash_in)
     |> Decimal.sub(cash_out)
   end
@@ -243,6 +256,7 @@ defmodule Zahlungs.Shifts do
     noncash_total = Decimal.sub(sales_total, cash_total)
     opening = to_decimal(shift.opening_cash)
     %{cash_in: cash_in, cash_out: cash_out} = movement_totals(shift.id)
+    services = Zahlungs.Services.shift_totals(shift)
 
     %{
       opening_cash: opening,
@@ -252,8 +266,15 @@ defmodule Zahlungs.Shifts do
       noncash_total: noncash_total,
       cash_in: cash_in,
       cash_out: cash_out,
+      service_count: services.count,
+      service_total: services.total,
+      service_cash_total: services.cash_total,
       expected_cash:
-        opening |> Decimal.add(cash_total) |> Decimal.add(cash_in) |> Decimal.sub(cash_out)
+        opening
+        |> Decimal.add(cash_total)
+        |> Decimal.add(services.cash_total)
+        |> Decimal.add(cash_in)
+        |> Decimal.sub(cash_out)
     }
   end
 
