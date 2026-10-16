@@ -197,24 +197,28 @@ defmodule Zahlungs.Services do
     Repo.transaction(fn ->
       locked = Repo.one!(from t in Transaction, where: t.id == ^id, lock: "FOR UPDATE")
 
-      cond do
-        locked.user_id != user.id and user.role != "admin" ->
-          Repo.rollback(:forbidden)
-
-        locked.status != "processing" ->
-          Repo.rollback(:not_processing)
-
-        true ->
-          locked
-          |> Transaction.resolve_changeset(attrs)
-          |> Ecto.Changeset.change(resolved_by_id: user.id, resolved_at: now())
-          |> Repo.update()
-          |> case do
-            {:ok, transaction} -> transaction
-            {:error, changeset} -> Repo.rollback(changeset)
-          end
+      case apply_result(locked, user, attrs) do
+        {:ok, transaction} -> transaction
+        {:error, reason} -> Repo.rollback(reason)
       end
     end)
+  end
+
+  # `locked` is the row as the database has it, under its lock.
+  defp apply_result(locked, user, attrs) do
+    cond do
+      locked.user_id != user.id and user.role != "admin" ->
+        {:error, :forbidden}
+
+      locked.status != "processing" ->
+        {:error, :not_processing}
+
+      true ->
+        locked
+        |> Transaction.resolve_changeset(attrs)
+        |> Ecto.Changeset.change(resolved_by_id: user.id, resolved_at: now())
+        |> Repo.update()
+    end
   end
 
   ## Reading
