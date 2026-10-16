@@ -64,6 +64,7 @@ defmodule ZahlungsWeb.ShiftLive.Index do
   defp movement_label("cash_drop"), do: "Setor brankas"
   defp movement_label("cash_in"), do: "Uang masuk"
   defp movement_label("consignment_payment"), do: "Bayar konsinyasi"
+  defp movement_label("deposit_topup"), do: "Isi deposit"
   defp movement_label("refund"), do: "Refund retur"
   defp movement_label(other), do: other
 

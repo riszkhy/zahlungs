@@ -263,6 +263,20 @@ defmodule Zahlungs.Services do
     %{count: row.count, total: to_decimal(row.total), cash_total: to_decimal(row.cash_total)}
   end
 
+  @doc """
+  What services have taken out of a deposit account: the cost of those
+  processing (the provider has charged) and successful. Failed ones are
+  refunded by the provider and don't count.
+  """
+  def deposit_used(%Zahlungs.Deposits.Account{id: account_id}) do
+    from(t in Transaction,
+      where: t.deposit_account_id == ^account_id and t.status in ["processing", "success"],
+      select: coalesce(sum(t.cost), 0)
+    )
+    |> Repo.one()
+    |> to_decimal()
+  end
+
   @doc "How many services of a shift are still processing."
   def count_processing(%Shift{id: shift_id}) do
     Repo.aggregate(

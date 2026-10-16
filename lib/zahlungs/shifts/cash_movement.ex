@@ -11,7 +11,10 @@ defmodule Zahlungs.Shifts.CashMovement do
     "consignment_payment" => "out",
     # Cash handed back for a sale from an already-closed shift; recorded by
     # Zahlungs.Sales.return_sale/2, not entered by hand.
-    "refund" => "out"
+    "refund" => "out",
+    # Cash taken from the drawer to top up a PPOB deposit account; recorded by
+    # Zahlungs.Deposits.record_topup/3, not entered by hand.
+    "deposit_topup" => "out"
   }
 
   schema "cash_movements" do
