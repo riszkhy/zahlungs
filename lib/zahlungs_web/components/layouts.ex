@@ -146,7 +146,8 @@ defmodule ZahlungsWeb.Layouts do
       {"Deposit", ~p"/admin/deposits"},
       {"Reports", ~p"/reports/sales"},
       {"Stock", ~p"/reports/stock"},
-      {"Consignment", ~p"/reports/consignment"}
+      {"Consignment", ~p"/reports/consignment"},
+      {"Laporan layanan", ~p"/reports/services"}
     ]
   end
 end

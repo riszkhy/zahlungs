@@ -36,6 +36,9 @@ Aturan akses berlapis (router):
 │   │     ├─ Cari produk / scan barcode (keyboard & kamera HP)
 │   │     ├─ Keranjang → metode bayar (Tunai; lainnya disabled) → Complete Sale
 │   │     └─ Modal struk: Print receipt · Koreksi/batalkan · New Transaction
+│   ├── /services               Layanan PPOB: catat pulsa/paket/token/tagihan PLN,
+│   │     │                     lalu tandai berhasil (token/SN) atau gagal
+│   │     └── /services/:id/receipt   Struk layanan versi cetak
 │   ├── /catalog                Katalog produk (browse, cari, filter, paginasi)
 │   ├── /sales                  Riwayat transaksi (filter tanggal, paginasi)
 │   │     └── /sales/:id        Detail + struk · Batalkan (koreksi) · Return (admin)
@@ -53,11 +56,15 @@ Aturan akses berlapis (router):
     ├── /admin/stores/register  Daftar cabang: wizard 2 langkah (data toko, kasir pertama opsional)
     ├── /admin/logins           Riwayat login + lokasi (filter toko & user)
     ├── /admin/suppliers        Manajemen supplier/consignor (+ /new, /:id/edit)
+    ├── /admin/services         Produk layanan PPOB: modal, margin Rp/% (+ /new, /:id/edit)
+    ├── /admin/deposits         Akun deposit: perkiraan saldo, isi ulang, pencocokan
+    │                           (+ /new, /:id, /:id/edit)
     ├── /reports/sales          Laporan penjualan (ringkasan, harian, per kasir,
     │                           per kategori, produk terlaris)
     ├── /reports/stock          Laporan stok (nilai persediaan, stok rendah/habis)
     ├── /reports/consignment    Settlement konsinyasi (payable/dibayar di rentang, sisa utang s.d. tanggal akhir
     │                           + sisa stok titipan per produk)
+    ├── /reports/services       Laporan layanan (berhasil/gagal, nilai, modal, margin per kategori)
     └── /dashboard              Phoenix LiveDashboard (dev/test saja)
 ```
 
@@ -69,6 +76,7 @@ Urutan link disesuaikan peran:
 | ----------- | :---: | :-----: | :---: | ---------------------- |
 | Home        |   –   |    ✓    |   ✓   | `/home`                |
 | Cashier     |   –   |    ✓    |   ✓   | `/cashier`             |
+| Layanan     |   –   |    ✓    |   ✓   | `/services`            |
 | Catalog     |   –   |    ✓    |   ✓   | `/catalog`             |
 | Sales       |   –   |    ✓    |   ✓   | `/sales`               |
 | Shifts      |   –   |    ✓    |   ✓   | `/shifts`              |
@@ -77,9 +85,12 @@ Urutan link disesuaikan peran:
 | Users       |   –   |    –    |   ✓   | `/admin/users`         |
 | Stores      |   –   |    –    |   ✓   | `/admin/stores`        |
 | Suppliers   |   –   |    –    |   ✓   | `/admin/suppliers`     |
+| Produk layanan | – |    –    |   ✓   | `/admin/services`      |
+| Deposit     |   –   |    –    |   ✓   | `/admin/deposits`      |
 | Reports     |   –   |    –    |   ✓   | `/reports/sales`       |
 | Stock       |   –   |    –    |   ✓   | `/reports/stock`       |
 | Consignment |   –   |    –    |   ✓   | `/reports/consignment` |
+| Laporan layanan | – |   –    |   ✓   | `/reports/services`    |
 | Profile     |   –   |    ✓    |   ✓   | `/users/settings`      |
 | Log in      |   ✓   |    –    |   –   | `/users/log_in`        |
 | Log out     |   –   |    ✓    |   ✓   | DELETE `/users/log_out`|
@@ -224,3 +235,15 @@ Kelola user (admin):
 - `superadmin` tidak punya menu kasir maupun admin toko; membuka halaman itu
   mengembalikannya ke `/platform/organizations`.
 - Semua halaman lain hanya menampilkan data organisasi user yang login.
+
+## Layanan PPOB (Fase 0, tanpa API)
+
+- **/services** (kasir dan admin dengan shift terbuka, di toko yang punya akun
+  deposit aktif): pilih produk, isi nomor tujuan, terima uang → status
+  *diproses*; setelah diproses di aplikasi penyedia, tandai *berhasil* (token/SN)
+  atau *gagal* (alasan, uang dikembalikan). Hanya yang mencatat atau admin yang
+  boleh menandai.
+- Shift tidak bisa ditutup selama masih ada layanan *diproses*.
+- **/admin/services**, **/admin/deposits**, **/reports/services**: admin saja.
+  Form toko memilih akun deposit yang dipakai toko itu.
+- Layanan tidak masuk laporan penjualan barang maupun angka di Home.

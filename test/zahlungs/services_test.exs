@@ -291,6 +291,75 @@ defmodule Zahlungs.ServicesTest do
     end
   end
 
+  describe "report/3" do
+    setup do
+      assign_account(default_store(), deposit_account_fixture())
+      cashier = user_on_shift_fixture()
+
+      pulsa = service_product_fixture()
+
+      token =
+        service_product_fixture(%{category: "token_pln", cost: "50150", margin_value: "2350"})
+
+      for product <- [pulsa, token] do
+        tx = service_fixture(cashier, product)
+        {:ok, _} = Services.mark_success(tx, cashier, nil)
+      end
+
+      failed = service_fixture(cashier, pulsa)
+      {:ok, _} = Services.mark_failed(failed, cashier, "gagal")
+
+      # Still processing: not in the report yet.
+      service_fixture(cashier, pulsa)
+
+      {:ok, admin} = Zahlungs.Accounts.set_user_role(user_fixture(), "admin")
+      today = Zahlungs.LocalTime.today()
+
+      %{admin: admin, cashier: cashier, pulsa: pulsa, today: today}
+    end
+
+    defp money(value), do: Decimal.new(value)
+
+    test "counts successful services, their value, cost and margin, per category", ctx do
+      report = Services.report(store_scope(), ctx.today, ctx.today)
+
+      assert {report.success_count, report.failed_count} == {2, 1}
+      assert Decimal.equal?(report.value, money("64500"))
+      assert Decimal.equal?(report.cost, money("60300"))
+      assert Decimal.equal?(report.margin, money("4200"))
+
+      by = Map.new(report.by_category, &{&1.category, &1})
+      assert by["pulsa"].count == 1
+      assert Decimal.equal?(by["pulsa"].margin, money("1850"))
+      assert by["token_pln"].count == 1
+      assert Decimal.equal?(by["token_pln"].value, money("52500"))
+    end
+
+    test "one store, all stores of the organization, never another organization", ctx do
+      other_store = store_fixture()
+      assign_account(other_store, deposit_account_fixture())
+      elsewhere = user_on_shift_fixture(%{store_id: other_store.id})
+      tx = service_fixture(elsewhere, ctx.pulsa)
+      {:ok, _} = Services.mark_success(tx, elsewhere, nil)
+
+      in_org(organization_fixture(), fn ->
+        foreign_store = store_fixture()
+        assign_account(foreign_store, deposit_account_fixture())
+        foreigner = user_on_shift_fixture(%{store_id: foreign_store.id})
+        foreign = service_fixture(foreigner, service_product_fixture())
+        {:ok, _} = Services.mark_success(foreign, foreigner, nil)
+      end)
+
+      assert Services.report(store_scope(), ctx.today, ctx.today).success_count == 2
+      assert Services.report(all_stores_scope(ctx.admin), ctx.today, ctx.today).success_count == 3
+    end
+
+    test "only the chosen days count", ctx do
+      assert Services.report(store_scope(), ~D[2001-01-01], ~D[2001-01-31]).success_count == 0
+      assert Services.report(store_scope(), ctx.today, ctx.today).success_count == 2
+    end
+  end
+
   describe "products" do
     test "validates the category, the margin and the cost" do
       assert {:error, changeset} =

@@ -279,6 +279,56 @@ defmodule Zahlungs.Services do
     |> to_decimal()
   end
 
+  ## Report
+
+  @doc """
+  The services of the scope's store(s) between two shop-local dates
+  (inclusive): how many succeeded and failed, and for the successful ones the
+  value (what customers paid), the cost and the margin — in total and per
+  category.
+  """
+  def report(%Scope{} = scope, %Date{} = date_from, %Date{} = date_to) do
+    {start, finish} = LocalTime.day_range(date_from, date_to, scope.store)
+
+    in_range =
+      from t in for_store(Transaction, scope),
+        where: t.inserted_at >= ^start and t.inserted_at <= ^finish
+
+    by_category =
+      Repo.all(
+        from t in in_range,
+          where: t.status == "success",
+          group_by: t.category,
+          order_by: t.category,
+          select: %{
+            category: t.category,
+            count: count(t.id),
+            value: coalesce(sum(t.price), 0),
+            cost: coalesce(sum(t.cost), 0)
+          }
+      )
+      |> Enum.map(fn row ->
+        value = to_decimal(row.value)
+        cost = to_decimal(row.cost)
+        %{row | value: value, cost: cost} |> Map.put(:margin, Decimal.sub(value, cost))
+      end)
+
+    value = sum_of(by_category, :value)
+    cost = sum_of(by_category, :cost)
+
+    %{
+      success_count: Enum.sum(Enum.map(by_category, & &1.count)),
+      failed_count: Repo.aggregate(where(in_range, [t], t.status == "failed"), :count),
+      value: value,
+      cost: cost,
+      margin: Decimal.sub(value, cost),
+      by_category: by_category
+    }
+  end
+
+  defp sum_of(rows, key),
+    do: Enum.reduce(rows, Decimal.new(0), &Decimal.add(&2, Map.fetch!(&1, key)))
+
   @doc "How many services of a shift are still processing."
   def count_processing(%Shift{id: shift_id}) do
     Repo.aggregate(

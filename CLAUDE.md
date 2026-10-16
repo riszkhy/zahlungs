@@ -31,7 +31,7 @@ JS/CSS assets live in `assets/` and are built by the `esbuild`/`tailwind` mix wr
 
 - Dev/test use **MySQL/MariaDB** via `myxql`. Credentials come from env vars (`DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD`, `DB_NAME`/`DB_TEST_NAME`, with localhost defaults) and/or the gitignored `config/local.secret.exs`.
 - `mix test` runs pending migrations against whatever database the test config points at. If dev and test share one database, tests still clean up after themselves (SQL sandbox), but rows that already exist are visible to them: look fixtures up by a unique name/SKU rather than expecting them first in a list, and don't assert that a table is empty.
-- Migrations live in `priv/repo/migrations/`. Tables: `organizations`, `stores`, `users`, `users_tokens`, `user_logins`, `categories`, `suppliers`, `products`, `product_stocks`, `sales`, `sale_items`, `cashier_shifts`, `cash_movements`. (`products.stock` is a leftover column, no longer read; stock lives in `product_stocks`.)
+- Migrations live in `priv/repo/migrations/`. Tables: `organizations`, `stores`, `users`, `users_tokens`, `user_logins`, `categories`, `suppliers`, `products`, `product_stocks`, `sales`, `sale_items`, `cashier_shifts`, `cash_movements`, `service_products`, `service_transactions`, `deposit_accounts`, `deposit_entries`. (`products.stock` is a leftover column, no longer read; stock lives in `product_stocks`.)
 - There is no CI workflow in the repo.
 
 ## Production / releases
@@ -50,6 +50,7 @@ Standard Phoenix context layering — keep the boundary between the two. LiveVie
   - `catalog.ex` — products (SKU, barcode, purchase price/margin, soft delete, consignment flag), categories, suppliers, stock report.
   - `sales.ex` — `create_sale/3`, `return_sale/2`, `void_sale/3`, sales history, and all reports including the consignment statement.
   - `shifts.ex` — open/close shift, cash movements, expected-cash reconciliation.
+  - `services.ex` — PPOB services (Fase 0): service products and their price, service transactions, the service report. `deposits.ex` — deposit accounts, top-ups, corrections, estimated balance. See PPOB below.
   - `local_time.ex` — shop-local time (see Conventions).
   - `repo.ex`, `mailer.ex` (Swoosh), `application.ex` (supervision tree: Repo → Telemetry → PubSub → Endpoint).
 - `lib/zahlungs_web/` — **web layer**. The POS screens are LiveViews in `live/` (`cashier_live.ex` is the main one); auth pages, user settings and the printable receipt are plain controllers + heex templates in `controllers/`. Shared function components are in `components/core_components.ex`; create/edit forms are live components (`*/form_component.ex`).
@@ -74,6 +75,16 @@ Several owners share one database; full notes in `docs/SAAS-multi-pemilik.md`.
 - **Roles:** `superadmin` (platform operator: no organization, only `/platform`, created by seeds via `Accounts.create_platform_admin/1`), `admin` (an organization's owner/staff), `cashier`. `Scope.block_reason/1` says why a scope can't use the app (`:pending`, `:rejected`, `:suspended`, `:no_store`, `:no_organization`); the login controller and `UserAuth` act on it.
 - **Sign-up** (`/signup`, public, rate-limited) creates a pending organization, a first store and the owner via `Organizations.register/1`; the operator reviews at `/platform/organizations`. Billing is a manual record (`paid_until`, `billing_note`). Sign-ups and status changes are broadcast (`Organizations.subscribe/0` → `{:organizations_changed, id}`); the operator's page listens, so its pending count stays current.
 - **Tests** start inside a default organization (`DataCase`, `StoresFixtures.default_org/0`); use `organization_fixture/1` + `in_org/2` for a second one.
+
+### PPOB services (Fase 0, no provider API)
+
+Spec: `docs/superpowers/specs/2026-10-16-layanan-ppob-fase-0-design.md`. The cashier does the top-up in the provider's own app; Zahlungs records it. Goods sales (`Sales`, `Catalog`, stock) are untouched.
+
+- **Products** (`service_products`, owned): pulsa, paket data, token PLN at a fixed value; tagihan PLN with the bill entered per sale. Price = cost + margin (rupiah, or percent rounded up to the rupiah); for a bill, cost = bill + provider fee and price = bill + admin fee (`Services.price_for/2`).
+- **Transactions** (`service_transactions`, per store like `sales`, no `organization_id`): `Services.record/3` on the cashier's open shift, in the shift's store, against that store's deposit account — none of them from params — with price and cost copied. Status `processing` → `success` (token/SN) or `failed` (reason; money handed back), final; `mark_success/3` / `mark_failed/3` lock the row, and only the recorder or an admin may mark.
+- **Shift cash:** cash from `processing` and `success` services counts in `Shifts.expected_cash/1`; `close_shift/3` returns `{:error, :services_processing}` while any service of the shift is processing.
+- **Deposits** (`deposit_accounts`, `deposit_entries`, owned): each store picks one active account (`stores.deposit_account_id`); a store without one can't sell services. Estimated balance = top-ups + corrections − cost of `processing`/`success` services on the account. A top-up from the drawer is also a `deposit_topup` cash-out on the admin's open shift, in one transaction. `Deposits.reconcile/4` turns the difference with the provider's balance into a correction.
+- Services are not in the sales report or the Home figures; they have `/reports/services`.
 
 ### Multi-store
 
