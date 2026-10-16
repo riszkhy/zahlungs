@@ -5,6 +5,8 @@ defmodule Zahlungs.ServicesTest do
   """
   use Zahlungs.DataCase, async: true
 
+  import Zahlungs.AccountsFixtures
+  import Zahlungs.ShiftsFixtures
   import Zahlungs.StoresFixtures
   import Zahlungs.ServicesFixtures
 
@@ -80,6 +82,124 @@ defmodule Zahlungs.ServicesTest do
 
       assert Services.price_for(bill, nil) == {:error, :bill_required}
       assert Services.price_for(bill, d("0")) == {:error, :bill_required}
+    end
+  end
+
+  describe "record/3" do
+    setup do
+      account = deposit_account_fixture()
+      store = assign_account(default_store(), account)
+      cashier = user_on_shift_fixture()
+
+      %{account: account, store: store, cashier: cashier, product: service_product_fixture()}
+    end
+
+    defp cash(paid, ref \\ "081234567890"),
+      do: %{"customer_ref" => ref, "payment_method" => "cash", "amount_paid" => paid}
+
+    test "records a processing transaction in the shift's store, with the price and cost of the moment",
+         ctx do
+      assert {:ok, tx} = Services.record(ctx.cashier, ctx.product.id, cash("12000"))
+
+      assert tx.status == "processing"
+      assert tx.store_id == ctx.store.id
+      assert tx.shift_id == Zahlungs.Shifts.current_shift(ctx.cashier).id
+      assert tx.user_id == ctx.cashier.id
+      assert tx.deposit_account_id == ctx.account.id
+      assert Decimal.equal?(tx.price, d("12000"))
+      assert Decimal.equal?(tx.cost, d("10150"))
+      assert {tx.product_name, tx.category} == {ctx.product.name, "pulsa"}
+      assert tx.code =~ ~r/^#{ctx.store.code}-LYN\d{12}[0-9A-F]{4}$/
+
+      {:ok, _} = Services.update_product(ctx.product, %{margin_value: "5000"})
+      assert Decimal.equal?(Repo.get!(Services.Transaction, tx.id).price, d("12000"))
+    end
+
+    test "cash must cover the price; change is worked out", ctx do
+      assert {:ok, tx} = Services.record(ctx.cashier, ctx.product.id, cash("20000"))
+      assert Decimal.equal?(tx.amount_paid, d("20000"))
+      assert Decimal.equal?(tx.change_due, d("8000"))
+
+      assert Services.record(ctx.cashier, ctx.product.id, cash("10000")) ==
+               {:error, :insufficient_payment}
+
+      qris = %{"customer_ref" => "081234567890", "payment_method" => "qris", "amount_paid" => "1"}
+      assert {:ok, tx} = Services.record(ctx.cashier, ctx.product.id, qris)
+      assert Decimal.equal?(tx.amount_paid, d("12000"))
+      assert Decimal.equal?(tx.change_due, d("0"))
+    end
+
+    test "tagihan PLN needs the bill", ctx do
+      bill =
+        service_product_fixture(%{
+          category: "tagihan_pln",
+          cost: "1500",
+          margin_value: "3000"
+        })
+
+      assert Services.record(ctx.cashier, bill.id, cash("300000", "530011223344")) ==
+               {:error, :bill_required}
+
+      attrs = Map.put(cash("300000", "530011223344"), "bill_amount", "245000")
+      assert {:ok, tx} = Services.record(ctx.cashier, bill.id, attrs)
+      assert Decimal.equal?(tx.bill_amount, d("245000"))
+      assert Decimal.equal?(tx.price, d("248000"))
+      assert Decimal.equal?(tx.cost, d("246500"))
+    end
+
+    test "the customer number keeps its digits only", ctx do
+      assert {:ok, tx} =
+               Services.record(ctx.cashier, ctx.product.id, cash("12000", "0812-3456 7890"))
+
+      assert tx.customer_ref == "081234567890"
+
+      assert {:ok, tx} =
+               Services.record(ctx.cashier, ctx.product.id, cash("12000", "+62 812.3456.7890"))
+
+      assert tx.customer_ref == "6281234567890"
+
+      for bad <- ["0812abc", "123", ""] do
+        assert {:error, %Ecto.Changeset{} = changeset} =
+                 Services.record(ctx.cashier, ctx.product.id, cash("12000", bad))
+
+        assert errors_on(changeset)[:customer_ref], "#{inspect(bad)} was accepted"
+      end
+    end
+
+    test "refuses without an open shift", ctx do
+      assert Services.record(user_fixture(), ctx.product.id, cash("12000")) ==
+               {:error, :no_open_shift}
+    end
+
+    test "refuses where the store has no active deposit account", ctx do
+      bare_store = store_fixture()
+      elsewhere = user_on_shift_fixture(%{store_id: bare_store.id})
+
+      assert Services.record(elsewhere, ctx.product.id, cash("12000")) ==
+               {:error, :no_deposit_account}
+
+      {:ok, _} = Zahlungs.Deposits.update_account(ctx.account, %{active: false})
+
+      assert Services.record(ctx.cashier, ctx.product.id, cash("12000")) ==
+               {:error, :no_deposit_account}
+    end
+
+    test "refuses a product no longer for sale", ctx do
+      inactive = service_product_fixture(%{active: false})
+      deleted = service_product_fixture()
+      {:ok, _} = Services.delete_product(deleted)
+
+      for id <- [inactive.id, deleted.id, "#{deleted.id}", -1, "not-an-id"] do
+        assert Services.record(ctx.cashier, id, cash("12000")) == {:error, :product_unavailable}
+      end
+    end
+
+    test "the store comes from the shift, not from the caller", ctx do
+      other = store_fixture()
+      attrs = Map.put(cash("12000"), "store_id", other.id)
+
+      assert {:ok, tx} = Services.record(ctx.cashier, ctx.product.id, attrs)
+      assert tx.store_id == ctx.store.id
     end
   end
 

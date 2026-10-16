@@ -1,7 +1,8 @@
 defmodule Zahlungs.Services do
   @moduledoc """
   PPOB services (Fase 0, no provider API): the products a store sells besides
-  goods, and their price.
+  goods, their price, and the services sold. The cashier does the top-up in
+  the provider's own app; Zahlungs records the money and the result.
 
   ## Price
 
@@ -12,12 +13,20 @@ defmodule Zahlungs.Services do
       price = cost + margin(cost).
     * tagihan PLN: cost = bill + provider fee (the product's cost),
       price = bill + margin(bill) — the margin is the admin fee.
+
+  ## Transactions
+
+  A service is recorded when the money is taken (`record/3`, status
+  `processing`). The store is the cashier's shift's store and the deposit
+  account is that store's; neither comes from the caller.
   """
 
   import Ecto.Query, warn: false
   alias Zahlungs.Repo
 
-  alias Zahlungs.Services.Product
+  alias Zahlungs.Accounts.User
+  alias Zahlungs.{Deposits, LocalTime, Shifts, Stores}
+  alias Zahlungs.Services.{Product, Transaction}
 
   @category_labels [
     {"pulsa", "Pulsa"},
@@ -98,6 +107,109 @@ defmodule Zahlungs.Services do
       {:ok,
        %{price: Decimal.add(product.cost, margin(product, product.cost)), cost: product.cost}}
     end
+  end
+
+  ## Recording
+
+  @doc """
+  Records a service when the cashier takes the money: status `processing`, on
+  the cashier's open shift, in that shift's store, against the store's deposit
+  account. The price and cost are worked out here and copied onto the
+  transaction.
+
+  `attrs` (string keys): `"customer_ref"`, `"bill_amount"` (tagihan PLN only),
+  `"payment_method"` (default `"cash"`) and `"amount_paid"` (cash only).
+
+  Returns `{:ok, transaction}` or `{:error, reason}`: `:no_open_shift`,
+  `:no_deposit_account`, `:product_unavailable`, `:bill_required`,
+  `:insufficient_payment`, or a changeset (the customer number).
+  """
+  def record(%User{} = user, product_id, attrs) do
+    # The cashier decides whose products and stores these are.
+    Repo.put_org_id(user.organization_id)
+
+    Repo.transaction(fn ->
+      case insert_transaction(user, product_id, attrs) do
+        {:ok, transaction} -> transaction
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+  end
+
+  # Runs inside record/3's transaction: the shift stays locked until it ends.
+  defp insert_transaction(user, product_id, attrs) do
+    with {:ok, shift} <- Shifts.lock_current_shift(user),
+         store = Stores.get_store!(shift.store_id),
+         {:ok, account_id} <- store_account(store),
+         {:ok, product} <- sellable_product(product_id),
+         bill = bill_amount(product, attrs),
+         {:ok, %{price: price, cost: cost}} <- price_for(product, bill),
+         {:ok, payment} <- settle(attrs, price) do
+      %Transaction{
+        store_id: store.id,
+        shift_id: shift.id,
+        user_id: user.id,
+        service_product_id: product.id,
+        deposit_account_id: account_id,
+        code: generate_code(store),
+        category: product.category,
+        product_name: product.name,
+        bill_amount: bill,
+        price: price,
+        cost: cost,
+        amount_paid: payment.amount_paid,
+        change_due: payment.change_due
+      }
+      |> Transaction.record_changeset(%{
+        customer_ref: attrs["customer_ref"] || "",
+        payment_method: payment.method
+      })
+      |> Repo.insert()
+    end
+  end
+
+  defp store_account(%{deposit_account_id: id}) do
+    if Deposits.active_account?(id), do: {:ok, id}, else: {:error, :no_deposit_account}
+  end
+
+  # Active and not deleted: a screen left open may still offer one that isn't.
+  defp sellable_product(id) do
+    with {id, ""} <- Integer.parse(to_string(id)),
+         %Product{} = product <-
+           Repo.one(
+             from p in Product,
+               where: p.id == ^id and p.active == true and is_nil(p.deleted_at)
+           ) do
+      {:ok, product}
+    else
+      _ -> {:error, :product_unavailable}
+    end
+  end
+
+  defp bill_amount(product, attrs) do
+    if Product.bill?(product), do: to_decimal(attrs["bill_amount"])
+  end
+
+  # Cash must cover the price and may produce change; other methods are paid
+  # for the exact price.
+  defp settle(attrs, price) do
+    case attrs["payment_method"] do
+      method when method in [nil, "", "cash"] ->
+        paid = to_decimal(attrs["amount_paid"])
+
+        if Decimal.lt?(paid, price),
+          do: {:error, :insufficient_payment},
+          else: {:ok, %{method: "cash", amount_paid: paid, change_due: Decimal.sub(paid, price)}}
+
+      method ->
+        {:ok, %{method: method, amount_paid: price, change_due: Decimal.new(0)}}
+    end
+  end
+
+  # Store code + LYN + store-local timestamp + random hex, like a sale's INV code.
+  defp generate_code(store) do
+    ts = Calendar.strftime(LocalTime.now(store), "%y%m%d%H%M%S")
+    "#{store.code}-LYN#{ts}#{Base.encode16(:crypto.strong_rand_bytes(2))}"
   end
 
   defp margin(%Product{margin_type: "percent", margin_value: percent}, base) do
