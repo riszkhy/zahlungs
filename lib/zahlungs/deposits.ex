@@ -79,7 +79,15 @@ defmodule Zahlungs.Deposits do
   `{:error, :credentials}` when stored credentials can't be read (e.g. the
   secret key changed).
   """
-  def provider(%Account{mode: "api", provider: key, credentials: encrypted}) do
+  def provider(%Account{mode: "api"} = account), do: connection(account)
+  def provider(%Account{}), do: :manual
+
+  @doc """
+  The adapter and credentials stored on the account, whatever its mode now:
+  services sent while it was in api mode are still settled with the provider
+  after the admin switches it to manual.
+  """
+  def connection(%Account{provider: key, credentials: encrypted}) do
     with {:ok, adapter} <- Provider.adapter(key),
          {:ok, credentials} <- Credentials.decrypt(encrypted) do
       {:ok, adapter, credentials}
@@ -87,8 +95,6 @@ defmodule Zahlungs.Deposits do
       _ -> {:error, :credentials}
     end
   end
-
-  def provider(%Account{}), do: :manual
 
   @doc "The account a provider's callback is for, by its token, in any organization."
   def get_account_by_callback_token(token) when is_binary(token) do

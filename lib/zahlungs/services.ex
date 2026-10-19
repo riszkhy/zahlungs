@@ -412,7 +412,7 @@ defmodule Zahlungs.Services do
     enter_store_organization(transaction)
     account = Deposits.get_account!(transaction.deposit_account_id)
 
-    case Deposits.provider(account) do
+    case Deposits.connection(account) do
       {:ok, adapter, credentials} ->
         {:ok, sent} = transaction |> Ecto.Changeset.change(sent_at: now()) |> Repo.update()
         {:ok, sent, adapter, credentials, provider_request(sent)}
@@ -518,6 +518,80 @@ defmodule Zahlungs.Services do
 
   defp clip(nil, _max), do: nil
   defp clip(value, max), do: value |> to_string() |> String.slice(0, max)
+
+  ## Status checks (Fase 1)
+
+  @recheck_after 30
+
+  @doc """
+  Asks the provider how an api service is doing, now (the cashier's "Cek
+  status", and the status checker). A service never sent is sent instead,
+  once. A provider that doesn't know the `ref_id` leaves it pending, with a
+  message to look it up in the provider's own app — it is never paid again.
+  """
+  def check_status(transaction_id) do
+    case Repo.get(Transaction, transaction_id) do
+      %Transaction{status: "processing", channel: "api", sent_at: nil} = transaction ->
+        send_payment(transaction.id)
+        {:ok, Repo.get!(Transaction, transaction.id)}
+
+      %Transaction{status: "processing", channel: "api"} = transaction ->
+        ask_status(transaction)
+
+      _ ->
+        {:ok, :already_final}
+    end
+  end
+
+  defp ask_status(transaction) do
+    enter_store_organization(transaction)
+    account = Deposits.get_account!(transaction.deposit_account_id)
+
+    result =
+      with {:ok, adapter, credentials} <- Deposits.connection(account),
+           {:ok, result} <- adapter.status(credentials, provider_request(transaction)) do
+        result
+      else
+        {:error, :not_found} ->
+          %{
+            status: :pending,
+            message: "Penyedia tidak mengenal transaksi ini. Periksa di aplikasi penyedia."
+          }
+
+        {:error, :credentials} ->
+          %{
+            status: :pending,
+            message: "Kredensial penyedia tidak bisa dibaca. Minta admin mengisinya ulang."
+          }
+
+        {:error, _} ->
+          %{status: :pending, message: "Belum ada jawaban penyedia"}
+      end
+
+    apply_result(transaction.id, result)
+  end
+
+  @doc """
+  One round of the status checker: every api service still processing, in
+  any store or organization, that was never sent (sent now) or not asked about
+  in the last #{@recheck_after} seconds (asked now). Returns how many it handled.
+  """
+  def check_pending(now \\ NaiveDateTime.utc_now()) do
+    due = NaiveDateTime.add(now, -@recheck_after)
+
+    ids =
+      Repo.all(
+        from t in Transaction,
+          where:
+            t.channel == "api" and t.status == "processing" and
+              (is_nil(t.sent_at) or is_nil(t.last_checked_at) or t.last_checked_at < ^due),
+          order_by: t.id,
+          select: t.id
+      )
+
+    Enum.each(ids, &check_status/1)
+    length(ids)
+  end
 
   @doc "Subscribes to `{:service_changed, transaction_id}` for a store's services."
   def subscribe(store_id), do: Phoenix.PubSub.subscribe(Zahlungs.PubSub, topic(store_id))

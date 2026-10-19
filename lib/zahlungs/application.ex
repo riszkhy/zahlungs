@@ -41,6 +41,12 @@ defmodule Zahlungs.Application do
         do: children ++ [Zahlungs.Accounts.LoginPruner],
         else: children
 
+    # Settles PPOB services still pending at the provider; off in tests too.
+    children =
+      if Application.get_env(:zahlungs, :service_status_checker, true),
+        do: children ++ [Zahlungs.Services.StatusChecker],
+        else: children
+
     opts = [strategy: :one_for_one, name: Zahlungs.Supervisor]
     Supervisor.start_link(children, opts)
   end

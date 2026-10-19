@@ -294,4 +294,105 @@ defmodule Zahlungs.ServicesApiTest do
       assert reload(tx).status == "success"
     end
   end
+
+  describe "the status checker" do
+    setup do
+      account = api_account_fixture()
+      assign_account(default_store(), account)
+
+      %{
+        account: account,
+        cashier: user_on_shift_fixture(),
+        pulsa: service_product_fixture(%{provider_code: "TSEL10"})
+      }
+    end
+
+    defp record_pulsa(ctx, number) do
+      {:ok, tx} =
+        Services.record(ctx.cashier, ctx.pulsa.id, %{
+          "customer_ref" => number,
+          "amount_paid" => "12000"
+        })
+
+      tx
+    end
+
+    defp later(seconds), do: NaiveDateTime.add(NaiveDateTime.utc_now(), seconds)
+    defp status_of(tx), do: Repo.get!(Services.Transaction, tx.id).status
+
+    defp flush_provider_calls do
+      receive do
+        {:fake_provider, _, _} -> flush_provider_calls()
+      after
+        0 -> :ok
+      end
+    end
+
+    test "pending is settled by a later status check", ctx do
+      done = record_pulsa(ctx, "081234567899")
+      failed = record_pulsa(ctx, "081234567898")
+
+      assert Services.check_pending(later(31)) >= 2
+
+      assert status_of(done) == "success"
+      assert status_of(failed) == "failed"
+    end
+
+    test "a service never sent is sent by the checker, once", ctx do
+      tx = record_pulsa(ctx, "081234567899")
+      ref_id = tx.ref_id
+      Repo.update_all(from(t in Services.Transaction, where: t.id == ^tx.id), set: [sent_at: nil])
+      flush_provider_calls()
+
+      Services.check_pending(later(31))
+
+      assert_received {:fake_provider, :pay, ^ref_id}
+      refute_received {:fake_provider, :pay, ^ref_id}
+      assert Repo.get!(Services.Transaction, tx.id).sent_at
+    end
+
+    test "a sent service is only asked about, never paid again", ctx do
+      tx = record_pulsa(ctx, "081234567894")
+      ref_id = tx.ref_id
+      flush_provider_calls()
+
+      Services.check_pending(later(31))
+      Services.check_pending(later(62))
+
+      refute_received {:fake_provider, :pay, ^ref_id}
+      assert_received {:fake_provider, :status, ^ref_id}
+
+      reloaded = Repo.get!(Services.Transaction, tx.id)
+      assert reloaded.status == "processing"
+      assert reloaded.provider_message =~ "tidak mengenal"
+    end
+
+    test "recently checked services wait their turn", ctx do
+      tx = record_pulsa(ctx, "081234567899")
+      ref_id = tx.ref_id
+      flush_provider_calls()
+
+      Services.check_pending(later(10))
+
+      refute_received {:fake_provider, :status, ^ref_id}
+      assert status_of(tx) == "processing"
+    end
+
+    test "the cashier's status check asks right away", ctx do
+      tx = record_pulsa(ctx, "081234567899")
+
+      assert {:ok, %Services.Transaction{status: "success"}} = Services.check_status(tx.id)
+      assert Services.check_status(tx.id) == {:ok, :already_final}
+    end
+
+    test "switching the account to manual leaves pending api services to the provider", ctx do
+      tx = record_pulsa(ctx, "081234567899")
+      {:ok, _} = Zahlungs.Deposits.update_account(ctx.account, %{"mode" => "manual"})
+
+      assert Services.mark_success(tx, ctx.cashier, nil) == {:error, :not_manual}
+
+      Services.check_pending(later(31))
+      assert status_of(tx) == "success"
+    end
+  end
 end

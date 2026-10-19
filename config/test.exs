@@ -46,6 +46,7 @@ config :zahlungs, :prune_login_log, false
 
 # PPOB services are sent to the (fake) provider in the test's own process.
 config :zahlungs, :service_dispatch, :inline
+config :zahlungs, :service_status_checker, false
 
 # Import local, gitignored credentials (real DB username/password/host/etc) if present.
 if File.exists?(Path.expand("local.secret.exs", __DIR__)) do
