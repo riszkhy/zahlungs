@@ -109,7 +109,7 @@ defmodule ZahlungsWeb.StoreLive.Register do
       <h3 class="font-semibold text-gray-700">Langkah 1 dari 2 — Data toko</h3>
 
       <.form for={@store_form} id="branch-store-form" phx-change="validate_store" phx-submit="next">
-        <.store_fields form={@store_form} />
+        <.store_fields form={@store_form} deposit_account_options={Zahlungs.Deposits.account_options()} />
 
         <div class="mt-6">
           <.button>Lanjut</.button>

@@ -60,6 +60,11 @@ defmodule ZahlungsWeb.ReportLive.Index do
       <:subtitle>Ringkasan penjualan & laba (khusus admin)</:subtitle>
     </.header>
 
+    <p class="mt-2 text-sm text-gray-600">
+      Layanan (pulsa, token, tagihan) tidak termasuk di sini; lihat
+      <.link navigate={~p"/reports/services"} class="text-blue-600 underline">Laporan layanan</.link>.
+    </p>
+
     <form phx-change="filter" class="mt-6 flex flex-wrap items-end gap-3">
       <label class="text-sm">
         From

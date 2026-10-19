@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Struk {@transaction.code}</title>
+    <style>
+      body { font-family: ui-monospace, "Courier New", monospace; max-width: 320px; margin: 16px auto; color: #111; padding: 0 12px; }
+      h1 { font-size: 16px; text-align: center; margin: 0 0 4px; }
+      .muted { color: #666; font-size: 11px; text-align: center; margin: 0 0 12px; line-height: 1.5; }
+      .line { border-top: 1px dashed #999; margin: 8px 0; }
+      .row { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; padding: 1px 0; }
+      .b { font-weight: bold; }
+      .token { font-size: 15px; font-weight: bold; text-align: center; letter-spacing: 1px; margin: 8px 0; word-break: break-all; }
+      .status { text-align: center; font-size: 12px; font-weight: bold; margin-top: 8px; }
+      .foot { text-align: center; font-size: 11px; color: #666; margin-top: 12px; }
+      .noprint { text-align: center; margin-top: 16px; }
+      @media print { .noprint { display: none; } body { margin: 0; } }
+    </style>
+  </head>
+  <body>
+    <h1>{@transaction.store.name}</h1>
+    <p :if={@transaction.store.address || @transaction.store.phone} class="muted">
+      {@transaction.store.address}<br :if={@transaction.store.address && @transaction.store.phone} />{@transaction.store.phone}
+    </p>
+    <p class="muted">
+      {@transaction.code}<br />
+      {Calendar.strftime(Zahlungs.LocalTime.to_local(@transaction.inserted_at, @transaction.store), "%d %b %Y %H:%M")}<br />
+      Kasir: {@transaction.user && @transaction.user.email}
+    </p>
+
+    <div class="line"></div>
+
+    <div class="row b"><span>{@transaction.product_name}</span></div>
+    <div class="row"><span>Nomor tujuan</span><span>{group_digits(@transaction.customer_ref)}</span></div>
+    <div :if={@transaction.customer_name} class="row">
+      <span>Nama</span><span>{@transaction.customer_name}</span>
+    </div>
+    <div :if={@transaction.period} class="row">
+      <span>Periode</span><span>{@transaction.period}</span>
+    </div>
+    <div :if={@transaction.sheets && @transaction.customer_name} class="row">
+      <span>Jumlah</span><span>{@transaction.sheets} lembar</span>
+    </div>
+    <div :if={@transaction.bill_amount} class="row">
+      <span>Tagihan</span><span>{format_money(@transaction.bill_amount)}</span>
+    </div>
+    <p :if={@transaction.token_sn} class="token">{@transaction.token_sn}</p>
+    <div :if={@transaction.provider_ref} class="row">
+      <span>Ref penyedia</span><span>{@transaction.provider_ref}</span>
+    </div>
+
+    <div class="line"></div>
+
+    <div class="row b"><span>Total</span><span>{format_money(@transaction.price)}</span></div>
+    <div class="row"><span>Dibayar</span><span>{format_money(@transaction.amount_paid)}</span></div>
+    <div class="row"><span>Kembalian</span><span>{format_money(@transaction.change_due)}</span></div>
+
+    <p class="status">{status_label(@transaction.status)}</p>
+
+    <p class="foot">Terima kasih</p>
+
+    <div class="noprint">
+      <button type="button" onclick="window.print()">Cetak</button>
+    </div>
+
+    <script>
+      window.addEventListener("load", function () { window.print(); });
+    </script>
+  </body>
+</html>

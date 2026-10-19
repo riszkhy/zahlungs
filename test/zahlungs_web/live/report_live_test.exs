@@ -92,4 +92,42 @@ defmodule ZahlungsWeb.ReportLiveTest do
       assert response =~ "Out of stock"
     end
   end
+
+  describe "/reports/services" do
+    test "redirects authenticated non-admins to /", %{conn: conn} do
+      conn = conn |> log_in_user(user_fixture()) |> get("/reports/services")
+      assert redirected_to(conn) == "/"
+    end
+
+    test "shows this period's services to admins", %{conn: conn} do
+      Zahlungs.ServicesFixtures.assign_account(
+        Zahlungs.StoresFixtures.default_store(),
+        Zahlungs.ServicesFixtures.deposit_account_fixture()
+      )
+
+      cashier = Zahlungs.ShiftsFixtures.user_on_shift_fixture()
+
+      tx =
+        Zahlungs.ServicesFixtures.service_fixture(
+          cashier,
+          Zahlungs.ServicesFixtures.service_product_fixture()
+        )
+
+      {:ok, _} = Zahlungs.Services.mark_success(tx, cashier, nil)
+
+      response =
+        conn |> log_in_user(admin_fixture()) |> get("/reports/services") |> html_response(200)
+
+      assert response =~ "Laporan layanan"
+      assert response =~ "Rp 12.000,00"
+      assert response =~ "Rp 1.850,00"
+    end
+
+    test "the sales report points to it", %{conn: conn} do
+      response =
+        conn |> log_in_user(admin_fixture()) |> get("/reports/sales") |> html_response(200)
+
+      assert response =~ ~s(href="/reports/services")
+    end
+  end
 end

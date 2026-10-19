@@ -133,7 +133,7 @@ defmodule ZahlungsWeb.StoreLive.Index do
       <.header>{@page_title}</.header>
 
       <.form for={@form} id="store-form" phx-change="validate" phx-submit="save">
-        <.store_fields form={@form} />
+        <.store_fields form={@form} deposit_account_options={Zahlungs.Deposits.account_options()} />
 
         <div class="mt-6">
           <.button phx-disable-with="Menyimpan...">Simpan</.button>

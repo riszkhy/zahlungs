@@ -25,6 +25,8 @@ defmodule Zahlungs.Application do
       {Phoenix.PubSub, name: Zahlungs.PubSub},
       # Counts failed logins to slow down password guessing
       ZahlungsWeb.LoginThrottle,
+      # Sends PPOB services to their provider in the background
+      {Task.Supervisor, name: Zahlungs.Services.TaskSupervisor},
       # Start the Endpoint (http/https)
       ZahlungsWeb.Endpoint
       # Start a worker by calling: Zahlungs.Worker.start_link(arg)
@@ -37,6 +39,12 @@ defmodule Zahlungs.Application do
     children =
       if Application.get_env(:zahlungs, :prune_login_log, true),
         do: children ++ [Zahlungs.Accounts.LoginPruner],
+        else: children
+
+    # Settles PPOB services still pending at the provider; off in tests too.
+    children =
+      if Application.get_env(:zahlungs, :service_status_checker, true),
+        do: children ++ [Zahlungs.Services.StatusChecker],
         else: children
 
     opts = [strategy: :one_for_one, name: Zahlungs.Supervisor]

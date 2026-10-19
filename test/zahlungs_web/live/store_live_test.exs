@@ -7,6 +7,7 @@ defmodule ZahlungsWeb.StoreLiveTest do
 
   import Zahlungs.AccountsFixtures
   import Zahlungs.StoresFixtures
+  import Zahlungs.ServicesFixtures
   import ZahlungsWeb.LiveDriver
 
   alias Zahlungs.{Accounts, Stores}
@@ -77,6 +78,31 @@ defmodule ZahlungsWeb.StoreLiveTest do
 
       assert flash(socket, :info) == "Toko disimpan."
       assert Stores.get_store!(store.id).name == "Nama Baru"
+    end
+
+    test "picks the deposit account the store sells services from", %{admin: admin} do
+      store = store_fixture()
+      active = deposit_account_fixture()
+      inactive = deposit_account_fixture(%{active: false})
+
+      socket = mount_live(StoreLive.Index, admin, action: :edit, params: %{"id" => "#{store.id}"})
+      rendered = html(socket)
+
+      assert rendered =~ "Akun deposit"
+      assert rendered =~ active.name
+      refute rendered =~ inactive.name
+
+      socket =
+        event(socket, "save", %{
+          "store" => %{
+            "name" => store.name,
+            "code" => store.code,
+            "deposit_account_id" => active.id
+          }
+        })
+
+      assert flash(socket, :info) == "Toko disimpan."
+      assert Stores.get_store!(store.id).deposit_account_id == active.id
     end
 
     test "deactivates and reactivates a store", %{admin: admin} do

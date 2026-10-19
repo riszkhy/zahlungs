@@ -64,6 +64,7 @@ defmodule ZahlungsWeb.ShiftLive.Index do
   defp movement_label("cash_drop"), do: "Setor brankas"
   defp movement_label("cash_in"), do: "Uang masuk"
   defp movement_label("consignment_payment"), do: "Bayar konsinyasi"
+  defp movement_label("deposit_topup"), do: "Isi deposit"
   defp movement_label("refund"), do: "Refund retur"
   defp movement_label(other), do: other
 
@@ -146,6 +147,10 @@ defmodule ZahlungsWeb.ShiftLive.Index do
         <div class="flex justify-between"><dt>Opening cash</dt><dd>{format_money(@shift.opening_cash)}</dd></div>
         <div class="flex justify-between"><dt>Transactions</dt><dd>{@summary.transactions}</dd></div>
         <div class="flex justify-between"><dt>Cash sales</dt><dd>{format_money(@summary.cash_total)}</dd></div>
+        <div :if={@summary.service_count > 0} class="flex justify-between">
+          <dt>Layanan tunai</dt>
+          <dd>{format_money(@summary.service_cash_total)}</dd>
+        </div>
         <div class="flex justify-between text-gray-500">
           <dt>Non-cash sales (QRIS/kartu/transfer)</dt><dd>{format_money(@summary.noncash_total)}</dd>
         </div>

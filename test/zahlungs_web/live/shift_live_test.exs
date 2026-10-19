@@ -9,6 +9,7 @@ defmodule ZahlungsWeb.ShiftLiveTest do
   import Zahlungs.StoresFixtures
   import Zahlungs.CatalogFixtures
   import Zahlungs.ShiftsFixtures
+  import Zahlungs.ServicesFixtures
   import ZahlungsWeb.LiveDriver
 
   alias Zahlungs.{Sales, Shifts}
@@ -118,6 +119,23 @@ defmodule ZahlungsWeb.ShiftLiveTest do
       assert flash(socket, :error) == "You can only view your own shifts."
       assert live_redirect(socket) == "/shifts"
       assert is_nil(socket.assigns[:summary])
+    end
+  end
+
+  describe "services in the shift detail" do
+    test "the summary lists service cash, so it adds up to the expected cash" do
+      assign_account(default_store(), deposit_account_fixture())
+      cashier = user_on_shift_fixture()
+      shift = Shifts.current_shift(cashier)
+      tx = service_fixture(cashier, service_product_fixture())
+      {:ok, _} = Zahlungs.Services.mark_success(tx, cashier, nil)
+
+      rendered =
+        ShiftLive.Index
+        |> mount_live(cashier, action: :show, params: %{"id" => "#{shift.id}"})
+        |> html()
+
+      assert rendered =~ ~r{Layanan tunai</dt>\s*<dd>Rp 12\.000,00}
     end
   end
 end

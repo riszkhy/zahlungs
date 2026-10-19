@@ -9,6 +9,10 @@ defmodule ZahlungsWeb.StoreLive.FormFields do
 
   attr :form, Phoenix.HTML.Form, required: true
 
+  attr :deposit_account_options, :list,
+    default: [],
+    doc: "active deposit accounts as `{name, id}`, for the PPOB services the store sells"
+
   def store_fields(assigns) do
     ~H"""
     <.input field={@form[:name]} type="text" label="Nama" required />
@@ -20,6 +24,13 @@ defmodule ZahlungsWeb.StoreLive.FormFields do
       type="select"
       label="Zona waktu"
       options={[{"WIB (UTC+7)", 7}, {"WITA (UTC+8)", 8}, {"WIT (UTC+9)", 9}]}
+    />
+    <.input
+      field={@form[:deposit_account_id]}
+      type="select"
+      label="Akun deposit (untuk layanan PPOB)"
+      prompt="— Belum ada —"
+      options={@deposit_account_options}
     />
 
     <div id="store-location" phx-hook="StoreLocation" class="mt-2 grid grid-cols-2 gap-3">

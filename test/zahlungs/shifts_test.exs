@@ -7,6 +7,7 @@ defmodule Zahlungs.ShiftsTest do
   import Zahlungs.StoresFixtures
   import Zahlungs.CatalogFixtures
   import Zahlungs.ShiftsFixtures
+  import Zahlungs.ServicesFixtures
 
   test "open_shift/2 opens a shift and current_shift/1 finds it" do
     user = user_fixture()
@@ -270,6 +271,54 @@ defmodule Zahlungs.ShiftsTest do
 
       assert_cash(closed, "102000")
       assert Shifts.list_cash_movements(admin_shift) == []
+    end
+  end
+
+  describe "services in the drawer" do
+    setup do
+      assign_account(default_store(), deposit_account_fixture())
+      cashier = user_fixture()
+      %{cashier: cashier, shift: shift_fixture(cashier, "50000")}
+    end
+
+    defp priced(cost, margin),
+      do: service_product_fixture(%{cost: cost, margin_type: "amount", margin_value: margin})
+
+    defp money(value), do: Decimal.new(value)
+
+    test "processing and successful cash services count; failed and non-cash ones do not", ctx do
+      done = service_fixture(ctx.cashier, priced("10150", "1850"))
+      {:ok, _} = Zahlungs.Services.mark_success(done, ctx.cashier, nil)
+
+      _processing = service_fixture(ctx.cashier, priced("50150", "2350"))
+
+      failed = service_fixture(ctx.cashier, priced("25000", "1500"))
+      {:ok, _} = Zahlungs.Services.mark_failed(failed, ctx.cashier, "gagal di penyedia")
+
+      qris = service_fixture(ctx.cashier, priced("10000", "1800"), %{"payment_method" => "qris"})
+      {:ok, _} = Zahlungs.Services.mark_success(qris, ctx.cashier, nil)
+
+      # 50.000 float + 12.000 (done) + 52.500 (processing)
+      assert Decimal.equal?(Shifts.expected_cash(ctx.shift), money("114500"))
+
+      summary = Shifts.shift_summary(ctx.shift)
+      assert summary.service_count == 3
+      assert Decimal.equal?(summary.service_total, money("76300"))
+      assert Decimal.equal?(summary.service_cash_total, money("64500"))
+      assert Decimal.equal?(summary.expected_cash, money("114500"))
+    end
+
+    test "a shift with a service still processing cannot be closed", ctx do
+      tx = service_fixture(ctx.cashier, priced("10150", "1850"))
+
+      assert Shifts.close_shift(ctx.shift, "62000") == {:error, :services_processing}
+      assert Zahlungs.Repo.get!(Shifts.Shift, ctx.shift.id).status == "open"
+
+      {:ok, _} = Zahlungs.Services.mark_success(tx, ctx.cashier, nil)
+
+      assert {:ok, closed} = Shifts.close_shift(ctx.shift, "62000")
+      assert Decimal.equal?(closed.expected_cash, money("62000"))
+      assert Decimal.equal?(closed.variance, money("0"))
     end
   end
 end

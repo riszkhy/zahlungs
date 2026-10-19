@@ -126,6 +126,7 @@ defmodule ZahlungsWeb.Layouts do
   defp cashier_links do
     [
       {"Cashier", ~p"/cashier"},
+      {"Layanan", ~p"/services"},
       {"Sales", ~p"/sales"},
       {"Shifts", ~p"/shifts"},
       {"Catalog", ~p"/catalog"}
@@ -141,9 +142,12 @@ defmodule ZahlungsWeb.Layouts do
       {"Daftar Cabang", ~p"/admin/stores/register"},
       {"Riwayat login", ~p"/admin/logins"},
       {"Suppliers", ~p"/admin/suppliers"},
+      {"Produk layanan", ~p"/admin/services"},
+      {"Deposit", ~p"/admin/deposits"},
       {"Reports", ~p"/reports/sales"},
       {"Stock", ~p"/reports/stock"},
-      {"Consignment", ~p"/reports/consignment"}
+      {"Consignment", ~p"/reports/consignment"},
+      {"Laporan layanan", ~p"/reports/services"}
     ]
   end
 end

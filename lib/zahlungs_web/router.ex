@@ -24,9 +24,13 @@ defmodule ZahlungsWeb.Router do
   end
 
   # Other scopes may use custom stacks.
-  # scope "/api", ZahlungsWeb do
-  #   pipe_through :api
-  # end
+  # PPOB providers report results here; the token picks the deposit account
+  # and the adapter checks the signature (no session, no CSRF token).
+  scope "/api", ZahlungsWeb do
+    pipe_through :api
+
+    post "/ppob/callback/:token", PpobCallbackController, :create
+  end
 
   # Enables LiveDashboard only for development
   #
@@ -71,6 +75,7 @@ defmodule ZahlungsWeb.Router do
       live "/home", HomeLive, :index
       live "/catalog", CatalogLive, :index
       live "/cashier", CashierLive, :index
+      live "/services", ServiceLive.Index, :index
       live "/sales", SalesLive.Index, :index
       live "/sales/:id", SalesLive.Index, :show
       live "/shifts", ShiftLive.Index, :index
@@ -78,6 +83,7 @@ defmodule ZahlungsWeb.Router do
     end
 
     get "/sales/:id/receipt", ReceiptController, :show
+    get "/services/:id/receipt", ServiceReceiptController, :show
 
     get "/users/settings", UserSettingsController, :edit
     put "/users/settings", UserSettingsController, :update
@@ -124,9 +130,18 @@ defmodule ZahlungsWeb.Router do
       live "/admin/suppliers/new", SupplierLive.Index, :new
       live "/admin/suppliers/:id/edit", SupplierLive.Index, :edit
 
+      live "/admin/services", ServiceProductLive.Index, :index
+      live "/admin/services/new", ServiceProductLive.Index, :new
+      live "/admin/services/:id/edit", ServiceProductLive.Index, :edit
+      live "/admin/deposits", DepositLive.Index, :index
+      live "/admin/deposits/new", DepositLive.Index, :new
+      live "/admin/deposits/:id", DepositLive.Index, :show
+      live "/admin/deposits/:id/edit", DepositLive.Index, :edit
+
       live "/reports/sales", ReportLive.Index, :index
       live "/reports/stock", ReportLive.Stock, :index
       live "/reports/consignment", ReportLive.Consignment, :index
+      live "/reports/services", ReportLive.Services, :index
     end
   end
 
