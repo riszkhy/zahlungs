@@ -176,4 +176,122 @@ defmodule Zahlungs.ServicesApiTest do
       assert Decimal.equal?(tx.price, d("248000"))
     end
   end
+
+  describe "sending and the provider's answers" do
+    setup do
+      store = api_store_fixture()
+
+      %{
+        store: store,
+        cashier: user_on_shift_fixture(),
+        pulsa: service_product_fixture(%{provider_code: "TSEL10"}),
+        token:
+          service_product_fixture(%{
+            category: "token_pln",
+            provider_code: "PLN20",
+            cost: "50150",
+            margin_value: "2350"
+          })
+      }
+    end
+
+    defp sell(cashier, product, number, extra \\ %{}) do
+      {:ok, %{price: price}} = Services.price_for(product, nil)
+
+      {:ok, tx} =
+        Services.record(
+          cashier,
+          product.id,
+          Map.merge(
+            %{
+              "customer_ref" => number,
+              "payment_method" => "cash",
+              "amount_paid" => Decimal.to_string(price)
+            },
+            extra
+          )
+        )
+
+      tx
+    end
+
+    defp reload(tx), do: Repo.get!(Services.Transaction, tx.id)
+
+    test "pays at once: success keeps the token, failure the message", ctx do
+      done = ctx.cashier |> sell(ctx.pulsa, "081234567891") |> reload()
+
+      assert {done.status, done.token_sn, done.provider_ref} ==
+               {"success", "SN" <> done.ref_id, "FAKE-" <> done.ref_id}
+
+      assert done.sent_at && done.resolved_at
+
+      token = ctx.cashier |> sell(ctx.token, "12345678901") |> reload()
+      assert token.status == "success"
+      assert token.token_sn =~ ~r/^\d{20}$/
+
+      failed = ctx.cashier |> sell(ctx.pulsa, "081234567890") |> reload()
+      assert {failed.status, failed.provider_message} == {"failed", "Nomor tidak aktif"}
+      refute failed.failed_after_shift_close
+    end
+
+    test "pending stays processing; a timeout too", ctx do
+      pending = ctx.cashier |> sell(ctx.pulsa, "081234567899") |> reload()
+      assert {pending.status, pending.provider_ref} == {"processing", "FAKE-" <> pending.ref_id}
+      assert pending.sent_at
+
+      timeout = ctx.cashier |> sell(ctx.pulsa, "081234567897") |> reload()
+
+      assert {timeout.status, timeout.provider_message} ==
+               {"processing", "Belum ada jawaban penyedia"}
+    end
+
+    test "a payment is sent once", ctx do
+      tx = sell(ctx.cashier, ctx.pulsa, "081234567899")
+      ref_id = tx.ref_id
+      assert_received {:fake_provider, :pay, ^ref_id}
+
+      assert Services.send_payment(tx.id) == :ok
+      refute_received {:fake_provider, :pay, ^ref_id}
+    end
+
+    test "a late answer for a settled service is ignored", ctx do
+      tx = sell(ctx.cashier, ctx.pulsa, "081234567899")
+
+      assert {:ok, %Services.Transaction{status: "failed"}} =
+               Services.apply_result(tx.id, %{status: :failed, message: "Gagal di penyedia"})
+
+      assert Services.apply_result(tx.id, %{status: :success, token_sn: "X", provider_ref: "Y"}) ==
+               {:ok, :already_final}
+
+      assert reload(tx).status == "failed"
+    end
+
+    test "changes are broadcast to the store", ctx do
+      :ok = Services.subscribe(ctx.store.id)
+      tx = sell(ctx.cashier, ctx.pulsa, "081234567891")
+      id = tx.id
+
+      assert_receive {:service_changed, ^id}
+    end
+
+    test "api services can't be marked by hand", ctx do
+      tx = sell(ctx.cashier, ctx.pulsa, "081234567899")
+
+      assert Services.mark_success(tx, ctx.cashier, nil) == {:error, :not_manual}
+      assert Services.mark_failed(tx, ctx.cashier, "salah") == {:error, :not_manual}
+    end
+
+    test "a bill goes out with its inquiry", ctx do
+      bill = api_product_fixture()
+      {:ok, inquiry} = Services.inquire(ctx.cashier, bill.id, "530011223341")
+
+      {:ok, tx} =
+        Services.record(ctx.cashier, bill.id, %{
+          "inquiry_id" => inquiry.id,
+          "amount_paid" => "251000"
+        })
+
+      assert reload(tx).status == "success"
+    end
+  end
 end

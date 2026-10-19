@@ -360,11 +360,173 @@ defmodule Zahlungs.Services do
     :ok
   end
 
+  ## Sending (Fase 1)
+
   @doc """
-  Sends an api service to its provider. (Fase 1, filled in with the provider's
-  answers in a later step.)
+  Sends an api service to its provider, once: only a `processing` api service
+  with no `sent_at` is sent, and `sent_at` is committed before the call, so a
+  crash afterwards leaves a service the status checker asks about instead of
+  paying again. The answer goes through `apply_result/2`; a timeout or network
+  error leaves it pending.
   """
-  def send_payment(_transaction_id), do: :ok
+  def send_payment(transaction_id) do
+    case claim_for_sending(transaction_id) do
+      {:ok, transaction, adapter, credentials, request} ->
+        result =
+          case adapter.pay(credentials, request) do
+            {:ok, result} ->
+              result
+
+            {:error, _} ->
+              %{status: :pending, provider_ref: nil, message: "Belum ada jawaban penyedia"}
+          end
+
+        apply_result(transaction.id, result)
+        :ok
+
+      {:no_provider, transaction} ->
+        apply_result(transaction.id, %{
+          status: :pending,
+          provider_ref: nil,
+          message: "Kredensial penyedia tidak bisa dibaca. Minta admin mengisinya ulang."
+        })
+
+        :ok
+
+      :skip ->
+        :ok
+    end
+  end
+
+  defp claim_for_sending(transaction_id) do
+    fn -> transaction_id |> lock_transaction() |> claim() end
+    |> Repo.transaction()
+    |> case do
+      {:ok, claimed} -> claimed
+      _ -> :skip
+    end
+  end
+
+  # Inside claim_for_sending/1's transaction, on the locked row.
+  defp claim(%Transaction{status: "processing", channel: "api", sent_at: nil} = transaction) do
+    enter_store_organization(transaction)
+    account = Deposits.get_account!(transaction.deposit_account_id)
+
+    case Deposits.provider(account) do
+      {:ok, adapter, credentials} ->
+        {:ok, sent} = transaction |> Ecto.Changeset.change(sent_at: now()) |> Repo.update()
+        {:ok, sent, adapter, credentials, provider_request(sent)}
+
+      _ ->
+        {:no_provider, transaction}
+    end
+  end
+
+  defp claim(_transaction), do: :skip
+
+  @doc false
+  # What the provider is sent about a service (pay and status alike).
+  def provider_request(%Transaction{} = transaction) do
+    product = Repo.get!(Product, transaction.service_product_id)
+
+    inquiry_ref =
+      transaction.service_inquiry_id &&
+        Repo.one(
+          from i in Inquiry, where: i.id == ^transaction.service_inquiry_id, select: i.inquiry_ref
+        )
+
+    %{
+      ref_id: transaction.ref_id,
+      product_code: product.provider_code,
+      customer_ref: transaction.customer_ref,
+      inquiry_ref: inquiry_ref
+    }
+  end
+
+  # Background work has no user: the store says whose data this is.
+  defp enter_store_organization(%Transaction{store_id: store_id}) do
+    store = Repo.get!(Zahlungs.Stores.Store, store_id, skip_org_id: true)
+    Repo.put_org_id(store.organization_id)
+  end
+
+  defp lock_transaction(id) do
+    Repo.one(from t in Transaction, where: t.id == ^id, lock: "FOR UPDATE")
+  end
+
+  @doc """
+  The one way an api service gets the provider's answer — from `pay`, a
+  callback or a status check. Locks the row; only a `processing` service
+  changes, so a late or repeated answer is `{:ok, :already_final}`.
+
+  A failure on a shift already closed is flagged `failed_after_shift_close`:
+  the closed shift's figures stay as they were (see `shift_totals/1`).
+  Every change is broadcast to the store (`subscribe/1`).
+  """
+  def apply_result(transaction_id, result) do
+    fn ->
+      case lock_transaction(transaction_id) do
+        %Transaction{status: "processing"} = transaction ->
+          {:ok, updated} =
+            transaction
+            |> Ecto.Changeset.change(result_changes(transaction, result))
+            |> Repo.update()
+
+          updated
+
+        _ ->
+          :already_final
+      end
+    end
+    |> Repo.transaction()
+    |> tap(fn
+      {:ok, %Transaction{} = updated} -> broadcast(updated)
+      _ -> :ok
+    end)
+  end
+
+  defp result_changes(_transaction, %{status: :success} = result) do
+    %{
+      status: "success",
+      token_sn: result |> Map.get(:token_sn) |> clip(64),
+      provider_ref: result |> Map.get(:provider_ref) |> clip(255),
+      resolved_at: now(),
+      last_checked_at: now()
+    }
+  end
+
+  defp result_changes(transaction, %{status: :failed} = result) do
+    %{
+      status: "failed",
+      provider_message: result |> Map.get(:message, "Gagal di penyedia") |> clip(255),
+      resolved_at: now(),
+      last_checked_at: now(),
+      failed_after_shift_close: shift_closed?(transaction)
+    }
+  end
+
+  defp result_changes(transaction, %{status: :pending} = result) do
+    %{
+      provider_ref: clip(Map.get(result, :provider_ref), 255) || transaction.provider_ref,
+      provider_message: clip(Map.get(result, :message), 255) || transaction.provider_message,
+      last_checked_at: now()
+    }
+  end
+
+  defp shift_closed?(%Transaction{shift_id: shift_id}) do
+    Repo.exists?(from s in Shift, where: s.id == ^shift_id and s.status == "closed")
+  end
+
+  defp clip(nil, _max), do: nil
+  defp clip(value, max), do: value |> to_string() |> String.slice(0, max)
+
+  @doc "Subscribes to `{:service_changed, transaction_id}` for a store's services."
+  def subscribe(store_id), do: Phoenix.PubSub.subscribe(Zahlungs.PubSub, topic(store_id))
+
+  defp broadcast(%Transaction{id: id, store_id: store_id}) do
+    Phoenix.PubSub.broadcast(Zahlungs.PubSub, topic(store_id), {:service_changed, id})
+  end
+
+  defp topic(store_id), do: "services:store:#{store_id}"
 
   ## Results
 
@@ -394,7 +556,7 @@ defmodule Zahlungs.Services do
     Repo.transaction(fn ->
       locked = Repo.one!(from t in Transaction, where: t.id == ^id, lock: "FOR UPDATE")
 
-      case apply_result(locked, user, attrs) do
+      case apply_mark(locked, user, attrs) do
         {:ok, transaction} -> transaction
         {:error, reason} -> Repo.rollback(reason)
       end
@@ -402,8 +564,11 @@ defmodule Zahlungs.Services do
   end
 
   # `locked` is the row as the database has it, under its lock.
-  defp apply_result(locked, user, attrs) do
+  defp apply_mark(locked, user, attrs) do
     cond do
+      locked.channel == "api" ->
+        {:error, :not_manual}
+
       locked.user_id != user.id and user.role != "admin" ->
         {:error, :forbidden}
 
