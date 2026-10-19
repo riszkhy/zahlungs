@@ -14,6 +14,8 @@ defmodule Zahlungs.Services.Product do
     field :name, :string
     field :category, :string
     field :operator, :string
+    # The vendor's code for this product (Fase 1, sold through an api account).
+    field :provider_code, :string
     # Fixed-value products: what the provider takes. Tagihan PLN: the provider's
     # fee on top of the bill.
     field :cost, :decimal, default: Decimal.new(0)
@@ -37,10 +39,20 @@ defmodule Zahlungs.Services.Product do
   @doc false
   def changeset(product, attrs) do
     product
-    |> cast(attrs, [:name, :category, :operator, :cost, :margin_type, :margin_value, :active])
+    |> cast(attrs, [
+      :name,
+      :category,
+      :operator,
+      :provider_code,
+      :cost,
+      :margin_type,
+      :margin_value,
+      :active
+    ])
     |> validate_required([:name, :category, :cost, :margin_type, :margin_value])
     |> validate_length(:name, max: 160)
     |> validate_length(:operator, max: 60)
+    |> validate_length(:provider_code, max: 60)
     |> validate_inclusion(:category, @categories)
     |> validate_inclusion(:margin_type, @margin_types)
     |> validate_number(:margin_value, greater_than_or_equal_to: 0)

@@ -71,6 +71,42 @@ defmodule Zahlungs.ServicesTest do
       assert_price(Services.price_for(percent, d("245000")), "247450", "246500")
     end
 
+    test "a bill of several sheets pays the admin and provider fees per sheet" do
+      fixed =
+        product(
+          category: "tagihan_pln",
+          cost: d("1500"),
+          margin_type: "amount",
+          margin_value: d("3000")
+        )
+
+      # 735.000 + 3 × 3.000; cost 735.000 + 3 × 1.500
+      assert_price(Services.price_for(fixed, d("735000"), 3), "744000", "739500")
+
+      percent =
+        product(
+          category: "tagihan_pln",
+          cost: d("1500"),
+          margin_type: "percent",
+          margin_value: d("1")
+        )
+
+      # 1% of the whole bill, however many sheets
+      assert_price(Services.price_for(percent, d("735000"), 3), "742350", "739500")
+    end
+
+    test "sheets don't change a fixed-value product" do
+      token =
+        product(
+          category: "token_pln",
+          cost: d("50150"),
+          margin_type: "amount",
+          margin_value: d("2350")
+        )
+
+      assert_price(Services.price_for(token, nil, 3), "52500", "50150")
+    end
+
     test "a bill without its amount has no price" do
       bill =
         product(
@@ -396,6 +432,16 @@ defmodule Zahlungs.ServicesTest do
 
       assert {:ok, _bill} =
                Services.create_product(%{name: "Tagihan PLN", category: "tagihan_pln", cost: "0"})
+    end
+
+    test "keeps the vendor's product code, up to 60 characters" do
+      product = service_product_fixture(%{provider_code: "PLNPASCA"})
+      assert product.provider_code == "PLNPASCA"
+
+      assert {:error, changeset} =
+               Services.update_product(product, %{provider_code: String.duplicate("X", 61)})
+
+      assert errors_on(changeset)[:provider_code]
     end
 
     test "a deleted product is no longer listed or found" do

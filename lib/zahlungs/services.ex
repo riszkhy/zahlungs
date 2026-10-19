@@ -11,8 +11,9 @@ defmodule Zahlungs.Services do
 
     * pulsa, paket data, token PLN: cost = the product's cost,
       price = cost + margin(cost).
-    * tagihan PLN: cost = bill + provider fee (the product's cost),
-      price = bill + margin(bill) — the margin is the admin fee.
+    * tagihan PLN: cost = bill + provider fee × sheets (the product's cost),
+      price = bill + admin fee × sheets (a rupiah margin), or bill + percent of
+      the bill. A bill entered by hand (Fase 0) is one sheet.
 
   ## Transactions
 
@@ -94,13 +95,16 @@ defmodule Zahlungs.Services do
   The price to the customer and the cost to the shop, for a product and (for
   tagihan PLN) the bill. A bill without a positive amount has no price.
   """
-  def price_for(%Product{} = product, bill_amount) do
+  def price_for(%Product{} = product, bill_amount, sheets \\ 1) do
     if Product.bill?(product) do
       bill = to_decimal(bill_amount)
 
       if Decimal.gt?(bill, 0) do
         {:ok,
-         %{price: Decimal.add(bill, margin(product, bill)), cost: Decimal.add(bill, product.cost)}}
+         %{
+           price: Decimal.add(bill, bill_margin(product, bill, sheets)),
+           cost: Decimal.add(bill, Decimal.mult(product.cost, sheets))
+         }}
       else
         {:error, :bill_required}
       end
@@ -400,6 +404,12 @@ defmodule Zahlungs.Services do
     ts = Calendar.strftime(LocalTime.now(store), "%y%m%d%H%M%S")
     "#{store.code}-LYN#{ts}#{Base.encode16(:crypto.strong_rand_bytes(2))}"
   end
+
+  # A bill's admin fee is per sheet (month); a percent is of the whole bill.
+  defp bill_margin(%Product{margin_type: "percent"} = product, bill, _sheets),
+    do: margin(product, bill)
+
+  defp bill_margin(%Product{margin_value: fee}, _bill, sheets), do: Decimal.mult(fee, sheets)
 
   defp margin(%Product{margin_type: "percent", margin_value: percent}, base) do
     base |> Decimal.mult(percent) |> Decimal.div(100) |> Decimal.round(0, :ceiling)
