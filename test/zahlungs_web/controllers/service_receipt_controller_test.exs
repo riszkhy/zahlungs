@@ -67,6 +67,31 @@ defmodule ZahlungsWeb.ServiceReceiptControllerTest do
     assert response =~ "Diproses"
   end
 
+  test "a bill paid through the provider shows the customer, period and reference",
+       %{conn: conn, cashier: cashier} do
+    api_store_fixture()
+    bill = api_product_fixture()
+    {:ok, inquiry} = Services.inquire(cashier, bill.id, "530011223331")
+
+    {:ok, tx} =
+      Services.record(cashier, bill.id, %{"inquiry_id" => inquiry.id, "amount_paid" => "750000"})
+
+    tx = Services.get_transaction!(scope(cashier), tx.id)
+    assert tx.status == "success"
+
+    response =
+      conn |> log_in_user(cashier) |> get("/services/#{tx.id}/receipt") |> html_response(200)
+
+    assert response =~ "PELANGGAN 3331"
+    assert response =~ "AGU–OKT 2026"
+    assert response =~ "3 lembar"
+    assert response =~ "Ref penyedia"
+    assert response =~ tx.provider_ref
+    assert tx.provider_ref =~ "FAKE-"
+    assert response =~ "Rp 735.000,00"
+    assert response =~ "Rp 744.000,00"
+  end
+
   test "another store's service is not found", %{conn: conn, cashier: cashier} do
     tx = service_fixture(cashier, service_product_fixture())
     elsewhere = user_fixture(%{store_id: store_fixture().id})

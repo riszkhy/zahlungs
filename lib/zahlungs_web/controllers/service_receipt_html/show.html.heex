@@ -33,10 +33,22 @@
 
     <div class="row b"><span>{@transaction.product_name}</span></div>
     <div class="row"><span>Nomor tujuan</span><span>{group_digits(@transaction.customer_ref)}</span></div>
+    <div :if={@transaction.customer_name} class="row">
+      <span>Nama</span><span>{@transaction.customer_name}</span>
+    </div>
+    <div :if={@transaction.period} class="row">
+      <span>Periode</span><span>{@transaction.period}</span>
+    </div>
+    <div :if={@transaction.sheets && @transaction.customer_name} class="row">
+      <span>Jumlah</span><span>{@transaction.sheets} lembar</span>
+    </div>
     <div :if={@transaction.bill_amount} class="row">
       <span>Tagihan</span><span>{format_money(@transaction.bill_amount)}</span>
     </div>
     <p :if={@transaction.token_sn} class="token">{@transaction.token_sn}</p>
+    <div :if={@transaction.provider_ref} class="row">
+      <span>Ref penyedia</span><span>{@transaction.provider_ref}</span>
+    </div>
 
     <div class="line"></div>
 
