@@ -23,6 +23,7 @@ defmodule Zahlungs.Services do
   """
 
   import Ecto.Query, warn: false
+  require Logger
   alias Zahlungs.Repo
 
   alias Zahlungs.Accounts.User
@@ -489,6 +490,7 @@ defmodule Zahlungs.Services do
       status: "success",
       token_sn: result |> Map.get(:token_sn) |> clip(64),
       provider_ref: result |> Map.get(:provider_ref) |> clip(255),
+      provider_message: nil,
       resolved_at: now(),
       last_checked_at: now()
     }
@@ -584,13 +586,22 @@ defmodule Zahlungs.Services do
         from t in Transaction,
           where:
             t.channel == "api" and t.status == "processing" and
-              (is_nil(t.sent_at) or is_nil(t.last_checked_at) or t.last_checked_at < ^due),
+              (is_nil(t.sent_at) or coalesce(t.last_checked_at, t.sent_at) < ^due),
           order_by: t.id,
           select: t.id
       )
 
-    Enum.each(ids, &check_status/1)
+    Enum.each(ids, &check_one/1)
     length(ids)
+  end
+
+  # A service that raises (an adapter meeting an answer it doesn't expect) is
+  # logged and tried again next round; the others are still checked.
+  defp check_one(id) do
+    check_status(id)
+  rescue
+    error ->
+      Logger.error("Status check of service #{id} failed: " <> Exception.message(error))
   end
 
   ## Callbacks (Fase 1)
@@ -694,7 +705,7 @@ defmodule Zahlungs.Services do
   # `locked` is the row as the database has it, under its lock.
   defp apply_mark(locked, user, attrs) do
     cond do
-      locked.channel == "api" ->
+      locked.channel == "api" and not (user.role == "admin" and awaiting_too_long?(locked)) ->
         {:error, :not_manual}
 
       locked.user_id != user.id and user.role != "admin" ->
@@ -710,6 +721,21 @@ defmodule Zahlungs.Services do
         |> Repo.update()
     end
   end
+
+  @settle_by_hand_after 10 * 60
+
+  @doc """
+  Whether an api service has waited for the provider so long (#{div(@settle_by_hand_after, 60)}
+  minutes since it was recorded) that an admin may mark it by hand, after
+  looking it up in the provider's own app. A failure marked so goes to "Perlu
+  dikembalikan" like any other.
+  """
+  def awaiting_too_long?(transaction, now \\ NaiveDateTime.utc_now())
+
+  def awaiting_too_long?(%Transaction{channel: "api", status: "processing"} = transaction, now),
+    do: NaiveDateTime.diff(now, transaction.inserted_at) >= @settle_by_hand_after
+
+  def awaiting_too_long?(_transaction, _now), do: false
 
   ## Reading
 
@@ -732,7 +758,11 @@ defmodule Zahlungs.Services do
   @doc """
   What a shift's services add up to: `count`, `total` and `cash_total` (the
   cash that went into the drawer). Processing and successful services count —
-  the money was taken; failed ones don't — it was handed back.
+  the money was taken. A failed manual service doesn't — it was handed back
+  when marked. A failed api service counts until its refund is confirmed from
+  this shift's drawer; one refunded from another drawer (a later shift, a
+  colleague's) keeps counting here, flagged `failed_after_shift_close`, and is
+  a `refund` cash-out there (see `confirm_refund/2`).
   """
   def shift_totals(%Shift{id: shift_id}) do
     row =
@@ -741,7 +771,9 @@ defmodule Zahlungs.Services do
           where:
             t.shift_id == ^shift_id and
               (t.status in ["processing", "success"] or
-                 (t.status == "failed" and t.failed_after_shift_close)),
+                 (t.status == "failed" and
+                    (t.failed_after_shift_close or
+                       (t.channel == "api" and is_nil(t.refunded_at))))),
           select: %{
             count: count(t.id),
             total: coalesce(sum(t.price), 0),
@@ -848,11 +880,12 @@ defmodule Zahlungs.Services do
 
   @doc """
   A cashier confirms the money of a failed api service went back to the
-  customer, on their open shift in the service's store. A cash service that
-  failed after its shift closed is booked as a `refund` cash-out on that open
-  shift (the closed shift still counts it); otherwise nothing moves in a
-  drawer — a failure on an open shift was never counted, and non-cash is
-  refunded the way it was paid.
+  customer, on their open shift in the service's store. Cash refunded on the
+  service's own shift simply leaves that drawer (the shift stops counting it).
+  Cash refunded on any other shift — a later one, or a colleague's — is booked
+  as a `refund` cash-out there, and the service keeps counting in its own
+  shift (`failed_after_shift_close`). Non-cash is refunded the way it was
+  paid, never from a drawer.
 
   Returns `{:ok, transaction}` or
   `{:error, :not_refundable | :no_open_shift | :other_store}`.
@@ -879,9 +912,9 @@ defmodule Zahlungs.Services do
        ) do
     with {:ok, shift} <- Shifts.lock_current_shift(user),
          :ok <- same_store(shift, transaction),
-         :ok <- refund_from_drawer(shift, transaction) do
+         {:ok, changes} <- refund_from_drawer(shift, transaction) do
       transaction
-      |> Ecto.Changeset.change(refunded_at: now(), refunded_by_id: user.id)
+      |> Ecto.Changeset.change([refunded_at: now(), refunded_by_id: user.id] ++ changes)
       |> Repo.update()
     end
   end
@@ -891,21 +924,20 @@ defmodule Zahlungs.Services do
   defp same_store(%Shift{store_id: store_id}, %Transaction{store_id: store_id}), do: :ok
   defp same_store(_shift, _transaction), do: {:error, :other_store}
 
-  defp refund_from_drawer(
-         shift,
-         %Transaction{payment_method: "cash", failed_after_shift_close: true} = transaction
-       ) do
+  defp refund_from_drawer(%Shift{id: shift_id}, %Transaction{shift_id: shift_id}), do: {:ok, []}
+
+  defp refund_from_drawer(shift, %Transaction{payment_method: "cash"} = transaction) do
     case Shifts.add_cash_movement(shift, %{
            category: "refund",
            amount: transaction.price,
            note: "Refund #{transaction.code}"
          }) do
-      {:ok, _movement} -> :ok
+      {:ok, _movement} -> {:ok, [failed_after_shift_close: true]}
       {:error, reason} -> {:error, reason}
     end
   end
 
-  defp refund_from_drawer(_shift, _transaction), do: :ok
+  defp refund_from_drawer(_shift, _transaction), do: {:ok, []}
 
   @doc "How many services of a shift are still processing."
   def count_processing(%Shift{id: shift_id}) do

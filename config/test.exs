@@ -48,6 +48,12 @@ config :zahlungs, :prune_login_log, false
 config :zahlungs, :service_dispatch, :inline
 config :zahlungs, :service_status_checker, false
 
+# A provider whose status check raises, beside the fake one (test/support).
+config :zahlungs, :provider_adapters, %{
+  "fake" => Zahlungs.Services.Provider.Fake,
+  "broken" => Zahlungs.Services.Provider.Broken
+}
+
 # Import local, gitignored credentials (real DB username/password/host/etc) if present.
 if File.exists?(Path.expand("local.secret.exs", __DIR__)) do
   import_config "local.secret.exs"

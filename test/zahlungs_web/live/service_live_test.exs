@@ -358,6 +358,28 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       assert socket.assigns.refunds == []
     end
 
+    test "an admin may mark a service the provider has left waiting", ctx do
+      {:ok, admin} = Zahlungs.Accounts.set_user_role(user_on_shift_fixture(), "admin")
+
+      {:ok, tx} =
+        Services.record(admin, ctx.pulsa.id, %{
+          "customer_ref" => "081234567894",
+          "amount_paid" => "12000"
+        })
+
+      refute ServiceLive.Index |> mount_live(admin) |> html() =~ ~s(phx-submit="mark_failed")
+
+      long_ago = NaiveDateTime.add(NaiveDateTime.utc_now(), -11 * 60, :second)
+
+      tx
+      |> Ecto.Changeset.change(inserted_at: NaiveDateTime.truncate(long_ago, :second))
+      |> Zahlungs.Repo.update!()
+
+      rendered = ServiceLive.Index |> mount_live(admin) |> html()
+      assert rendered =~ ~s(phx-submit="mark_failed")
+      assert rendered =~ "Periksa di aplikasi penyedia, lalu tandai"
+    end
+
     test "updates arrive by themselves", ctx do
       socket = mount_live(ServiceLive.Index, ctx.cashier, connected: true)
 

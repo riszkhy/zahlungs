@@ -385,6 +385,79 @@ defmodule Zahlungs.ServicesApiTest do
       assert Services.check_status(tx.id) == {:ok, :already_final}
     end
 
+    test "a payment still on its way isn't asked about yet", ctx do
+      tx = record_pulsa(ctx, "081234567899")
+      ref_id = tx.ref_id
+      sent_now = NaiveDateTime.truncate(NaiveDateTime.utc_now(), :second)
+
+      Repo.update_all(from(t in Services.Transaction, where: t.id == ^tx.id),
+        set: [sent_at: sent_now, last_checked_at: nil]
+      )
+
+      flush_provider_calls()
+
+      Services.check_pending(later(10))
+      refute_received {:fake_provider, :status, ^ref_id}
+
+      Services.check_pending(later(31))
+      assert_received {:fake_provider, :status, ^ref_id}
+    end
+
+    test "success clears an earlier warning", ctx do
+      tx = record_pulsa(ctx, "081234567899")
+
+      Repo.update_all(from(t in Services.Transaction, where: t.id == ^tx.id),
+        set: [provider_message: "Penyedia tidak mengenal transaksi ini."]
+      )
+
+      Services.check_pending(later(31))
+
+      assert %{status: "success", provider_message: nil} = Repo.get!(Services.Transaction, tx.id)
+    end
+
+    @tag :capture_log
+    test "a service that breaks the check doesn't stop the others", ctx do
+      broken_store = store_fixture()
+      assign_account(broken_store, deposit_account_fixture(%{mode: "api", provider: "broken"}))
+      elsewhere = user_on_shift_fixture(%{store_id: broken_store.id})
+
+      {:ok, broken} =
+        Services.record(elsewhere, ctx.pulsa.id, %{
+          "customer_ref" => "081234567899",
+          "amount_paid" => "12000"
+        })
+
+      done = record_pulsa(ctx, "081234567899")
+      assert broken.id < done.id
+
+      Services.check_pending(later(31))
+
+      assert status_of(done) == "success"
+      assert status_of(broken) == "processing"
+    end
+
+    test "an admin may settle a service the provider has left waiting", ctx do
+      tx = record_pulsa(ctx, "081234567894")
+      {:ok, admin} = Zahlungs.Accounts.set_user_role(user_fixture(), "admin")
+
+      refute Services.awaiting_too_long?(tx)
+      assert Services.mark_failed(tx, admin, "Tidak ada") == {:error, :not_manual}
+
+      long_ago = NaiveDateTime.add(NaiveDateTime.utc_now(), -11 * 60)
+
+      Repo.update_all(from(t in Services.Transaction, where: t.id == ^tx.id),
+        set: [inserted_at: long_ago]
+      )
+
+      tx = Repo.get!(Services.Transaction, tx.id)
+      assert Services.awaiting_too_long?(tx)
+      assert Services.mark_failed(tx, ctx.cashier, "Tidak ada") == {:error, :not_manual}
+
+      assert {:ok, failed} = Services.mark_failed(tx, admin, "Tidak ada di aplikasi penyedia")
+      assert {failed.status, failed.resolved_by_id} == {"failed", admin.id}
+      assert tx.id in Enum.map(Services.list_refunds_due(store_scope()), & &1.id)
+    end
+
     test "switching the account to manual leaves pending api services to the provider", ctx do
       tx = record_pulsa(ctx, "081234567899")
       {:ok, _} = Zahlungs.Deposits.update_account(ctx.account, %{"mode" => "manual"})
@@ -478,17 +551,43 @@ defmodule Zahlungs.ServicesApiTest do
       assert Services.confirm_refund(fresh(tx), ctx.cashier) == {:error, :not_refundable}
     end
 
-    test "a failure while the shift is open is not counted, and confirming it books no cash",
-         ctx do
+    test "a failure counts in its shift until the money is handed back from that drawer", ctx do
       tx = sell_pulsa(ctx, "081234567890")
 
       assert fresh(tx).status == "failed"
       refute fresh(tx).failed_after_shift_close
-      assert money_equal?(Shifts.expected_cash(ctx.shift), "50000")
+      assert money_equal?(Shifts.expected_cash(ctx.shift), "62000")
 
       assert {:ok, _} = Services.confirm_refund(fresh(tx), ctx.cashier)
       assert Shifts.list_cash_movements(ctx.shift) == []
       assert money_equal?(Shifts.expected_cash(ctx.shift), "50000")
+    end
+
+    test "a failure the shift closed over is refunded from the next drawer", ctx do
+      tx = sell_pulsa(ctx, "081234567898")
+      Services.check_pending(in_a_minute())
+      assert fresh(tx).status == "failed"
+
+      assert {:ok, closed} = Shifts.close_shift(ctx.shift, "62000")
+      assert money_equal?(closed.expected_cash, "62000")
+
+      next_shift = shift_fixture(ctx.cashier, "0")
+      assert {:ok, _} = Services.confirm_refund(fresh(tx), ctx.cashier)
+
+      assert [%{category: "refund"}] = Shifts.list_cash_movements(next_shift)
+      assert money_equal?(Shifts.expected_cash(closed), "62000")
+    end
+
+    test "another cashier's refund comes out of their own drawer", ctx do
+      tx = sell_pulsa(ctx, "081234567890")
+      colleague = user_fixture()
+      their_shift = shift_fixture(colleague, "0")
+
+      assert {:ok, _} = Services.confirm_refund(fresh(tx), colleague)
+
+      assert [%{category: "refund"}] = Shifts.list_cash_movements(their_shift)
+      assert money_equal?(Shifts.expected_cash(their_shift), "-12000")
+      assert money_equal?(Shifts.expected_cash(ctx.shift), "62000")
     end
 
     test "a non-cash failure is never refunded from a drawer", ctx do

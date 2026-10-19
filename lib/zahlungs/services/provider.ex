@@ -43,12 +43,14 @@ defmodule Zahlungs.Services.Provider do
 
   @adapters %{"fake" => Zahlungs.Services.Provider.Fake}
 
-  @doc "The adapters Zahlungs knows, by the key an account stores."
-  def adapters, do: @adapters
+  @doc """
+  The adapters Zahlungs knows, by the key an account stores
+  (`config :zahlungs, :provider_adapters`; the fake one by default).
+  """
+  def adapters, do: Application.get_env(:zahlungs, :provider_adapters, @adapters)
 
   @doc "The adapter for a key, or `:error` for one Zahlungs doesn't know."
-  def adapter(key) when is_map_key(@adapters, key), do: {:ok, Map.fetch!(@adapters, key)}
-  def adapter(_key), do: :error
+  def adapter(key), do: Map.fetch(adapters(), key)
 
   @doc "The adapters as `{label, key}` options for a select."
   def options, do: [{"Penyedia tiruan (uji coba)", "fake"}]

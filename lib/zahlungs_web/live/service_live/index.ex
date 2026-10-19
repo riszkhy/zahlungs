@@ -370,6 +370,10 @@ defmodule ZahlungsWeb.ServiceLive.Index do
     end
   end
 
+  # An api service the provider has left waiting may be marked by an admin.
+  defp by_hand?(transaction, user),
+    do: user.role == "admin" and Services.awaiting_too_long?(transaction)
+
   defp status_label("success"), do: "Berhasil"
   defp status_label("failed"), do: "Gagal"
   defp status_label(_), do: "Diproses"
@@ -409,7 +413,9 @@ defmodule ZahlungsWeb.ServiceLive.Index do
         <span>
           <span class="font-medium">{tx.product_name}</span>
           · {group_digits(tx.customer_ref)} · {refund_message(tx)}
-          <span :if={tx.provider_message} class="block text-xs text-red-700">{tx.provider_message}</span>
+          <span :if={tx.failure_reason || tx.provider_message} class="block text-xs text-red-700">
+            {tx.failure_reason || tx.provider_message}
+          </span>
         </span>
         <button
           type="button"
@@ -550,7 +556,11 @@ defmodule ZahlungsWeb.ServiceLive.Index do
           </button>
         </div>
 
-        <div :if={tx.channel != "api"}>
+        <p :if={by_hand?(tx, @current_user)} class="mt-2 text-xs text-amber-800">
+          Belum ada jawaban penyedia lebih dari 10 menit. Periksa di aplikasi penyedia, lalu tandai.
+        </p>
+
+        <div :if={tx.channel != "api" or by_hand?(tx, @current_user)}>
           <form phx-submit="mark_success" class="mt-2 flex flex-wrap items-center gap-2">
             <input type="hidden" name="transaction_id" value={tx.id} />
             <input type="text" name="token_sn" placeholder="Token / SN (opsional)" maxlength="64" class="form-control min-w-0 flex-1" />
