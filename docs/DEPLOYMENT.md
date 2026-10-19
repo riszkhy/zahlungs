@@ -184,7 +184,23 @@ Rincian model dan batasannya ada di `docs/SAAS-multi-pemilik.md`.
 - Belum ada verifikasi email pendaftar maupun reset password lewat email
   (menunggu mailer); pembatas pendaftaran adalah 5 kali per 15 menit per alamat.
 
-## 8. Rollback
+## 8. Layanan PPOB lewat API
+
+- **Jangan mengganti `SECRET_KEY_BASE`** setelah ada akun deposit mode API:
+  kredensial penyedia dienkripsi dengan kunci turunannya. Bila terpaksa
+  diganti, isi ulang kredensial tiap akun di `/admin/deposits` (Tes koneksi
+  akan gagal sampai diisi ulang).
+- **URL callback** (`https://<PHX_HOST>/api/ppob/callback/<token>`, tampil di
+  form akun) harus bisa dijangkau server vendor dari internet. Di jaringan LAN
+  saja callback tidak sampai; transaksi tetap selesai lewat pengecekan status
+  otomatis tiap menit, hanya lebih lambat.
+- Pengecek status berjalan di dalam aplikasi (tidak perlu cron). Bila server
+  mati saat ada transaksi menunggu, transaksi itu dicek lagi begitu aplikasi
+  hidup.
+- Belum ada adapter vendor sungguhan; "Penyedia tiruan (uji coba)" hanya untuk
+  mencoba alurnya. Jangan dipakai untuk berjualan.
+
+## 9. Rollback
 
 ```bash
 bin/zahlungs eval "Release.rollback(Zahlungs.Repo, 20260701170000)"

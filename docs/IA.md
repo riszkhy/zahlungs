@@ -247,3 +247,30 @@ Kelola user (admin):
 - **/admin/services**, **/admin/deposits**, **/reports/services**: admin saja.
   Form toko memilih akun deposit yang dipakai toko itu.
 - Layanan tidak masuk laporan penjualan barang maupun angka di Home.
+
+## Layanan PPOB (Fase 1, lewat API penyedia)
+
+Berlaku bila akun deposit toko bermode **API** (diatur di `/admin/deposits`).
+
+- **Tagihan PLN**: pilih produk → isi ID pelanggan → **Cek tagihan** (ke
+  penyedia) → tampil nama, periode, jumlah lembar, tagihan, biaya admin, total →
+  terima uang → **Bayar**. Mengubah ID pelanggan setelah cek membatalkan hasil
+  cek; hasil cek berlaku 15 menit.
+- **Pulsa, paket data, token PLN**: pilih produk, isi nomor, terima uang →
+  **Bayar**. Zahlungs mengirim ke penyedia; tidak ada tombol Berhasil/Gagal.
+- **Menunggu penyedia**: transaksi yang belum dijawab tampil di "Sedang
+  diproses" dengan tombol **Cek status**. Jawaban penyedia (pengecekan otomatis
+  tiap menit atau callback) memperbarui layar tanpa reload. Shift boleh ditutup
+  meski masih ada yang menunggu.
+- **Perlu dikembalikan**: layanan yang gagal di penyedia muncul di bagian ini
+  sampai kasir menekan **Uang sudah dikembalikan**. Bila gagalnya setelah shift
+  ditutup, pengembalian tunai dicatat sebagai kas keluar di shift yang sedang
+  buka.
+- **Struk tagihan** memuat nama pelanggan, periode, jumlah lembar dan referensi
+  penyedia.
+- **/admin/deposits** (akun API): penyedia, kredensial (tidak pernah
+  ditampilkan lagi, hanya "tersimpan"), URL callback untuk didaftarkan ke
+  penyedia, **Tes koneksi**, **Ambil saldo dari penyedia** (mengisi form
+  pencocokan). **/admin/services**: kolom "Kode produk vendor".
+- **`POST /api/ppob/callback/:token`**: dipanggil penyedia, bukan orang;
+  tanpa login, diverifikasi dengan token akun dan tanda tangan penyedia.
