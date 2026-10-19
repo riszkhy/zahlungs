@@ -28,7 +28,7 @@ defmodule Zahlungs.Services do
   alias Zahlungs.Accounts.User
   alias Zahlungs.{Deposits, LocalTime, Scope, Shifts, Stores}
   alias Zahlungs.Shifts.Shift
-  alias Zahlungs.Services.{Inquiry, Product, Transaction}
+  alias Zahlungs.Services.{Dispatcher, Inquiry, Product, Transaction}
 
   @category_labels [
     {"pulsa", "Pulsa"},
@@ -235,46 +235,136 @@ defmodule Zahlungs.Services do
     # The cashier decides whose products and stores these are.
     Repo.put_org_id(user.organization_id)
 
-    Repo.transaction(fn ->
+    fn ->
       case insert_transaction(user, product_id, attrs) do
         {:ok, transaction} -> transaction
         {:error, reason} -> Repo.rollback(reason)
       end
-    end)
+    end
+    |> Repo.transaction()
+    |> dispatch_api()
   end
+
+  # An api service goes to the provider only once it is committed.
+  defp dispatch_api({:ok, %Transaction{channel: "api"} = transaction} = result) do
+    Dispatcher.dispatch(transaction)
+    result
+  end
+
+  defp dispatch_api(result), do: result
 
   # Runs inside record/3's transaction: the shift stays locked until it ends.
   defp insert_transaction(user, product_id, attrs) do
     with {:ok, shift} <- Shifts.lock_current_shift(user),
          store = Stores.get_store!(shift.store_id),
-         {:ok, account_id} <- store_account(store),
+         {:ok, account} <- store_account(store),
          {:ok, product} <- sellable_product(product_id),
-         bill = bill_amount(product, attrs),
-         {:ok, %{price: price, cost: cost}} <- price_for(product, bill),
+         channel = if(Deposits.api?(account), do: "api", else: "manual"),
+         :ok <- sellable_through(channel, product),
+         {:ok, bill} <- bill_details(channel, product, store, attrs),
+         {:ok, %{price: price, cost: cost}} <- price_for(product, bill.amount, bill.sheets),
          :ok <- check_quoted_price(attrs["expected_price"], price),
-         {:ok, payment} <- settle(attrs, price) do
+         {:ok, payment} <- settle(attrs, price),
+         :ok <- use_inquiry(bill.inquiry) do
+      code = generate_code(store)
+
       %Transaction{
         store_id: store.id,
         shift_id: shift.id,
         user_id: user.id,
         service_product_id: product.id,
-        deposit_account_id: account_id,
-        code: generate_code(store),
+        deposit_account_id: account.id,
+        code: code,
+        ref_id: code,
+        channel: channel,
         category: product.category,
         product_name: product.name,
-        bill_amount: bill,
+        bill_amount: bill.amount,
+        sheets: bill.sheets,
+        customer_name: bill.customer_name,
+        period: bill.period,
+        service_inquiry_id: bill.inquiry && bill.inquiry.id,
         price: price,
         cost: cost,
         amount_paid: payment.amount_paid,
         change_due: payment.change_due
       }
       |> Transaction.record_changeset(%{
-        customer_ref: attrs["customer_ref"] || "",
+        customer_ref: bill.customer_ref || attrs["customer_ref"] || "",
         payment_method: payment.method
       })
       |> Repo.insert()
     end
   end
+
+  # Through the provider, a product needs the vendor's code.
+  defp sellable_through("api", product),
+    do: if(blank_code?(product), do: {:error, :no_provider_code}, else: :ok)
+
+  defp sellable_through(_manual, _product), do: :ok
+
+  # An api bill is paid from its inquiry, locked and checked here: the shift's
+  # store, the same product, unused, not expired. Anything else is entered.
+  defp bill_details("api", %Product{category: "tagihan_pln"} = product, store, attrs) do
+    case lock_inquiry(attrs["inquiry_id"], store, product) do
+      nil ->
+        {:error, :inquiry_expired}
+
+      inquiry ->
+        {:ok,
+         %{
+           amount: inquiry.bill_amount,
+           sheets: inquiry.sheets,
+           customer_ref: inquiry.customer_ref,
+           customer_name: inquiry.customer_name,
+           period: inquiry.period,
+           inquiry: inquiry
+         }}
+    end
+  end
+
+  defp bill_details(_channel, product, _store, attrs) do
+    {:ok,
+     %{
+       amount: bill_amount(product, attrs),
+       sheets: 1,
+       customer_ref: nil,
+       customer_name: nil,
+       period: nil,
+       inquiry: nil
+     }}
+  end
+
+  defp lock_inquiry(id, store, product) do
+    case Integer.parse(to_string(id)) do
+      {id, ""} ->
+        now = now()
+
+        Repo.one(
+          from i in Inquiry,
+            where:
+              i.id == ^id and i.store_id == ^store.id and i.service_product_id == ^product.id and
+                is_nil(i.used_at) and i.expires_at > ^now,
+            lock: "FOR UPDATE"
+        )
+
+      _ ->
+        nil
+    end
+  end
+
+  defp use_inquiry(nil), do: :ok
+
+  defp use_inquiry(%Inquiry{id: id}) do
+    Repo.update_all(from(i in Inquiry, where: i.id == ^id), set: [used_at: now()])
+    :ok
+  end
+
+  @doc """
+  Sends an api service to its provider. (Fase 1, filled in with the provider's
+  answers in a later step.)
+  """
+  def send_payment(_transaction_id), do: :ok
 
   ## Results
 
@@ -454,7 +544,10 @@ defmodule Zahlungs.Services do
   defp now, do: NaiveDateTime.truncate(NaiveDateTime.utc_now(), :second)
 
   defp store_account(%{deposit_account_id: id}) do
-    if Deposits.active_account?(id), do: {:ok, id}, else: {:error, :no_deposit_account}
+    case Deposits.get_active_account(id) do
+      nil -> {:error, :no_deposit_account}
+      account -> {:ok, account}
+    end
   end
 
   # Active and not deleted: a screen left open may still offer one that isn't.

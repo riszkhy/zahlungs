@@ -27,6 +27,21 @@ defmodule Zahlungs.Services.Transaction do
     field :token_sn, :string
     field :failure_reason, :string
     field :resolved_at, :naive_datetime
+    # Fase 1: the account's mode when recorded, and what the provider says.
+    field :channel, :string, default: "manual"
+    field :ref_id, :string
+    field :provider_ref, :string
+    field :provider_message, :string
+    field :sent_at, :naive_datetime
+    field :last_checked_at, :naive_datetime
+    field :sheets, :integer, default: 1
+    field :customer_name, :string
+    field :period, :string
+    field :failed_after_shift_close, :boolean, default: false
+    field :refunded_at, :naive_datetime
+
+    belongs_to :service_inquiry, Zahlungs.Services.Inquiry
+    belongs_to :refunded_by, Zahlungs.Accounts.User
 
     belongs_to :store, Zahlungs.Stores.Store
     belongs_to :shift, Zahlungs.Shifts.Shift
@@ -53,6 +68,7 @@ defmodule Zahlungs.Services.Transaction do
     |> validate_format(:customer_ref, ~r/^\d{6,20}$/, message: "harus 6–20 angka")
     |> validate_inclusion(:payment_method, Zahlungs.Sales.Sale.payment_methods())
     |> unique_constraint(:code, name: :service_transactions_store_id_code_index)
+    |> unique_constraint(:ref_id)
   end
 
   @doc """

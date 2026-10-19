@@ -25,6 +25,8 @@ defmodule Zahlungs.Application do
       {Phoenix.PubSub, name: Zahlungs.PubSub},
       # Counts failed logins to slow down password guessing
       ZahlungsWeb.LoginThrottle,
+      # Sends PPOB services to their provider in the background
+      {Task.Supervisor, name: Zahlungs.Services.TaskSupervisor},
       # Start the Endpoint (http/https)
       ZahlungsWeb.Endpoint
       # Start a worker by calling: Zahlungs.Worker.start_link(arg)

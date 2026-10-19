@@ -44,6 +44,9 @@ config :phoenix, :plug_init_mode, :runtime
 # The login-log pruner would touch the database outside the test sandbox.
 config :zahlungs, :prune_login_log, false
 
+# PPOB services are sent to the (fake) provider in the test's own process.
+config :zahlungs, :service_dispatch, :inline
+
 # Import local, gitignored credentials (real DB username/password/host/etc) if present.
 if File.exists?(Path.expand("local.secret.exs", __DIR__)) do
   import_config "local.secret.exs"
