@@ -28,7 +28,7 @@ defmodule Zahlungs.Services do
   alias Zahlungs.Accounts.User
   alias Zahlungs.{Deposits, LocalTime, Scope, Shifts, Stores}
   alias Zahlungs.Shifts.Shift
-  alias Zahlungs.Services.{Product, Transaction}
+  alias Zahlungs.Services.{Inquiry, Product, Transaction}
 
   @category_labels [
     {"pulsa", "Pulsa"},
@@ -111,6 +111,106 @@ defmodule Zahlungs.Services do
     else
       {:ok,
        %{price: Decimal.add(product.cost, margin(product, product.cost)), cost: product.cost}}
+    end
+  end
+
+  ## Inquiry (Fase 1)
+
+  @inquiry_timeout 15_000
+  @inquiry_lifetime 15 * 60
+
+  @doc """
+  Asks the provider about a PLN bill, for a cashier on an open shift in a store
+  with an api deposit account, and keeps the answer for 15 minutes
+  (`Zahlungs.Services.Inquiry`). The provider gets 15 seconds.
+
+  Returns `{:ok, inquiry}` (with its product) or `{:error, reason}`:
+  `:no_open_shift`, `:no_deposit_account`, `:not_api`, `:product_unavailable`
+  (not an active bill product), `:no_provider_code`, the provider's
+  `:not_found` / `:already_paid` / `:unavailable` / `{:rejected, message}`, or a
+  changeset (the customer number).
+  """
+  def inquire(%User{} = user, product_id, customer_ref) do
+    Repo.put_org_id(user.organization_id)
+
+    with {:ok, shift} <- open_shift(user),
+         store = Stores.get_store!(shift.store_id),
+         {:ok, account} <- api_account(store),
+         {:ok, product} <- sellable_product(product_id),
+         :ok <- bill_with_code(product),
+         changeset =
+           Inquiry.number_changeset(
+             %Inquiry{
+               store_id: store.id,
+               user_id: user.id,
+               service_product_id: product.id,
+               deposit_account_id: account.id
+             },
+             %{customer_ref: customer_ref || ""}
+           ),
+         {:ok, %{customer_ref: number}} <- Ecto.Changeset.apply_action(changeset, :insert),
+         {:ok, answer} <- ask_provider(account, product, number) do
+      changeset
+      |> Inquiry.answer_changeset(answer)
+      |> Ecto.Changeset.put_change(:expires_at, NaiveDateTime.add(now(), @inquiry_lifetime))
+      |> Repo.insert()
+      |> case do
+        {:ok, inquiry} -> {:ok, %{inquiry | service_product: product}}
+        error -> error
+      end
+    end
+  end
+
+  @doc "What an inquired bill costs the customer and the shop: `%{price, cost}`."
+  def inquiry_price(%Inquiry{service_product: %Product{} = product} = inquiry) do
+    {:ok, price} = price_for(product, inquiry.bill_amount, inquiry.sheets)
+    price
+  end
+
+  defp open_shift(user) do
+    case Shifts.current_shift(user) do
+      nil -> {:error, :no_open_shift}
+      shift -> {:ok, shift}
+    end
+  end
+
+  defp api_account(store) do
+    case Deposits.get_active_account(store.deposit_account_id) do
+      nil -> {:error, :no_deposit_account}
+      account -> if Deposits.api?(account), do: {:ok, account}, else: {:error, :not_api}
+    end
+  end
+
+  defp bill_with_code(product) do
+    cond do
+      not Product.bill?(product) -> {:error, :product_unavailable}
+      blank_code?(product) -> {:error, :no_provider_code}
+      true -> :ok
+    end
+  end
+
+  defp blank_code?(%Product{provider_code: code}), do: code in [nil, ""]
+
+  # The provider gets @inquiry_timeout; past that it counts as unavailable.
+  defp ask_provider(account, product, number) do
+    case Deposits.provider(account) do
+      {:ok, adapter, credentials} ->
+        task =
+          Task.async(fn ->
+            adapter.inquiry(credentials, %{
+              product_code: product.provider_code,
+              customer_ref: number
+            })
+          end)
+
+        case Task.yield(task, @inquiry_timeout) || Task.shutdown(task, :brutal_kill) do
+          {:ok, answer} -> answer
+          _ -> {:error, :unavailable}
+        end
+
+      _ ->
+        {:error,
+         {:rejected, "Kredensial penyedia tidak bisa dibaca. Minta admin mengisinya ulang."}}
     end
   end
 

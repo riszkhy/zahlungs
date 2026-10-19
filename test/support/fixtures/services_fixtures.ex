@@ -69,6 +69,24 @@ defmodule Zahlungs.ServicesFixtures do
     |> deposit_account_fixture()
   end
 
+  @doc "The test's default store, selling from a new api account on the fake provider."
+  def api_store_fixture do
+    assign_account(Zahlungs.StoresFixtures.default_store(), api_account_fixture())
+  end
+
+  @doc "A tagihan PLN product for api accounts: vendor code PLNPASCA, provider fee 1.500, admin 3.000."
+  def api_product_fixture(attrs \\ %{}) do
+    attrs
+    |> Enum.into(%{
+      name: "Tagihan PLN #{System.unique_integer([:positive])}",
+      category: "tagihan_pln",
+      provider_code: "PLNPASCA",
+      cost: "1500",
+      margin_value: "3000"
+    })
+    |> service_product_fixture()
+  end
+
   @doc "Makes `account` the one `store` sells services from."
   def assign_account(store, account) do
     {:ok, store} = Stores.update_store(store, %{deposit_account_id: account.id})

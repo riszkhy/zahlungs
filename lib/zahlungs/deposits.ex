@@ -35,6 +35,13 @@ defmodule Zahlungs.Deposits do
 
   def get_account!(id), do: Repo.get!(Account, id)
 
+  @doc "The account if it is active (and of the current organization), else nil."
+  def get_active_account(nil), do: nil
+
+  def get_active_account(id) do
+    Repo.one(from a in Account, where: a.id == ^id and a.active == true)
+  end
+
   @doc "Whether `id` is an active account of the current organization."
   def active_account?(nil), do: false
 
