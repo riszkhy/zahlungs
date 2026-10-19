@@ -249,4 +249,132 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       assert ServiceLive.Index.group_digits("") == ""
     end
   end
+
+  describe "an api account" do
+    setup do
+      api_store_fixture()
+      cashier = user_on_shift_fixture()
+
+      %{
+        cashier: cashier,
+        shift: Shifts.current_shift(cashier),
+        bill: api_product_fixture(),
+        pulsa: service_product_fixture(%{provider_code: "TSEL10"}),
+        socket: mount_live(ServiceLive.Index, cashier)
+      }
+    end
+
+    defp checked(socket, bill, number) do
+      socket
+      |> event("set_category", %{"category" => "tagihan_pln"})
+      |> event("select", %{"id" => bill.id})
+      |> event("inquire", %{"service" => %{"customer_ref" => number}})
+    end
+
+    defp sell_pulsa(socket, pulsa, number) do
+      socket
+      |> event("set_category", %{"category" => "pulsa"})
+      |> event("select", %{"id" => pulsa.id})
+      |> event("record", %{
+        "service" => %{
+          "customer_ref" => number,
+          "payment_method" => "cash",
+          "amount_paid" => "12.000"
+        }
+      })
+    end
+
+    test "a bill is checked, shown, then paid", ctx do
+      socket = checked(ctx.socket, ctx.bill, "5300 1122 3331")
+      rendered = html(socket)
+
+      assert rendered =~ "PELANGGAN 3331"
+      assert rendered =~ "AGU–OKT 2026"
+      assert rendered =~ "3 lembar"
+      assert rendered =~ "Rp 744.000,00"
+
+      socket =
+        event(socket, "record", %{
+          "service" => %{"payment_method" => "cash", "amount_paid" => "750.000"}
+        })
+
+      assert flash(socket, :info) =~ "penyedia"
+      assert [tx] = Services.list_shift_transactions(ctx.shift)
+      assert {tx.channel, tx.status, tx.customer_ref} == {"api", "success", "530011223331"}
+      assert Decimal.equal?(tx.change_due, money("6000"))
+      assert is_nil(socket.assigns.inquiry)
+    end
+
+    test "changing the number after checking drops the result", ctx do
+      socket =
+        ctx.socket
+        |> checked(ctx.bill, "530011223331")
+        |> event("change", %{"service" => %{"customer_ref" => "530011223341"}})
+
+      assert is_nil(socket.assigns.inquiry)
+      refute html(socket) =~ "PELANGGAN 3331"
+      refute html(socket) =~ ~s(phx-submit="record")
+    end
+
+    test "a slow or refusing provider says so", ctx do
+      assert ctx.socket |> checked(ctx.bill, "530011223347") |> flash(:error) ==
+               "Penyedia tidak tersedia, coba lagi."
+
+      assert ctx.socket |> checked(ctx.bill, "530011223345") |> flash(:error) ==
+               "Tagihan ini sudah lunas."
+
+      assert Services.list_shift_transactions(ctx.shift) == []
+    end
+
+    test "pending shows the wait and a status check", ctx do
+      socket = sell_pulsa(ctx.socket, ctx.pulsa, "081234567899")
+      rendered = html(socket)
+
+      assert rendered =~ "Menunggu penyedia"
+      refute rendered =~ ~s(phx-submit="mark_success")
+      assert [tx] = socket.assigns.processing
+
+      socket = event(socket, "check_status", %{"transaction_id" => tx.id})
+      assert flash(socket, :info) =~ "Berhasil"
+      assert socket.assigns.processing == []
+    end
+
+    test "refunds due are confirmed from the screen", ctx do
+      {:ok, tx} =
+        Services.record(ctx.cashier, ctx.pulsa.id, %{
+          "customer_ref" => "081234567898",
+          "amount_paid" => "12000"
+        })
+
+      {:ok, _} = Shifts.close_shift(ctx.shift, "12000")
+      Services.check_pending(NaiveDateTime.add(NaiveDateTime.utc_now(), 61))
+      shift_fixture(ctx.cashier, "0")
+
+      socket = mount_live(ServiceLive.Index, ctx.cashier)
+      assert html(socket) =~ "Perlu dikembalikan"
+
+      socket = event(socket, "confirm_refund", %{"transaction_id" => "#{tx.id}"})
+      assert flash(socket, :info) =~ "Pengembalian dicatat"
+      assert socket.assigns.refunds == []
+    end
+
+    test "updates arrive by themselves", ctx do
+      socket = mount_live(ServiceLive.Index, ctx.cashier, connected: true)
+
+      {:ok, tx} =
+        Services.record(ctx.cashier, ctx.pulsa.id, %{
+          "customer_ref" => "081234567899",
+          "amount_paid" => "12000"
+        })
+
+      id = tx.id
+      assert_receive {:service_changed, ^id}
+      Services.check_pending(NaiveDateTime.add(NaiveDateTime.utc_now(), 31))
+      assert_receive {:service_changed, ^id}
+
+      socket = info(socket, {:service_changed, id})
+      assert socket.assigns.processing == []
+      assert [%{status: "success"}] = socket.assigns.history
+    end
+  end
 end
