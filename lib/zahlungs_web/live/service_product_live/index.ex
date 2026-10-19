@@ -168,6 +168,7 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
         <.input field={@form[:name]} type="text" label="Nama (mis. Pulsa Telkomsel 10.000)" required />
         <.input field={@form[:category]} type="select" label="Kategori" options={Enum.map(Services.categories(), fn {v, l} -> {l, v} end)} />
         <.input field={@form[:operator]} type="text" label="Operator (opsional)" />
+        <.input field={@form[:provider_code]} type="text" label="Kode produk vendor (untuk akun API)" maxlength="60" />
         <.input
           field={@form[:cost]}
           type="number"

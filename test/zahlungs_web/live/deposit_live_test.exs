@@ -61,6 +61,69 @@ defmodule ZahlungsWeb.DepositLiveTest do
     end
   end
 
+  describe "an api account" do
+    test "the form asks for the provider's credentials and never shows them back" do
+      admin = admin_fixture()
+      name = "API #{System.unique_integer([:positive])}"
+
+      socket =
+        DepositLive.Index
+        |> mount_live(admin, action: :new)
+        |> event("validate_account", %{
+          "account" => %{"name" => name, "mode" => "api", "provider" => "fake"}
+        })
+
+      assert html(socket) =~ "Secret callback"
+
+      socket =
+        event(socket, "save_account", %{
+          "account" => %{
+            "name" => name,
+            "mode" => "api",
+            "provider" => "fake",
+            "credentials" => %{"secret" => "sangat-rahasia-123"}
+          }
+        })
+
+      assert flash(socket, :info) =~ "disimpan"
+      account = Enum.find(Deposits.list_accounts(), &(&1.name == name))
+      assert Deposits.api?(account)
+
+      rendered =
+        DepositLive.Index
+        |> mount_live(admin, action: :edit, params: %{"id" => "#{account.id}"})
+        |> html()
+
+      refute rendered =~ "sangat-rahasia-123"
+      assert rendered =~ "tersimpan"
+      assert rendered =~ "/api/ppob/callback/#{account.callback_token}"
+    end
+
+    test "the connection is tested and the provider's balance fills the reconciling" do
+      admin = admin_fixture()
+      account = api_account_fixture()
+
+      {:ok, _} =
+        Deposits.record_topup(admin, account, %{"amount" => "900000", "source" => "outside"})
+
+      socket = admin |> show(account) |> event("test_connection", %{})
+      assert flash(socket, :info) == "Koneksi ke penyedia berhasil."
+
+      socket = event(socket, "fetch_balance", %{})
+      rendered = html(socket)
+      assert rendered =~ ~s(value="1000000")
+      assert rendered =~ "Selisih Rp 100.000,00"
+    end
+
+    test "a manual account offers neither" do
+      admin = admin_fixture()
+      rendered = admin |> show(deposit_account_fixture()) |> html()
+
+      refute rendered =~ "Tes koneksi"
+      refute rendered =~ "Ambil saldo dari penyedia"
+    end
+  end
+
   describe "an account" do
     setup do
       %{admin: admin_fixture(), account: deposit_account_fixture()}

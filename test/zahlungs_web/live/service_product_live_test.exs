@@ -110,6 +110,17 @@ defmodule ZahlungsWeb.ServiceProductLiveTest do
       assert is_nil(live_redirect(socket))
     end
 
+    test "keeps the vendor's product code", %{socket: socket} do
+      name = "Pulsa #{System.unique_integer([:positive])}"
+      assert html(socket) =~ "Kode produk vendor"
+
+      event(socket, "save", %{
+        "product" => Map.merge(@pulsa, %{"name" => name, "provider_code" => "TSEL10"})
+      })
+
+      assert Enum.find(Services.list_products(), &(&1.name == name)).provider_code == "TSEL10"
+    end
+
     test "edits a product" do
       product = service_product_fixture()
 

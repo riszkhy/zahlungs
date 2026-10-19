@@ -70,6 +70,14 @@ defmodule Zahlungs.Deposits do
   @doc "Whether Zahlungs talks to the provider for this account (Fase 1)."
   def api?(%Account{mode: mode}), do: mode == "api"
 
+  @doc "The credential fields a provider asks for, as `{key, label}`; `[]` for an unknown one."
+  def credential_fields(provider_key) do
+    case Provider.adapter(provider_key) do
+      {:ok, adapter} -> adapter.credential_fields()
+      :error -> []
+    end
+  end
+
   @doc "Whether credentials are stored (they are never shown back)."
   def credentials_saved?(%Account{credentials: credentials}), do: credentials != nil
 

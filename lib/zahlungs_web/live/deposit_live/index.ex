@@ -52,6 +52,13 @@ defmodule ZahlungsWeb.DepositLive.Index do
   end
 
   @impl true
+  def handle_event("validate_account", %{"account" => params}, socket) do
+    changeset =
+      socket.assigns.account |> Deposits.change_account(params) |> Map.put(:action, :validate)
+
+    {:noreply, assign(socket, :account_form, to_form(changeset))}
+  end
+
   def handle_event("save_account", %{"account" => params}, socket) do
     result =
       case socket.assigns.account do
@@ -113,6 +120,29 @@ defmodule ZahlungsWeb.DepositLive.Index do
     end
   end
 
+  def handle_event("test_connection", _params, socket) do
+    case Deposits.ping(socket.assigns.account) do
+      :ok -> {:noreply, put_flash(socket, :info, "Koneksi ke penyedia berhasil.")}
+      {:error, reason} -> {:noreply, put_flash(socket, :error, "Koneksi gagal: #{reason}")}
+    end
+  end
+
+  # The provider's balance goes into the reconciling form, to check and save.
+  def handle_event("fetch_balance", _params, socket) do
+    case Deposits.provider_balance(socket.assigns.account) do
+      {:ok, actual} ->
+        {:noreply, assign(socket, :reconcile, preview(socket.assigns.balance, actual))}
+
+      {:error, _reason} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "Saldo tidak bisa diambil dari penyedia. Isi dari aplikasinya."
+         )}
+    end
+  end
+
   defp preview(_balance, ""), do: nil
 
   defp preview(balance, actual) do
@@ -136,6 +166,14 @@ defmodule ZahlungsWeb.DepositLive.Index do
   defp entry_label(%{kind: "topup", source: "drawer"}), do: "Isi ulang (kas laci)"
   defp entry_label(%{kind: "topup"}), do: "Isi ulang (luar laci)"
   defp entry_label(%{kind: "correction"}), do: "Koreksi"
+
+  defp form_field(form, field), do: Ecto.Changeset.get_field(form.source, field)
+
+  defp mode_options,
+    do: [
+      {"Manual (diproses di aplikasi penyedia)", "manual"},
+      {"API (Zahlungs mengirim ke penyedia)", "api"}
+    ]
 
   @impl true
   def render(assigns) do
@@ -170,6 +208,15 @@ defmodule ZahlungsWeb.DepositLive.Index do
         <p class="text-sm text-gray-600">Perkiraan saldo <strong class="text-gray-900">{format_money(@balance)}</strong></p>
       </div>
 
+      <div :if={Deposits.api?(@account)} class="mt-3 flex flex-wrap gap-2">
+        <button type="button" phx-click="test_connection" phx-disable-with="Menghubungi..." class="chip">
+          Tes koneksi
+        </button>
+        <button type="button" phx-click="fetch_balance" phx-disable-with="Mengambil..." class="chip">
+          Ambil saldo dari penyedia
+        </button>
+      </div>
+
       <div class="mt-4 grid gap-6 md:grid-cols-2">
         <form phx-submit="topup" class="space-y-2">
           <h4 class="font-medium">Isi ulang</h4>
@@ -195,7 +242,15 @@ defmodule ZahlungsWeb.DepositLive.Index do
           <h4 class="font-medium">Cocokkan dengan aplikasi penyedia</h4>
           <label class="block text-sm">
             Saldo di aplikasi penyedia
-            <input type="text" inputmode="numeric" name="actual_balance" required class="form-control" autocomplete="off" />
+            <input
+              type="text"
+              inputmode="numeric"
+              name="actual_balance"
+              value={@reconcile && Decimal.to_string(@reconcile.actual, :normal)}
+              required
+              class="form-control"
+              autocomplete="off"
+            />
           </label>
           <label class="block text-sm">
             Catatan (opsional)
@@ -227,8 +282,34 @@ defmodule ZahlungsWeb.DepositLive.Index do
 
     <.modal :if={@account_form} id="deposit-account-modal" show on_cancel={JS.patch(~p"/admin/deposits")}>
       <h3 class="text-lg font-semibold">{if @account.id, do: "Ubah akun deposit", else: "Akun deposit baru"}</h3>
-      <.form for={@account_form} id="deposit-account-form" phx-submit="save_account" class="mt-4">
+      <.form for={@account_form} id="deposit-account-form" phx-change="validate_account" phx-submit="save_account" class="mt-4">
         <.input field={@account_form[:name]} type="text" label="Nama (mis. Pusat, Konter cabang 2)" required />
+        <.input field={@account_form[:mode]} type="select" label="Cara memproses layanan" options={mode_options()} />
+
+        <div :if={form_field(@account_form, :mode) == "api"}>
+          <.input
+            field={@account_form[:provider]}
+            type="select"
+            label="Penyedia"
+            prompt="Pilih penyedia"
+            options={Zahlungs.Services.Provider.options()}
+          />
+
+          <%!-- Credentials are write-only: the inputs start empty, and a blank one keeps what is stored. --%>
+          <label :for={{key, label} <- Deposits.credential_fields(form_field(@account_form, :provider))} class="mt-2 block text-sm">
+            {label}
+            <span :if={Deposits.credentials_saved?(@account)} class="text-xs text-gray-500">
+              (tersimpan, kosongkan bila tidak diganti)
+            </span>
+            <input type="password" name={"account[credentials][#{key}]"} value="" autocomplete="new-password" class="form-control" />
+          </label>
+
+          <p :if={@account.callback_token} class="mt-3 text-sm">
+            URL callback untuk penyedia:
+            <code class="block break-all rounded bg-gray-50 p-2 text-xs">{url(~p"/api/ppob/callback/#{@account.callback_token}")}</code>
+          </p>
+        </div>
+
         <.input field={@account_form[:active]} type="checkbox" label="Aktif" />
         <div class="mt-6"><.button class="w-full">Simpan</.button></div>
       </.form>
