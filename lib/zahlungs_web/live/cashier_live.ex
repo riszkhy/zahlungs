@@ -137,7 +137,7 @@ defmodule ZahlungsWeb.CashierLive do
          |> put_flash(:error, "Shift ini sudah ditutup.")}
 
       {:error, :services_processing} ->
-        count = Zahlungs.Services.count_processing(socket.assigns.shift)
+        count = Zahlungs.Services.count_blocking_close(socket.assigns.shift)
 
         {:noreply,
          socket

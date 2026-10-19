@@ -126,7 +126,8 @@ defmodule Zahlungs.Shifts do
   # A service still processing may yet be handed back: its result decides what
   # the drawer should hold. Called under the shift's lock.
   defp refuse_while_services_processing(shift) do
-    if Zahlungs.Services.count_processing(shift) > 0, do: Repo.rollback(:services_processing)
+    if Zahlungs.Services.count_blocking_close(shift) > 0,
+      do: Repo.rollback(:services_processing)
   end
 
   # Runs `fun` only if the shift is still open in the database (not just in the

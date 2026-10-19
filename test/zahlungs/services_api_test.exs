@@ -395,4 +395,119 @@ defmodule Zahlungs.ServicesApiTest do
       assert status_of(tx) == "success"
     end
   end
+
+  describe "shift cash and refunds" do
+    alias Zahlungs.Shifts
+
+    setup do
+      account = api_account_fixture()
+      store = assign_account(default_store(), account)
+      cashier = user_fixture()
+
+      %{
+        account: account,
+        store: store,
+        cashier: cashier,
+        shift: shift_fixture(cashier, "50000"),
+        pulsa: service_product_fixture(%{provider_code: "TSEL10"})
+      }
+    end
+
+    defp sell_pulsa(ctx, number, method \\ "cash") do
+      {:ok, tx} =
+        Services.record(ctx.cashier, ctx.pulsa.id, %{
+          "customer_ref" => number,
+          "payment_method" => method,
+          "amount_paid" => "12000"
+        })
+
+      tx
+    end
+
+    defp in_a_minute, do: NaiveDateTime.add(NaiveDateTime.utc_now(), 61)
+    defp fresh(tx), do: Repo.get!(Services.Transaction, tx.id)
+    defp money_equal?(a, b), do: Decimal.equal?(a, Decimal.new(b))
+
+    test "a shift closes over pending api services; manual ones still hold it", ctx do
+      sell_pulsa(ctx, "081234567899")
+
+      assert {:ok, closed} = Shifts.close_shift(ctx.shift, "62000")
+      assert money_equal?(closed.expected_cash, "62000")
+
+      manual_cashier = user_fixture()
+      manual_shift = shift_fixture(manual_cashier, "0")
+      {:ok, _} = Zahlungs.Deposits.update_account(ctx.account, %{"mode" => "manual"})
+
+      {:ok, _} =
+        Services.record(manual_cashier, ctx.pulsa.id, %{
+          "customer_ref" => "081234567891",
+          "amount_paid" => "12000"
+        })
+
+      assert Shifts.close_shift(manual_shift, "12000") == {:error, :services_processing}
+    end
+
+    test "a failure after close keeps the closed shift final", ctx do
+      tx = sell_pulsa(ctx, "081234567898")
+      {:ok, closed} = Shifts.close_shift(ctx.shift, "62000")
+
+      Services.check_pending(in_a_minute())
+
+      assert {fresh(tx).status, fresh(tx).failed_after_shift_close} == {"failed", true}
+      assert money_equal?(Shifts.shift_summary(closed).expected_cash, "62000")
+      assert money_equal?(Shifts.expected_cash(closed), "62000")
+    end
+
+    test "the refund comes out of the next shift's drawer", ctx do
+      tx = sell_pulsa(ctx, "081234567898")
+      {:ok, _} = Shifts.close_shift(ctx.shift, "62000")
+      Services.check_pending(in_a_minute())
+
+      next_shift = shift_fixture(ctx.cashier, "0")
+      assert tx.id in Enum.map(Services.list_refunds_due(store_scope()), & &1.id)
+
+      assert {:ok, refunded} = Services.confirm_refund(fresh(tx), ctx.cashier)
+      assert refunded.refunded_at && refunded.refunded_by_id == ctx.cashier.id
+
+      assert [movement] = Shifts.list_cash_movements(next_shift)
+      assert {movement.category, movement.direction} == {"refund", "out"}
+      assert money_equal?(movement.amount, "12000")
+      assert money_equal?(Shifts.expected_cash(next_shift), "-12000")
+
+      refute tx.id in Enum.map(Services.list_refunds_due(store_scope()), & &1.id)
+      assert Services.confirm_refund(fresh(tx), ctx.cashier) == {:error, :not_refundable}
+    end
+
+    test "a failure while the shift is open is not counted, and confirming it books no cash",
+         ctx do
+      tx = sell_pulsa(ctx, "081234567890")
+
+      assert fresh(tx).status == "failed"
+      refute fresh(tx).failed_after_shift_close
+      assert money_equal?(Shifts.expected_cash(ctx.shift), "50000")
+
+      assert {:ok, _} = Services.confirm_refund(fresh(tx), ctx.cashier)
+      assert Shifts.list_cash_movements(ctx.shift) == []
+      assert money_equal?(Shifts.expected_cash(ctx.shift), "50000")
+    end
+
+    test "a non-cash failure is never refunded from a drawer", ctx do
+      tx = sell_pulsa(ctx, "081234567898", "qris")
+      {:ok, _} = Shifts.close_shift(ctx.shift, "50000")
+      Services.check_pending(in_a_minute())
+      next_shift = shift_fixture(ctx.cashier, "0")
+
+      assert {:ok, _} = Services.confirm_refund(fresh(tx), ctx.cashier)
+      assert Shifts.list_cash_movements(next_shift) == []
+    end
+
+    test "refunds are confirmed in the service's own store, on an open shift", ctx do
+      tx = sell_pulsa(ctx, "081234567890")
+
+      elsewhere = user_on_shift_fixture(%{store_id: store_fixture().id})
+      assert Services.confirm_refund(fresh(tx), elsewhere) == {:error, :other_store}
+      assert Services.confirm_refund(fresh(tx), user_fixture()) == {:error, :no_open_shift}
+      assert is_nil(fresh(tx).refunded_at)
+    end
+  end
 end

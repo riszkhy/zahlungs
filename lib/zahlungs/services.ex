@@ -738,7 +738,10 @@ defmodule Zahlungs.Services do
     row =
       Repo.one(
         from t in Transaction,
-          where: t.shift_id == ^shift_id and t.status in ["processing", "success"],
+          where:
+            t.shift_id == ^shift_id and
+              (t.status in ["processing", "success"] or
+                 (t.status == "failed" and t.failed_after_shift_close)),
           select: %{
             count: count(t.id),
             total: coalesce(sum(t.price), 0),
@@ -818,6 +821,91 @@ defmodule Zahlungs.Services do
 
   defp sum_of(rows, key),
     do: Enum.reduce(rows, Decimal.new(0), &Decimal.add(&2, Map.fetch!(&1, key)))
+
+  @doc """
+  How many manual services of a shift are still processing: those hold the
+  shift open (an api service pending at the provider doesn't).
+  """
+  def count_blocking_close(%Shift{id: shift_id}) do
+    Repo.aggregate(
+      from(t in Transaction,
+        where: t.shift_id == ^shift_id and t.status == "processing" and t.channel == "manual"
+      ),
+      :count
+    )
+  end
+
+  ## Refunds (Fase 1)
+
+  @doc "Failed api services of the scope's store(s) whose money hasn't been handed back yet."
+  def list_refunds_due(%Scope{} = scope) do
+    Repo.all(
+      from t in for_store(Transaction, scope),
+        where: t.channel == "api" and t.status == "failed" and is_nil(t.refunded_at),
+        order_by: [desc: t.resolved_at, desc: t.id]
+    )
+  end
+
+  @doc """
+  A cashier confirms the money of a failed api service went back to the
+  customer, on their open shift in the service's store. A cash service that
+  failed after its shift closed is booked as a `refund` cash-out on that open
+  shift (the closed shift still counts it); otherwise nothing moves in a
+  drawer — a failure on an open shift was never counted, and non-cash is
+  refunded the way it was paid.
+
+  Returns `{:ok, transaction}` or
+  `{:error, :not_refundable | :no_open_shift | :other_store}`.
+  """
+  def confirm_refund(%Transaction{id: id}, %User{} = user) do
+    Repo.put_org_id(user.organization_id)
+
+    fn ->
+      case refund(lock_transaction(id), user) do
+        {:ok, transaction} -> transaction
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end
+    |> Repo.transaction()
+    |> tap(fn
+      {:ok, transaction} -> broadcast(transaction)
+      _ -> :ok
+    end)
+  end
+
+  defp refund(
+         %Transaction{channel: "api", status: "failed", refunded_at: nil} = transaction,
+         user
+       ) do
+    with {:ok, shift} <- Shifts.lock_current_shift(user),
+         :ok <- same_store(shift, transaction),
+         :ok <- refund_from_drawer(shift, transaction) do
+      transaction
+      |> Ecto.Changeset.change(refunded_at: now(), refunded_by_id: user.id)
+      |> Repo.update()
+    end
+  end
+
+  defp refund(_transaction, _user), do: {:error, :not_refundable}
+
+  defp same_store(%Shift{store_id: store_id}, %Transaction{store_id: store_id}), do: :ok
+  defp same_store(_shift, _transaction), do: {:error, :other_store}
+
+  defp refund_from_drawer(
+         shift,
+         %Transaction{payment_method: "cash", failed_after_shift_close: true} = transaction
+       ) do
+    case Shifts.add_cash_movement(shift, %{
+           category: "refund",
+           amount: transaction.price,
+           note: "Refund #{transaction.code}"
+         }) do
+      {:ok, _movement} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp refund_from_drawer(_shift, _transaction), do: :ok
 
   @doc "How many services of a shift are still processing."
   def count_processing(%Shift{id: shift_id}) do
