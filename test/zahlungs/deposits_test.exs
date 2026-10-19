@@ -237,4 +237,105 @@ defmodule Zahlungs.DepositsTest do
       assert Deposits.list_entries(foreign) == []
     end
   end
+
+  describe "api mode" do
+    alias Zahlungs.Deposits.{Account, Credentials}
+    alias Zahlungs.Services.Provider
+
+    test "credentials are stored encrypted and read back" do
+      account = api_account_fixture()
+
+      raw = Repo.get!(Account, account.id).credentials
+      assert is_binary(raw)
+      refute raw =~ "rahasia-uji"
+
+      assert Deposits.provider(account) == {:ok, Provider.Fake, %{"secret" => "rahasia-uji"}}
+      assert Deposits.api?(account)
+      assert Deposits.credentials_saved?(account)
+    end
+
+    test "saving without re-entering the credentials keeps them" do
+      account = api_account_fixture()
+
+      assert {:ok, renamed} =
+               Deposits.update_account(account, %{
+                 "name" => "Baru #{System.unique_integer([:positive])}",
+                 "credentials" => %{"secret" => ""}
+               })
+
+      assert Deposits.provider(renamed) == {:ok, Provider.Fake, %{"secret" => "rahasia-uji"}}
+    end
+
+    test "api mode needs a known provider and its credentials" do
+      assert {:error, changeset} =
+               Deposits.create_account(%{
+                 "name" => "A #{System.unique_integer([:positive])}",
+                 "mode" => "api",
+                 "provider" => "nope",
+                 "credentials" => %{"secret" => "x"}
+               })
+
+      assert errors_on(changeset)[:provider]
+
+      assert {:error, changeset} =
+               Deposits.create_account(%{
+                 "name" => "B #{System.unique_integer([:positive])}",
+                 "mode" => "api",
+                 "provider" => "fake"
+               })
+
+      assert errors_on(changeset)[:credentials]
+
+      assert {:error, changeset} =
+               Deposits.create_account(%{
+                 "name" => "C #{System.unique_integer([:positive])}",
+                 "mode" => "x"
+               })
+
+      assert errors_on(changeset)[:mode]
+    end
+
+    test "a manual account is manual" do
+      account = deposit_account_fixture()
+
+      assert Deposits.provider(account) == :manual
+      refute Deposits.api?(account)
+      refute Deposits.credentials_saved?(account)
+      assert is_nil(account.callback_token)
+    end
+
+    test "an api account gets a callback token once, found across organizations" do
+      account = api_account_fixture()
+      assert account.callback_token =~ ~r/^[A-Za-z0-9_-]{40,}$/
+
+      {:ok, again} =
+        Deposits.update_account(account, %{"name" => "Lagi #{System.unique_integer([:positive])}"})
+
+      assert again.callback_token == account.callback_token
+
+      found =
+        in_org(organization_fixture(), fn ->
+          Deposits.get_account_by_callback_token(account.callback_token)
+        end)
+
+      assert found.id == account.id
+      assert Deposits.get_account_by_callback_token("nope") == nil
+      assert Deposits.get_account_by_callback_token(nil) == nil
+    end
+
+    test "tampered credentials don't decrypt" do
+      assert Credentials.decrypt("xx") == :error
+      assert Credentials.decrypt(nil) == {:ok, %{}}
+      assert Credentials.decrypt(Credentials.encrypt(%{"a" => "b"})) == {:ok, %{"a" => "b"}}
+    end
+
+    test "ping and balance go to the provider" do
+      account = api_account_fixture()
+
+      assert Deposits.ping(account) == :ok
+      assert Deposits.provider_balance(account) == {:ok, Decimal.new("1000000")}
+      assert Deposits.provider_balance(deposit_account_fixture()) == {:error, :unsupported}
+      assert {:error, _message} = Deposits.ping(deposit_account_fixture())
+    end
+  end
 end

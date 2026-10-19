@@ -12,7 +12,8 @@ defmodule Zahlungs.Deposits do
   alias Zahlungs.Repo
 
   alias Zahlungs.Accounts.User
-  alias Zahlungs.Deposits.{Account, Entry}
+  alias Zahlungs.Deposits.{Account, Credentials, Entry}
+  alias Zahlungs.Services.Provider
   alias Zahlungs.Shifts
 
   ## Accounts
@@ -55,6 +56,58 @@ defmodule Zahlungs.Deposits do
 
   def change_account(%Account{} = account, attrs \\ %{}) do
     Account.changeset(account, attrs)
+  end
+
+  ## Provider (api mode)
+
+  @doc "Whether Zahlungs talks to the provider for this account (Fase 1)."
+  def api?(%Account{mode: mode}), do: mode == "api"
+
+  @doc "Whether credentials are stored (they are never shown back)."
+  def credentials_saved?(%Account{credentials: credentials}), do: credentials != nil
+
+  @doc """
+  The adapter and the decrypted credentials of an api account:
+  `{:ok, adapter, credentials}`; `:manual` for a manual account; and
+  `{:error, :credentials}` when stored credentials can't be read (e.g. the
+  secret key changed).
+  """
+  def provider(%Account{mode: "api", provider: key, credentials: encrypted}) do
+    with {:ok, adapter} <- Provider.adapter(key),
+         {:ok, credentials} <- Credentials.decrypt(encrypted) do
+      {:ok, adapter, credentials}
+    else
+      _ -> {:error, :credentials}
+    end
+  end
+
+  def provider(%Account{}), do: :manual
+
+  @doc "The account a provider's callback is for, by its token, in any organization."
+  def get_account_by_callback_token(token) when is_binary(token) do
+    Repo.one(from(a in Account, where: a.callback_token == ^token), skip_org_id: true)
+  end
+
+  def get_account_by_callback_token(_token), do: nil
+
+  @doc "Asks the provider whether it can be reached with these credentials."
+  def ping(%Account{} = account) do
+    case provider(account) do
+      {:ok, adapter, credentials} -> adapter.ping(credentials)
+      :manual -> {:error, "Akun ini mode manual."}
+      {:error, :credentials} -> {:error, "Kredensial tidak bisa dibaca. Isi ulang kredensialnya."}
+    end
+  end
+
+  @doc "The balance the provider holds for this account, where the adapter can tell."
+  def provider_balance(%Account{} = account) do
+    with {:ok, adapter, credentials} <- provider(account),
+         {:module, _} <- Code.ensure_loaded(adapter),
+         true <- function_exported?(adapter, :balance, 1) do
+      adapter.balance(credentials)
+    else
+      _ -> {:error, :unsupported}
+    end
   end
 
   ## Entries

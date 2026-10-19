@@ -62,6 +62,13 @@ defmodule Zahlungs.ServicesFixtures do
     transaction
   end
 
+  @doc "A deposit account in api mode, on the fake provider, with secret \"rahasia-uji\"."
+  def api_account_fixture(attrs \\ %{}) do
+    attrs
+    |> Enum.into(%{mode: "api", provider: "fake", credentials: %{"secret" => "rahasia-uji"}})
+    |> deposit_account_fixture()
+  end
+
   @doc "Makes `account` the one `store` sells services from."
   def assign_account(store, account) do
     {:ok, store} = Stores.update_store(store, %{deposit_account_id: account.id})
