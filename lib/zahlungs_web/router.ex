@@ -24,9 +24,13 @@ defmodule ZahlungsWeb.Router do
   end
 
   # Other scopes may use custom stacks.
-  # scope "/api", ZahlungsWeb do
-  #   pipe_through :api
-  # end
+  # PPOB providers report results here; the token picks the deposit account
+  # and the adapter checks the signature (no session, no CSRF token).
+  scope "/api", ZahlungsWeb do
+    pipe_through :api
+
+    post "/ppob/callback/:token", PpobCallbackController, :create
+  end
 
   # Enables LiveDashboard only for development
   #

@@ -593,6 +593,60 @@ defmodule Zahlungs.Services do
     length(ids)
   end
 
+  ## Callbacks (Fase 1)
+
+  @doc """
+  A provider's callback for the account with `token`: the adapter checks the
+  signature with the account's credentials, the `ref_id` must be an api
+  service of that account, and the result goes through `apply_result/2` — so a
+  repeated or late callback changes nothing.
+
+  Returns `{:ok, :applied | :already_final}` or
+  `{:error, :unknown_account | :invalid_signature | :unknown_ref}`.
+  """
+  def handle_callback(token, params, headers) do
+    with {:ok, account} <- callback_account(token),
+         {:ok, ref_id, result} <- verify_callback(account, params, headers),
+         {:ok, transaction} <- account_transaction(account, ref_id) do
+      case apply_result(transaction.id, result) do
+        {:ok, %Transaction{}} -> {:ok, :applied}
+        {:ok, :already_final} -> {:ok, :already_final}
+      end
+    end
+  end
+
+  defp callback_account(token) do
+    case Deposits.get_account_by_callback_token(token) do
+      nil ->
+        {:error, :unknown_account}
+
+      account ->
+        Repo.put_org_id(account.organization_id)
+        {:ok, account}
+    end
+  end
+
+  # Credentials that can't be read can't vouch for a signature either.
+  defp verify_callback(account, params, headers) do
+    case Deposits.connection(account) do
+      {:ok, adapter, credentials} -> adapter.verify_callback(credentials, params, headers)
+      {:error, :credentials} -> {:error, :invalid_signature}
+    end
+  end
+
+  defp account_transaction(account, ref_id) when is_binary(ref_id) do
+    case Repo.one(
+           from t in Transaction,
+             where:
+               t.ref_id == ^ref_id and t.deposit_account_id == ^account.id and t.channel == "api"
+         ) do
+      nil -> {:error, :unknown_ref}
+      transaction -> {:ok, transaction}
+    end
+  end
+
+  defp account_transaction(_account, _ref_id), do: {:error, :unknown_ref}
+
   @doc "Subscribes to `{:service_changed, transaction_id}` for a store's services."
   def subscribe(store_id), do: Phoenix.PubSub.subscribe(Zahlungs.PubSub, topic(store_id))
 
