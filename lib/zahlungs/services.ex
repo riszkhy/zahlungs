@@ -138,7 +138,7 @@ defmodule Zahlungs.Services do
          store = Stores.get_store!(shift.store_id),
          {:ok, account} <- api_account(store),
          {:ok, product} <- sellable_product(product_id),
-         :ok <- bill_with_code(product),
+         {:ok, kind} <- checkable(product),
          changeset =
            Inquiry.number_changeset(
              %Inquiry{
@@ -147,7 +147,7 @@ defmodule Zahlungs.Services do
                service_product_id: product.id,
                deposit_account_id: account.id,
                ref_id: Ref.generate("Q", store.id),
-               kind: "bill"
+               kind: kind
              },
              %{customer_ref: customer_ref || ""}
            ),
@@ -170,6 +170,11 @@ defmodule Zahlungs.Services do
   shop's `api_extra_fee` per sheet; the shop's cost is the provider's total
   until the provider says what it actually charged.
   """
+  def inquiry_price(%Inquiry{kind: "customer", service_product: %Product{} = product}) do
+    {:ok, price} = price_for(product, nil)
+    price
+  end
+
   def inquiry_price(%Inquiry{service_product: %Product{} = product} = inquiry) do
     total = inquiry.provider_total || inquiry.bill_amount
 
@@ -193,13 +198,17 @@ defmodule Zahlungs.Services do
     end
   end
 
-  defp bill_with_code(product) do
+  # What the provider is asked about: a bill, or the owner of a token PLN meter.
+  defp checkable(%Product{category: category} = product)
+       when category in ["tagihan_pln", "token_pln"] do
     cond do
-      not Product.bill?(product) -> {:error, :product_unavailable}
       blank_code?(product) -> {:error, :no_provider_code}
-      true -> :ok
+      category == "tagihan_pln" -> {:ok, "bill"}
+      true -> {:ok, "customer"}
     end
   end
+
+  defp checkable(_product), do: {:error, :product_unavailable}
 
   defp blank_code?(%Product{provider_code: code}), do: code in [nil, ""]
 
@@ -298,6 +307,7 @@ defmodule Zahlungs.Services do
         bill_amount: bill.amount,
         sheets: bill.sheets,
         customer_name: bill.customer_name,
+        customer_details: bill.customer_details,
         period: bill.period,
         service_inquiry_id: bill.inquiry && bill.inquiry.id,
         price: price,
@@ -330,15 +340,23 @@ defmodule Zahlungs.Services do
   defp transaction_ref("api", store, _code, _inquiry), do: Ref.generate("Z", store.id)
   defp transaction_ref(_manual, _store, code, _inquiry), do: code
 
-  # Through the provider, a product needs the vendor's code.
-  defp sellable_through("api", product),
-    do: if(blank_code?(product), do: {:error, :no_provider_code}, else: :ok)
+  # Through the provider, a product needs the vendor's code, and one the vendor
+  # last said it can't sell (out of order, out of stock, unknown) is refused.
+  defp sellable_through("api", product) do
+    cond do
+      blank_code?(product) -> {:error, :no_provider_code}
+      product.provider_status not in [nil, "normal"] -> {:error, :product_unavailable}
+      true -> :ok
+    end
+  end
 
   defp sellable_through(_manual, _product), do: :ok
 
-  # An api bill is paid from its inquiry, locked and checked here: the shift's
-  # store, the same product, unused, not expired. Anything else is entered.
-  defp bill_details("api", %Product{category: "tagihan_pln"} = product, store, attrs) do
+  # An api bill or token PLN comes from its inquiry, locked and checked here:
+  # the shift's store, the same product, unused, not expired. Anything else is
+  # entered.
+  defp bill_details("api", %Product{category: category} = product, store, attrs)
+       when category in ["tagihan_pln", "token_pln"] do
     case lock_inquiry(attrs["inquiry_id"], store, product) do
       nil ->
         {:error, :inquiry_expired}
@@ -350,6 +368,7 @@ defmodule Zahlungs.Services do
            sheets: inquiry.sheets,
            customer_ref: inquiry.customer_ref,
            customer_name: inquiry.customer_name,
+           customer_details: inquiry.details,
            period: inquiry.period,
            inquiry: inquiry
          }}
@@ -363,6 +382,7 @@ defmodule Zahlungs.Services do
        sheets: 1,
        customer_ref: nil,
        customer_name: nil,
+       customer_details: nil,
        period: nil,
        inquiry: nil
      }}

@@ -58,7 +58,14 @@ defmodule Zahlungs.Services.Inquiry do
       inquiry_ref: answer.inquiry_ref
     })
     |> validate_number(:sheets, greater_than: 0)
-    |> validate_number(:bill_amount, greater_than: 0)
+    |> validate_bill()
+  end
+
+  # A bill needs an amount; a token PLN owner check has none.
+  defp validate_bill(changeset) do
+    if get_field(changeset, :kind) == "customer",
+      do: changeset,
+      else: validate_number(changeset, :bill_amount, greater_than: 0)
   end
 
   defp clip(nil, _max), do: nil

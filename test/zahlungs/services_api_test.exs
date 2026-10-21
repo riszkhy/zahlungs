@@ -231,6 +231,109 @@ defmodule Zahlungs.ServicesApiTest do
     end
   end
 
+  describe "token PLN on an api account" do
+    setup do
+      api_store_fixture()
+
+      %{
+        cashier: user_on_shift_fixture(),
+        token:
+          service_product_fixture(%{
+            category: "token_pln",
+            provider_code: "PLN20",
+            cost: "20775",
+            margin_value: "1225"
+          })
+      }
+    end
+
+    defp check(ctx, number), do: Services.inquire(ctx.cashier, ctx.token.id, number)
+
+    defp buy(ctx, attrs) do
+      Services.record(
+        ctx.cashier,
+        ctx.token.id,
+        Map.merge(%{"customer_ref" => "99999999999", "amount_paid" => "22000"}, attrs)
+      )
+    end
+
+    test "is bought only after the meter's owner is checked", ctx do
+      assert buy(ctx, %{}) == {:error, :inquiry_expired}
+
+      assert {:ok, inquiry} = check(ctx, "1412-3344-441")
+
+      assert {inquiry.kind, inquiry.customer_name, inquiry.details} ==
+               {"customer", "PELANGGAN 4441", "R1/900VA"}
+
+      assert is_nil(inquiry.bill_amount)
+
+      assert {:ok, tx} = buy(ctx, %{"inquiry_id" => "#{inquiry.id}"})
+      assert tx.customer_ref == "14123344441"
+      assert {tx.customer_name, tx.customer_details} == {"PELANGGAN 4441", "R1/900VA"}
+      assert Decimal.equal?(tx.price, d("22000"))
+      refute tx.ref_id == inquiry.ref_id
+      assert is_nil(Services.provider_request(tx).inquiry_ref)
+
+      assert buy(ctx, %{"inquiry_id" => inquiry.id}) == {:error, :inquiry_expired}
+    end
+
+    test "the provider's refusals pass on", ctx do
+      assert check(ctx, "14123344446") == {:error, :not_found}
+      assert check(ctx, "14123344447") == {:error, :unavailable}
+    end
+
+    test "a manual account sells tokens without a check", ctx do
+      assign_account(default_store(), deposit_account_fixture())
+
+      assert {:ok, %{channel: "manual"}} =
+               buy(ctx, %{"customer_ref" => "14123344441"})
+    end
+  end
+
+  describe "what the vendor says about a product" do
+    setup do
+      api_store_fixture()
+
+      %{
+        cashier: user_on_shift_fixture(),
+        pulsa: service_product_fixture(%{provider_code: "TSEL10"})
+      }
+    end
+
+    defp vendor_status(product, status) do
+      Repo.update_all(from(p in Services.Product, where: p.id == ^product.id),
+        set: [provider_status: status]
+      )
+    end
+
+    defp sell_one(ctx) do
+      Services.record(ctx.cashier, ctx.pulsa.id, %{
+        "customer_ref" => "081234567891",
+        "amount_paid" => "12000"
+      })
+    end
+
+    test "a product the vendor can't sell is refused on an api account", ctx do
+      vendor_status(ctx.pulsa, "gangguan")
+      assert sell_one(ctx) == {:error, :product_unavailable}
+
+      vendor_status(ctx.pulsa, "tidak_ditemukan")
+      assert sell_one(ctx) == {:error, :product_unavailable}
+
+      vendor_status(ctx.pulsa, "normal")
+      assert {:ok, _} = sell_one(ctx)
+
+      vendor_status(ctx.pulsa, nil)
+      assert {:ok, _} = sell_one(ctx)
+    end
+
+    test "a manual account doesn't ask", ctx do
+      vendor_status(ctx.pulsa, "kosong")
+      assign_account(default_store(), deposit_account_fixture())
+      assert {:ok, %{channel: "manual"}} = sell_one(ctx)
+    end
+  end
+
   describe "sending and the provider's answers" do
     setup do
       store = api_store_fixture()
@@ -279,7 +382,11 @@ defmodule Zahlungs.ServicesApiTest do
 
       assert done.sent_at && done.resolved_at
 
-      token = ctx.cashier |> sell(ctx.token, "12345678901") |> reload()
+      {:ok, owner} = Services.inquire(ctx.cashier, ctx.token.id, "12345678901")
+
+      token =
+        ctx.cashier |> sell(ctx.token, "12345678901", %{"inquiry_id" => owner.id}) |> reload()
+
       assert token.status == "success"
       assert token.token_sn =~ ~r/^\d{20}$/
 

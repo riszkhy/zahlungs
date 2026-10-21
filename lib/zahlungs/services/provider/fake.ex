@@ -28,6 +28,14 @@ defmodule Zahlungs.Services.Provider.Fake do
   def credential_fields, do: [{"secret", "Secret callback"}]
 
   @impl true
+  def inquiry(_credentials, %{kind: :customer, customer_ref: number}) do
+    case last_digit(number) do
+      "7" -> {:error, :unavailable}
+      "6" -> {:error, :not_found}
+      _ -> {:ok, owner(number)}
+    end
+  end
+
   def inquiry(_credentials, %{customer_ref: number}) do
     case last_digit(number) do
       "7" -> {:error, :unavailable}
@@ -51,6 +59,20 @@ defmodule Zahlungs.Services.Provider.Fake do
       provider_total: bill_amount,
       details: nil,
       inquiry_ref: "INQ-" <> number
+    }
+  end
+
+  # The owner of a token PLN meter: a name and the tariff/power, no amount.
+  defp owner(number) do
+    %{
+      customer_name: "PELANGGAN " <> String.slice(number, -4, 4),
+      details: "R1/900VA",
+      period: nil,
+      sheets: 1,
+      bill_amount: nil,
+      provider_admin: nil,
+      provider_total: nil,
+      inquiry_ref: "CUS-" <> number
     }
   end
 
