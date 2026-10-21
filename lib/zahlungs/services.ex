@@ -29,7 +29,7 @@ defmodule Zahlungs.Services do
   alias Zahlungs.Accounts.User
   alias Zahlungs.{Deposits, LocalTime, Scope, Shifts, Stores}
   alias Zahlungs.Shifts.Shift
-  alias Zahlungs.Services.{Dispatcher, Inquiry, Product, Ref, Transaction}
+  alias Zahlungs.Services.{Dispatcher, Inquiry, Product, Provider, Ref, Transaction}
 
   @category_labels [
     {"pulsa", "Pulsa"},
@@ -733,6 +733,59 @@ defmodule Zahlungs.Services do
         {:ok, %Transaction{}} -> {:ok, :applied}
         {:ok, :already_final} -> {:ok, :already_final}
       end
+    end
+  end
+
+  @doc """
+  A provider's callback without a token in the URL (Smart Biller
+  Indonesia's): each adapter with `callback_ref/1` reads the ref from `params`;
+  it must name an api service whose account uses that adapter; then the
+  adapter checks the caller with that account's credentials, and the result
+  goes through `apply_result/2`. Refs are unique across organizations, so the
+  service is looked up in all of them, and its store's organization entered.
+
+  Returns `{:ok, :applied | :already_final}` or
+  `{:error, :unknown_ref | :invalid_signature}`.
+  """
+  def handle_ref_callback(params, headers) do
+    Enum.find_value(ref_readers(), {:error, :unknown_ref}, fn {key, adapter} ->
+      with {:ok, ref_id} <- adapter.callback_ref(params),
+           {:ok, transaction, account} <- ref_transaction(ref_id, key) do
+        settle_callback(transaction, account, params, headers)
+      else
+        _ -> nil
+      end
+    end)
+  end
+
+  defp ref_readers do
+    for {key, adapter} <- Provider.adapters(),
+        Code.ensure_loaded?(adapter) and function_exported?(adapter, :callback_ref, 1),
+        do: {key, adapter}
+  end
+
+  defp ref_transaction(ref_id, adapter_key) when is_binary(ref_id) do
+    with %Transaction{} = transaction <-
+           Repo.one(from t in Transaction, where: t.ref_id == ^ref_id and t.channel == "api"),
+         _ = enter_store_organization(transaction),
+         %Deposits.Account{provider: ^adapter_key} = account <-
+           Deposits.get_account!(transaction.deposit_account_id) do
+      {:ok, transaction, account}
+    else
+      _ -> :error
+    end
+  end
+
+  defp settle_callback(transaction, account, params, headers) do
+    case verify_callback(account, params, headers) do
+      {:ok, ref_id, result} when ref_id == transaction.ref_id ->
+        case apply_result(transaction.id, result) do
+          {:ok, %Transaction{}} -> {:ok, :applied}
+          {:ok, :already_final} -> {:ok, :already_final}
+        end
+
+      _ ->
+        {:error, :invalid_signature}
     end
   end
 

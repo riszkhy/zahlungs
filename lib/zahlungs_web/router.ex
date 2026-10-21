@@ -29,6 +29,7 @@ defmodule ZahlungsWeb.Router do
   scope "/api", ZahlungsWeb do
     pipe_through :api
 
+    post "/ppob/callback", PpobCallbackController, :create_by_ref
     post "/ppob/callback/:token", PpobCallbackController, :create
   end
 

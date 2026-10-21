@@ -81,8 +81,25 @@ defmodule Zahlungs.Services.Provider.Sbi do
 
   defp transaction_answer({:error, _reason}), do: {:error, :timeout}
 
+  @doc """
+  SBI signs nothing in a callback: it sends the member's password in `rqid`,
+  from its own address (`callback_ips`). Both must hold.
+  """
   @impl true
-  def verify_callback(_credentials, _params, _headers), do: {:error, :invalid_signature}
+  def verify_callback(credentials, params, headers) do
+    password = credentials["password"] || ""
+    rqid = headers["rqid"] || ""
+    ips = Keyword.get(config(), :callback_ips, [])
+
+    with true <- password != "" and Plug.Crypto.secure_compare(rqid, password),
+         true <- headers["x-zahlungs-client-ip"] in ips,
+         {:ok, ref_id} <- callback_ref(params),
+         {:ok, result} <- Reply.transaction(params) do
+      {:ok, ref_id, result}
+    else
+      _ -> {:error, :invalid_signature}
+    end
+  end
 
   @impl true
   def callback_ref(%{"ref_1" => ref_1}) when is_binary(ref_1) and ref_1 != "", do: {:ok, ref_1}
