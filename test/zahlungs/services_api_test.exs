@@ -107,9 +107,9 @@ defmodule Zahlungs.ServicesApiTest do
       assert {tx.sheets, tx.customer_name, tx.period} == {3, "PELANGGAN 3331", "AGU–OKT 2026"}
       assert Decimal.equal?(tx.bill_amount, d("735000"))
       assert Decimal.equal?(tx.price, d("744000"))
-      assert Decimal.equal?(tx.cost, d("739500"))
+      assert Decimal.equal?(tx.cost, d("735000"))
       assert Decimal.equal?(tx.change_due, d("6000"))
-      assert tx.ref_id == tx.code
+      assert tx.ref_id == inquiry.ref_id
       assert tx.service_inquiry_id == inquiry.id
       assert Repo.get!(Inquiry, inquiry.id).used_at
 
@@ -138,6 +138,60 @@ defmodule Zahlungs.ServicesApiTest do
 
       assert Services.record(ctx.cashier, ctx.bill.id, Map.delete(paying(inquiry), "inquiry_id")) ==
                {:error, :inquiry_expired}
+    end
+
+    test "the bill is paid with the inquiry's ref", ctx do
+      {:ok, inquiry} = Services.inquire(ctx.cashier, ctx.bill.id, "530011223341")
+      assert inquiry.ref_id =~ ~r/^Q#{ctx.store.id}/
+      assert inquiry.kind == "bill"
+      ref_id = inquiry.ref_id
+
+      assert {:ok, tx} = Services.record(ctx.cashier, ctx.bill.id, paying(inquiry))
+      assert tx.ref_id == ref_id
+      assert_received {:fake_provider, :pay, ^ref_id}
+    end
+
+    test "a bill costs the provider's total plus the shop's fee per sheet", ctx do
+      bill = api_product_fixture(%{api_extra_fee: "2000"})
+      {:ok, inquiry} = Services.inquire(ctx.cashier, bill.id, "530011223331")
+
+      assert Decimal.equal?(inquiry.provider_total, d("735000"))
+      assert Decimal.equal?(inquiry.provider_admin, d("0"))
+
+      assert {:ok, tx} = Services.record(ctx.cashier, bill.id, paying(inquiry))
+      assert Decimal.equal?(tx.price, d("741000"))
+      assert Decimal.equal?(tx.cost, d("735000"))
+      assert Decimal.equal?(tx.quoted_cost, d("735000"))
+    end
+
+    test "the vendor code is copied and used", ctx do
+      pulsa = service_product_fixture(%{provider_code: "TSEL10"})
+
+      {:ok, tx} =
+        Services.record(ctx.cashier, pulsa.id, %{
+          "customer_ref" => "081234567894",
+          "amount_paid" => "12000"
+        })
+
+      {:ok, _} = Services.update_product(pulsa, %{provider_code: "TSEL20"})
+      tx = Repo.get!(Services.Transaction, tx.id)
+
+      assert tx.provider_code == "TSEL10"
+      assert Decimal.equal?(tx.quoted_cost, tx.cost)
+      assert Services.provider_request(tx).product_code == "TSEL10"
+    end
+
+    test "api refs are unique across organizations", ctx do
+      pulsa = service_product_fixture(%{provider_code: "TSEL10"})
+
+      {:ok, tx} =
+        Services.record(ctx.cashier, pulsa.id, %{
+          "customer_ref" => "081234567891",
+          "amount_paid" => "12000"
+        })
+
+      assert tx.ref_id =~ ~r/^Z#{ctx.store.id}\d{12}[0-9A-F]{6}$/
+      refute tx.ref_id == tx.code
     end
 
     test "pulsa on an api account needs a vendor code", ctx do

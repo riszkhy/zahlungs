@@ -74,7 +74,7 @@ defmodule Zahlungs.ServicesFixtures do
     assign_account(Zahlungs.StoresFixtures.default_store(), api_account_fixture())
   end
 
-  @doc "A tagihan PLN product for api accounts: vendor code PLNPASCA, provider fee 1.500, admin 3.000."
+  @doc "A tagihan PLN product for api accounts: vendor code PLNPASCA, 3.000 added per sheet on api (manual: provider fee 1.500, admin 3.000)."
   def api_product_fixture(attrs \\ %{}) do
     attrs
     |> Enum.into(%{
@@ -82,7 +82,8 @@ defmodule Zahlungs.ServicesFixtures do
       category: "tagihan_pln",
       provider_code: "PLNPASCA",
       cost: "1500",
-      margin_value: "3000"
+      margin_value: "3000",
+      api_extra_fee: "3000"
     })
     |> service_product_fixture()
   end

@@ -29,7 +29,7 @@ defmodule Zahlungs.Services do
   alias Zahlungs.Accounts.User
   alias Zahlungs.{Deposits, LocalTime, Scope, Shifts, Stores}
   alias Zahlungs.Shifts.Shift
-  alias Zahlungs.Services.{Dispatcher, Inquiry, Product, Transaction}
+  alias Zahlungs.Services.{Dispatcher, Inquiry, Product, Ref, Transaction}
 
   @category_labels [
     {"pulsa", "Pulsa"},
@@ -145,12 +145,14 @@ defmodule Zahlungs.Services do
                store_id: store.id,
                user_id: user.id,
                service_product_id: product.id,
-               deposit_account_id: account.id
+               deposit_account_id: account.id,
+               ref_id: Ref.generate("Q", store.id),
+               kind: "bill"
              },
              %{customer_ref: customer_ref || ""}
            ),
-         {:ok, %{customer_ref: number}} <- Ecto.Changeset.apply_action(changeset, :insert),
-         {:ok, answer} <- ask_provider(account, product, number) do
+         {:ok, inquiry} <- Ecto.Changeset.apply_action(changeset, :insert),
+         {:ok, answer} <- ask_provider(account, product, inquiry) do
       changeset
       |> Inquiry.answer_changeset(answer)
       |> Ecto.Changeset.put_change(:expires_at, NaiveDateTime.add(now(), @inquiry_lifetime))
@@ -162,10 +164,19 @@ defmodule Zahlungs.Services do
     end
   end
 
-  @doc "What an inquired bill costs the customer and the shop: `%{price, cost}`."
+  @doc """
+  What an inquired bill costs the customer and the shop: `%{price, cost}`. The
+  customer pays the provider's total (bill and the provider's admin) plus the
+  shop's `api_extra_fee` per sheet; the shop's cost is the provider's total
+  until the provider says what it actually charged.
+  """
   def inquiry_price(%Inquiry{service_product: %Product{} = product} = inquiry) do
-    {:ok, price} = price_for(product, inquiry.bill_amount, inquiry.sheets)
-    price
+    total = inquiry.provider_total || inquiry.bill_amount
+
+    %{
+      price: Decimal.add(total, Decimal.mult(product.api_extra_fee, inquiry.sheets)),
+      cost: total
+    }
   end
 
   defp open_shift(user) do
@@ -193,14 +204,16 @@ defmodule Zahlungs.Services do
   defp blank_code?(%Product{provider_code: code}), do: code in [nil, ""]
 
   # The provider gets @inquiry_timeout; past that it counts as unavailable.
-  defp ask_provider(account, product, number) do
+  defp ask_provider(account, product, inquiry) do
     case Deposits.provider(account) do
       {:ok, adapter, credentials} ->
         task =
           Task.async(fn ->
             adapter.inquiry(credentials, %{
+              ref_id: inquiry.ref_id,
               product_code: product.provider_code,
-              customer_ref: number
+              customer_ref: inquiry.customer_ref,
+              kind: if(inquiry.kind == "customer", do: :customer, else: :bill)
             })
           end)
 
@@ -263,7 +276,7 @@ defmodule Zahlungs.Services do
          channel = if(Deposits.api?(account), do: "api", else: "manual"),
          :ok <- sellable_through(channel, product),
          {:ok, bill} <- bill_details(channel, product, store, attrs),
-         {:ok, %{price: price, cost: cost}} <- price_for(product, bill.amount, bill.sheets),
+         {:ok, %{price: price, cost: cost}} <- priced(product, bill),
          :ok <- check_quoted_price(attrs["expected_price"], price),
          {:ok, payment} <- settle(attrs, price),
          :ok <- use_inquiry(bill.inquiry) do
@@ -276,7 +289,9 @@ defmodule Zahlungs.Services do
         service_product_id: product.id,
         deposit_account_id: account.id,
         code: code,
-        ref_id: code,
+        ref_id: transaction_ref(channel, store, code, bill.inquiry),
+        provider_code: if(channel == "api", do: product.provider_code),
+        quoted_cost: cost,
         channel: channel,
         category: product.category,
         product_name: product.name,
@@ -297,6 +312,23 @@ defmodule Zahlungs.Services do
       |> Repo.insert()
     end
   end
+
+  # A bill from an inquiry is priced from the provider's answer; anything else
+  # from the product.
+  defp priced(%Product{} = product, %{inquiry: %Inquiry{kind: "bill"} = inquiry}),
+    do: {:ok, inquiry_price(%{inquiry | service_product: product})}
+
+  defp priced(product, bill), do: price_for(product, bill.amount, bill.sheets)
+
+  # What the provider knows the service by: a bill keeps its inquiry's ref (the
+  # provider pays the bill it was asked about); other api services get their
+  # own, unique across organizations; a manual one is its code.
+  defp transaction_ref("api", _store, _code, %Inquiry{kind: "bill", ref_id: ref_id})
+       when is_binary(ref_id),
+       do: ref_id
+
+  defp transaction_ref("api", store, _code, _inquiry), do: Ref.generate("Z", store.id)
+  defp transaction_ref(_manual, _store, code, _inquiry), do: code
 
   # Through the provider, a product needs the vendor's code.
   defp sellable_through("api", product),
@@ -428,21 +460,26 @@ defmodule Zahlungs.Services do
   @doc false
   # What the provider is sent about a service (pay and status alike).
   def provider_request(%Transaction{} = transaction) do
-    product = Repo.get!(Product, transaction.service_product_id)
-
+    # Only a bill is paid against its inquiry; a token PLN's owner check is not.
     inquiry_ref =
       transaction.service_inquiry_id &&
         Repo.one(
-          from i in Inquiry, where: i.id == ^transaction.service_inquiry_id, select: i.inquiry_ref
+          from i in Inquiry,
+            where: i.id == ^transaction.service_inquiry_id and i.kind == "bill",
+            select: i.inquiry_ref
         )
 
     %{
       ref_id: transaction.ref_id,
-      product_code: product.provider_code,
+      product_code: transaction.provider_code || product_code(transaction),
       customer_ref: transaction.customer_ref,
       inquiry_ref: inquiry_ref
     }
   end
+
+  # Services recorded before vendor codes were copied read the product's.
+  defp product_code(%Transaction{service_product_id: id}),
+    do: Repo.one(from p in Product, where: p.id == ^id, select: p.provider_code)
 
   # Background work has no user: the store says whose data this is.
   defp enter_store_organization(%Transaction{store_id: store_id}) do

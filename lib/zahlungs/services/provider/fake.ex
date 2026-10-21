@@ -40,11 +40,16 @@ defmodule Zahlungs.Services.Provider.Fake do
   defp bill(number) do
     sheets = if String.at(number, -2) == "3", do: 3, else: 1
 
+    bill_amount = Decimal.mult(@sheet, sheets)
+
     %{
       customer_name: "PELANGGAN " <> String.slice(number, -4, 4),
       period: if(sheets == 3, do: "AGU–OKT 2026", else: "OKT 2026"),
       sheets: sheets,
-      bill_amount: Decimal.mult(@sheet, sheets),
+      bill_amount: bill_amount,
+      provider_admin: Decimal.new(0),
+      provider_total: bill_amount,
+      details: nil,
       inquiry_ref: "INQ-" <> number
     }
   end

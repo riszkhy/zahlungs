@@ -52,9 +52,15 @@ defmodule Zahlungs.Services.Inquiry do
       period: answer.period |> to_string() |> String.slice(0, 60),
       sheets: answer.sheets,
       bill_amount: answer.bill_amount,
+      provider_admin: Map.get(answer, :provider_admin),
+      provider_total: Map.get(answer, :provider_total) || answer.bill_amount,
+      details: answer |> Map.get(:details) |> clip(120),
       inquiry_ref: answer.inquiry_ref
     })
     |> validate_number(:sheets, greater_than: 0)
     |> validate_number(:bill_amount, greater_than: 0)
   end
+
+  defp clip(nil, _max), do: nil
+  defp clip(value, max), do: value |> to_string() |> String.trim() |> String.slice(0, max)
 end
