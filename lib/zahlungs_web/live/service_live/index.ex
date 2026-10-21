@@ -382,12 +382,20 @@ defmodule ZahlungsWeb.ServiceLive.Index do
     transaction.inserted_at |> Zahlungs.LocalTime.to_local(store) |> Calendar.strftime("%H:%M")
   end
 
-  defp api_bill?(assigns),
-    do: (assigns.api and assigns.selected) && Product.bill?(assigns.selected)
+  # On an api account, a bill and a token PLN are checked with the provider
+  # before the money is taken.
+  defp checked?(%{api: true, selected: %Product{category: category}}),
+    do: category in ["tagihan_pln", "token_pln"]
+
+  defp checked?(_assigns), do: false
+
+  # The shop's extra fee on an inquired bill: the price above the provider's total.
+  defp extra_fee(%{price: price}, inquiry),
+    do: Decimal.sub(price, inquiry.provider_total || inquiry.bill_amount)
 
   @impl true
   def render(assigns) do
-    assigns = assign(assigns, :api_bill, api_bill?(assigns))
+    assigns = assign(assigns, :api_bill, checked?(assigns))
 
     ~H"""
     <.header>
@@ -461,29 +469,38 @@ defmodule ZahlungsWeb.ServiceLive.Index do
       <section class="cart-panel lg:col-span-2">
         <p :if={is_nil(@selected)} class="text-sm text-gray-500">Pilih produk di kiri.</p>
 
-        <%!-- An api bill: check it with the provider first. --%>
+        <%!-- An api bill or token: check it with the provider first. --%>
         <form :if={@api_bill} phx-change="change" phx-submit="inquire" class="space-y-3">
           <p class="font-medium">{@selected.name}</p>
           <label class="block text-sm">
-            ID pelanggan
+            {if Product.bill?(@selected), do: "ID pelanggan", else: "Nomor meter / ID pelanggan"}
             <input type="text" inputmode="numeric" name="service[customer_ref]" value={@form["customer_ref"]} class="form-control" autocomplete="off" required />
           </label>
           <button type="submit" phx-disable-with="Mengecek..." class="btn btn-primary w-full">
-            Cek tagihan
+            {if Product.bill?(@selected), do: "Cek tagihan", else: "Cek pelanggan"}
           </button>
         </form>
 
         <div :if={@api_bill && @inquiry} id="inquiry" class="mt-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm">
           <p class="font-semibold text-gray-800">{@inquiry.customer_name}</p>
           <p class="text-gray-600">
-            {group_digits(@inquiry.customer_ref)} · {@inquiry.period} · {@inquiry.sheets} lembar
+            {group_digits(@inquiry.customer_ref)}<span :if={@inquiry.period}> · {@inquiry.period}</span><span :if={@inquiry.kind == "bill"}> · {@inquiry.sheets} lembar</span><span :if={@inquiry.details}> · {@inquiry.details}</span>
           </p>
-          <div class="mt-2 flex justify-between"><span>Tagihan</span><span>{format_money(@inquiry.bill_amount)}</span></div>
-          <div class="flex justify-between">
-            <span>Biaya admin</span>
-            <span>{format_money(Decimal.sub(@preview.price, @inquiry.bill_amount))}</span>
+          <div :if={@inquiry.kind == "bill"}>
+            <div class="mt-2 flex justify-between"><span>Tagihan</span><span>{format_money(@inquiry.bill_amount)}</span></div>
+            <div class="flex justify-between">
+              <span>Admin penyedia</span>
+              <span>{format_money(@inquiry.provider_admin || Decimal.new(0))}</span>
+            </div>
+            <div class="flex justify-between">
+              <span>Tambahan toko</span>
+              <span>{format_money(extra_fee(@preview, @inquiry))}</span>
+            </div>
           </div>
-          <div class="mt-1 flex justify-between font-semibold"><span>Total</span><span>{format_money(@preview.price)}</span></div>
+          <div class="mt-1 flex justify-between font-semibold">
+            <span>{if @inquiry.kind == "bill", do: "Total", else: "Harga"}</span>
+            <span>{format_money(@preview.price)}</span>
+          </div>
         </div>
 
         <form :if={@selected && (not @api_bill or @inquiry)} phx-change="change" phx-submit="record" class={["space-y-3", @api_bill && "mt-4"]}>
@@ -581,6 +598,9 @@ defmodule ZahlungsWeb.ServiceLive.Index do
         <span class="min-w-0 flex-1">
           <span class="block truncate font-medium">{tx.product_name} · {group_digits(tx.customer_ref)}</span>
           <span :if={tx.token_sn} class="block text-xs text-gray-500">Token / SN: {tx.token_sn}</span>
+          <span :if={tx.review_reason} class="block text-xs font-medium text-amber-700">
+            Perlu ditinjau — admin akan meninjau
+          </span>
           <span :if={tx.failure_reason || tx.provider_message} class="block text-xs text-gray-500">
             {tx.failure_reason || tx.provider_message}
           </span>

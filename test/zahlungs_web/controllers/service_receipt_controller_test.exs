@@ -67,6 +67,34 @@ defmodule ZahlungsWeb.ServiceReceiptControllerTest do
     assert response =~ "Diproses"
   end
 
+  test "a token through the provider shows its owner, power and the token in groups of four",
+       %{conn: conn, cashier: cashier} do
+    api_store_fixture()
+
+    token =
+      service_product_fixture(%{
+        category: "token_pln",
+        provider_code: "PLN20",
+        cost: "20775",
+        margin_value: "1225"
+      })
+
+    {:ok, owner} = Services.inquire(cashier, token.id, "14123344441")
+
+    {:ok, tx} =
+      Services.record(cashier, token.id, %{"inquiry_id" => owner.id, "amount_paid" => "22000"})
+
+    tx = Services.get_transaction!(scope(cashier), tx.id)
+    assert tx.token_sn =~ ~r/^\d{20}$/
+
+    response =
+      conn |> log_in_user(cashier) |> get("/services/#{tx.id}/receipt") |> html_response(200)
+
+    assert response =~ ZahlungsWeb.ServiceLive.Index.group_digits(tx.token_sn)
+    assert response =~ "PELANGGAN 4441"
+    assert response =~ "R1/900VA"
+  end
+
   test "a bill paid through the provider shows the customer, period and reference",
        %{conn: conn, cashier: cashier} do
     api_store_fixture()

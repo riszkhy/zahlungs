@@ -284,6 +284,66 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       })
     end
 
+    test "a token is bought after checking the meter's owner", ctx do
+      token =
+        service_product_fixture(%{
+          category: "token_pln",
+          provider_code: "PLN20",
+          cost: "20775",
+          margin_value: "1225"
+        })
+
+      socket =
+        ctx.socket
+        |> event("set_category", %{"category" => "token_pln"})
+        |> event("select", %{"id" => token.id})
+
+      assert html(socket) =~ "Cek pelanggan"
+      refute html(socket) =~ ~s(phx-submit="record")
+
+      socket = event(socket, "inquire", %{"service" => %{"customer_ref" => "1412-3344-441"}})
+      rendered = html(socket)
+      assert rendered =~ "PELANGGAN 4441"
+      assert rendered =~ "R1/900VA"
+      assert rendered =~ "Rp 22.000,00"
+      assert rendered =~ ~s(phx-submit="record")
+
+      socket =
+        event(socket, "record", %{
+          "service" => %{"payment_method" => "cash", "amount_paid" => "22.000"}
+        })
+
+      assert flash(socket, :info) =~ "penyedia"
+      assert [tx] = Services.list_shift_transactions(ctx.shift)
+
+      assert {tx.status, tx.customer_ref, tx.customer_details} ==
+               {"success", "14123344441", "R1/900VA"}
+    end
+
+    test "a bill shows the provider's admin and the shop's extra fee", ctx do
+      rendered = ctx.socket |> checked(ctx.bill, "530011223331") |> html()
+      assert rendered =~ "Admin penyedia"
+      assert rendered =~ "Tambahan toko"
+      assert rendered =~ "Rp 9.000,00"
+      assert rendered =~ "Rp 744.000,00"
+    end
+
+    test "a service held for review says so", ctx do
+      {:ok, tx} =
+        Services.record(ctx.cashier, ctx.pulsa.id, %{
+          "customer_ref" => "081234567891",
+          "amount_paid" => "12000"
+        })
+
+      {:ok, _} = Services.apply_result(tx.id, %{status: :refunded, message: "Refund transaksi"})
+
+      {:ok, _} =
+        Services.apply_result(tx.id, %{status: :success, token_sn: "SN", provider_ref: "R"})
+
+      rendered = ServiceLive.Index |> mount_live(ctx.cashier) |> html()
+      assert rendered =~ "Perlu ditinjau"
+    end
+
     test "a bill is checked, shown, then paid", ctx do
       socket = checked(ctx.socket, ctx.bill, "5300 1122 3331")
       rendered = html(socket)

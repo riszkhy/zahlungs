@@ -48,8 +48,8 @@ defmodule Zahlungs.Services.Inquiry do
   def answer_changeset(changeset, answer) do
     changeset
     |> change(%{
-      customer_name: answer.customer_name |> to_string() |> String.slice(0, 120),
-      period: answer.period |> to_string() |> String.slice(0, 60),
+      customer_name: clip(answer.customer_name, 120),
+      period: clip(answer.period, 60),
       sheets: answer.sheets,
       bill_amount: answer.bill_amount,
       provider_admin: Map.get(answer, :provider_admin),
