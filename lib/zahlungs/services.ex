@@ -498,21 +498,23 @@ defmodule Zahlungs.Services do
 
   A failure on a shift already closed is flagged `failed_after_shift_close`:
   the closed shift's figures stay as they were (see `shift_totals/1`).
-  Every change is broadcast to the store (`subscribe/1`).
+
+  An answer may also carry `actual_cost` (what the provider charged: it
+  becomes `cost`, and marks the product's `provider_price` when above the
+  product's cost) and `payload` (the raw answer, kept up to 4000 characters).
+  `:refunded` on a processing service is a failure.
+
+  An answer that contradicts a final status — a refund after success, or a
+  success after failure — changes nothing but `review_reason`, for an admin to
+  decide (`resolve_review/3`). Every change is broadcast to the store
+  (`subscribe/1`).
   """
   def apply_result(transaction_id, result) do
     fn ->
       case lock_transaction(transaction_id) do
-        %Transaction{status: "processing"} = transaction ->
-          {:ok, updated} =
-            transaction
-            |> Ecto.Changeset.change(result_changes(transaction, result))
-            |> Repo.update()
-
-          updated
-
-        _ ->
-          :already_final
+        %Transaction{status: "processing"} = transaction -> settle_result(transaction, result)
+        %Transaction{} = transaction -> hold_contradiction(transaction, result)
+        nil -> :already_final
       end
     end
     |> Repo.transaction()
@@ -521,6 +523,57 @@ defmodule Zahlungs.Services do
       _ -> :ok
     end)
   end
+
+  defp settle_result(transaction, result) do
+    {:ok, updated} =
+      transaction
+      |> Ecto.Changeset.change(result_changes(transaction, result))
+      |> Ecto.Changeset.change(answer_copies(result))
+      |> Repo.update()
+
+    note_vendor_price(updated, result)
+    updated
+  end
+
+  defp answer_copies(result) do
+    %{
+      cost: Map.get(result, :actual_cost),
+      provider_payload: clip(Map.get(result, :payload), 4000)
+    }
+    |> Map.reject(fn {_field, value} -> is_nil(value) end)
+  end
+
+  # The provider charges more than the product's cost: the admin should see it.
+  defp note_vendor_price(%Transaction{service_product_id: id}, %{actual_cost: %Decimal{} = cost}) do
+    Repo.update_all(
+      from(p in Product, where: p.id == ^id and p.cost < ^cost),
+      [set: [provider_price: cost, provider_checked_at: now()]],
+      skip_org_id: true
+    )
+  end
+
+  defp note_vendor_price(_transaction, _result), do: :ok
+
+  defp hold_contradiction(
+         %Transaction{status: "success"} = transaction,
+         %{status: :refunded} = r
+       ),
+       do: hold(transaction, "Penyedia melaporkan refund: " <> (Map.get(r, :message) || "-"))
+
+  defp hold_contradiction(%Transaction{status: "failed"} = transaction, %{status: :success}),
+    do: hold(transaction, "Penyedia melaporkan berhasil setelah transaksi gagal")
+
+  defp hold_contradiction(_transaction, _result), do: :already_final
+
+  defp hold(transaction, reason) do
+    {:ok, held} =
+      transaction |> Ecto.Changeset.change(review_reason: clip(reason, 255)) |> Repo.update()
+
+    held
+  end
+
+  defp result_changes(transaction, %{status: :refunded} = result),
+    do: result_changes(transaction, %{result | status: :failed})
 
   defp result_changes(_transaction, %{status: :success} = result) do
     %{
@@ -773,6 +826,74 @@ defmodule Zahlungs.Services do
     do: NaiveDateTime.diff(now, transaction.inserted_at) >= @settle_by_hand_after
 
   def awaiting_too_long?(_transaction, _now), do: false
+
+  ## Reviews
+
+  @doc """
+  An admin decides about an answer that contradicted a final status (see
+  `apply_result/2`). `:keep` leaves the status and drops the flag; `:refund`
+  (a success the provider took back) fails it, so its money waits under
+  "Perlu dikembalikan" and stops counting against the deposit. Locks the row.
+
+  Returns `{:ok, transaction}` or `{:error, :forbidden | :not_in_review}`.
+  """
+  def resolve_review(%Transaction{id: id}, %User{role: "admin"} = admin, decision)
+      when decision in [:keep, :refund] do
+    fn ->
+      case review(lock_transaction(id), admin, decision) do
+        {:ok, transaction} -> transaction
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end
+    |> Repo.transaction()
+    |> tap(fn
+      {:ok, transaction} -> broadcast(transaction)
+      _ -> :ok
+    end)
+  end
+
+  def resolve_review(%Transaction{}, %User{}, _decision), do: {:error, :forbidden}
+
+  defp review(%Transaction{review_reason: reason} = transaction, admin, :keep)
+       when is_binary(reason) do
+    transaction |> reviewed(admin) |> Repo.update()
+  end
+
+  defp review(
+         %Transaction{status: "success", review_reason: reason} = transaction,
+         admin,
+         :refund
+       )
+       when is_binary(reason) do
+    transaction
+    |> reviewed(admin)
+    |> Ecto.Changeset.change(
+      status: "failed",
+      failure_reason: reason,
+      resolved_at: now(),
+      failed_after_shift_close: shift_closed?(transaction)
+    )
+    |> Repo.update()
+  end
+
+  defp review(_transaction, _admin, _decision), do: {:error, :not_in_review}
+
+  defp reviewed(transaction, admin) do
+    Ecto.Changeset.change(transaction,
+      review_reason: nil,
+      reviewed_at: now(),
+      reviewed_by_id: admin.id
+    )
+  end
+
+  @doc "The services of a deposit account waiting for an admin's review, newest first."
+  def list_in_review(%Deposits.Account{id: account_id}) do
+    Repo.all(
+      from t in Transaction,
+        where: t.deposit_account_id == ^account_id and not is_nil(t.review_reason),
+        order_by: [desc: t.updated_at, desc: t.id]
+    )
+  end
 
   ## Reading
 

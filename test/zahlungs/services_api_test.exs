@@ -308,16 +308,21 @@ defmodule Zahlungs.ServicesApiTest do
       refute_received {:fake_provider, :pay, ^ref_id}
     end
 
-    test "a late answer for a settled service is ignored", ctx do
+    test "a late answer never changes a settled service", ctx do
       tx = sell(ctx.cashier, ctx.pulsa, "081234567899")
 
       assert {:ok, %Services.Transaction{status: "failed"}} =
                Services.apply_result(tx.id, %{status: :failed, message: "Gagal di penyedia"})
 
-      assert Services.apply_result(tx.id, %{status: :success, token_sn: "X", provider_ref: "Y"}) ==
+      assert Services.apply_result(tx.id, %{status: :failed, message: "lagi"}) ==
                {:ok, :already_final}
 
-      assert reload(tx).status == "failed"
+      # A contradicting one is held for an admin instead (see services_review_test).
+      assert {:ok, %Services.Transaction{}} =
+               Services.apply_result(tx.id, %{status: :success, token_sn: "X", provider_ref: "Y"})
+
+      assert %{status: "failed", token_sn: nil, review_reason: reason} = reload(tx)
+      assert reason =~ "berhasil setelah"
     end
 
     test "changes are broadcast to the store", ctx do
