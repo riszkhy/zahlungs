@@ -274,3 +274,27 @@ Berlaku bila akun deposit toko bermode **API** (diatur di `/admin/deposits`).
   pencocokan). **/admin/services**: kolom "Kode produk vendor".
 - **`POST /api/ppob/callback/:token`**: dipanggil penyedia, bukan orang;
   tanpa login, diverifikasi dengan token akun dan tanda tangan penyedia.
+
+## Layanan PPOB lewat Smart Biller Indonesia (SBI)
+
+- **Token PLN** (akun API): pilih produk → isi nomor meter → **Cek
+  pelanggan** → tampil nama dan tarif/daya → terima uang → **Bayar**. Tanpa cek
+  pelanggan, token tidak bisa dibayar.
+- **Kartu tagihan**: tagihan, admin penyedia, tambahan toko (biaya tambahan
+  per lembar yang diatur admin), total.
+- **Perlu ditinjau**: bila SBI menjawab bertentangan dengan status transaksi
+  (refund setelah berhasil, atau berhasil setelah gagal), status tidak berubah
+  sendiri. Kasir melihat tanda "Perlu ditinjau" di riwayat; admin memutuskan di
+  halaman akun deposit: **Batalkan dan kembalikan uang** (masuk Perlu
+  dikembalikan) atau **Tetap berhasil / Tetap gagal**.
+- **/admin/deposits** (penyedia SBI): Member ID, PIN, Password (tidak pernah
+  ditampilkan lagi); URL callback `…/api/ppob/callback` untuk didaftarkan di
+  SBI; Tes koneksi dan Ambil saldo memakai saldo SBI.
+- **/admin/services**: **Cari di daftar SBI** di form produk (mengisi kode,
+  nama, modal, kategori; tagihan menampilkan admin dan komisi SBI); kolom
+  **Biaya tambahan toko (akun API)** untuk tagihan; tombol **Perbarui dari
+  SBI** (ringkasan perubahan modal dan status, disimpan setelah disetujui);
+  tanda **Gangguan / Kosong / Tidak ditemukan** (tidak bisa dijual lewat akun
+  API) dan **Modal SBI naik**.
+- **`POST /api/ppob/callback`** (tanpa token): callback SBI, dikenali dari
+  `ref_1`, dipercaya hanya dengan header `rqid` (password akun) dari IP SBI.

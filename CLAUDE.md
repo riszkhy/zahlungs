@@ -37,7 +37,7 @@ JS/CSS assets live in `assets/` and are built by the `esbuild`/`tailwind` mix wr
 ## Production / releases
 
 - Built as an OTP release via `build.sh` (bare metal) or the multi-stage `Dockerfile`. Release-safe entry points in `lib/release.ex`: `Release.migrate`, `Release.seed`, `Release.rollback/2` — exposed as `bin/migrate`, `bin/seed`, `bin/server` overlays (`rel/overlays/bin/`).
-- Prod config is runtime-driven (`config/runtime.exs`, only active when `config_env() == :prod`): requires `DATABASE_URL` and `SECRET_KEY_BASE`; optional `PHX_HOST`, `PORT`, `POOL_SIZE`, `UTC_OFFSET_HOURS`, `MAIL_FROM`, `FORCE_SSL` (behind a TLS proxy), `DATABASE_SSL`, `HTTPS_PORT` + `SSL_CERT_PATH` + `SSL_KEY_PATH` (HTTPS served by the app, for LAN use), and `SEED_*` vars for first accounts. Seeds never insert dev passwords or sample catalog in prod. Full guide: `docs/DEPLOYMENT.md`.
+- Prod config is runtime-driven (`config/runtime.exs`, only active when `config_env() == :prod`): requires `DATABASE_URL` and `SECRET_KEY_BASE`; optional `PHX_HOST`, `PORT`, `POOL_SIZE`, `UTC_OFFSET_HOURS`, `MAIL_FROM`, `FORCE_SSL` (behind a TLS proxy), `TRUSTED_PROXIES` (reverse proxies whose X-Forwarded-For is believed, for PPOB callbacks), `DATABASE_SSL`, `HTTPS_PORT` + `SSL_CERT_PATH` + `SSL_KEY_PATH` (HTTPS served by the app, for LAN use), and `SEED_*` vars for first accounts. Seeds never insert dev passwords or sample catalog in prod. Full guide: `docs/DEPLOYMENT.md`.
 - No real mail adapter is configured: in prod `Zahlungs.Mailer.delivers?/0` is false, a warning is logged at boot and the login page hides "Forgot password?". Admins reset passwords and confirm users at `/admin/users`.
 
 ## Architecture
@@ -88,7 +88,7 @@ Spec: `docs/superpowers/specs/2026-10-16-layanan-ppob-fase-0-design.md`. The cas
 
 ### PPOB Fase 1 (provider API)
 
-Spec: `docs/superpowers/specs/2026-10-19-layanan-ppob-fase-1-design.md`. Per deposit account, `mode` is `manual` (Fase 0, above) or `api`: Zahlungs itself talks to the provider. The real vendor isn't chosen yet; `Services.Provider.Fake` stands in.
+Spec: `docs/superpowers/specs/2026-10-19-layanan-ppob-fase-1-design.md`. Per deposit account, `mode` is `manual` (Fase 0, above) or `api`: Zahlungs itself talks to the provider: Smart Biller Indonesia (`Provider.Sbi`, below) or, in dev/test only, `Services.Provider.Fake`.
 
 - **Provider** (`services/provider.ex`): a behaviour (`credential_fields/0`, `inquiry/2`, `pay/2`, `status/2`, `verify_callback/3`, `ping/1`, optional `balance/1`); adapters are registered by key in `config :zahlungs, :provider_adapters` (default: the fake one; test adds `Provider.Broken` from `test/support`). Results are `%{status: :success | :failed | :pending, ...}`; a timeout or network error is *pending*, never failed. The fake answers by the number's last digit (see its moduledoc).
 - **Credentials** are encrypted with a key derived from `secret_key_base` (`Deposits.Credentials`), write-only in the form (a blank field keeps what is stored), redacted on the schema. `Deposits.provider/1` gives `{:ok, adapter, credentials}` for api accounts; `Deposits.connection/1` does the same regardless of mode, for answering services sent before a switch to manual.
@@ -97,6 +97,19 @@ Spec: `docs/superpowers/specs/2026-10-19-layanan-ppob-fase-1-design.md`. Per dep
 - **Settling pending:** `Services.StatusChecker` (GenServer, every 60 s) runs `check_pending/1`: re-asks the provider 30 s after the last check (or after sending), sends unsent ones; a service that raises is logged and doesn't stop the round. Providers may also call `POST /api/ppob/callback/:token` (`PpobCallbackController`, token per account, signature checked by the adapter).
 - **Failures are refunded by a person.** A failed api service waits under "Perlu dikembalikan" until the cashier confirms (`Services.confirm_refund/2`), and counts in its shift's cash until then (the money is still in the drawer). Refunded on its own shift, it leaves that drawer; refunded on any other shift (later, or a colleague's), it is a `refund` cash-out there and is flagged `failed_after_shift_close`, so it keeps counting in its own shift. `mark_success`/`mark_failed` return `{:error, :not_manual}` for api services, except for an admin once the service has waited 10 minutes (`Services.awaiting_too_long?/1`).
 - **Test config:** `config :zahlungs, :service_dispatch, :inline` and `:service_status_checker, false` (`config/test.exs`); call `Services.check_pending/1` with a later time to settle in tests.
+
+### PPOB through Smart Biller Indonesia (SBI)
+
+Spec: `docs/superpowers/specs/2026-10-21-layanan-ppob-sbi-design.md`. SBI has no sandbox: the first real trial uses a small deposit (checklist in `docs/DEPLOYMENT.md`).
+
+- **Adapter** `services/provider/sbi.ex` (key `"sbi"`; prod registers only this one): signed JSON (`Sbi.Sign`), answers read by `Sbi.Reply` (status 1/2/11, RC in `msg`, SN, actual cost), HTTP through `Sbi.Client` (`:httpc`, TLS verified, HTTPS only). Config `config :zahlungs, Zahlungs.Services.Provider.Sbi` (`base_url`, `client`, `callback_ips`, `pricelist_url`). Credentials: Member ID, PIN, Password. Rule: when in doubt (timeout, HTTP 5xx, not JSON, RC:94/08, unknown RC, any error on `status`) it is **pending**, never failed.
+- **Tests never call SBI:** `config/test.exs` uses `Sbi.StubClient` (`test/support`): `expect(action, answer)` queues answers per test process (found through `$callers`), `respond(action, fun)` answers concurrent requests, `requests/0` lists what was sent. The catalog cache's `ttl` is 0 in tests.
+- **Refs** (`Services.Ref`): `Z…` for an api transaction, `Q…` for an inquiry — store id + time + random, unique across organizations. A bill is paid with its inquiry's ref (SBI requires the same `ref_1`); a token PLN isn't.
+- **Copies on the transaction:** `provider_code`, `quoted_cost` (cost when recorded), `cost` replaced by the vendor's `actual_cost`, `provider_payload` (raw answer, ≤ 4000 chars), `customer_details` (tariff/power). An actual cost above the product's cost sets the product's `provider_price` ("Modal SBI naik").
+- **Prices on api:** a bill costs `provider_total` (bill + provider admin) + `api_extra_fee` × sheets; a token PLN needs a `"customer"` inquiry first (owner check, `CPLNPRA` at SBI). A product whose `provider_status` is set and not `normal` can't be sold through an api account.
+- **Reviews:** an answer that contradicts a final status (refund after success, success after failure) only sets `review_reason`; an admin decides on the deposit account page (`Services.resolve_review/3`: `:refund` fails it into "Perlu dikembalikan", `:keep`).
+- **Callbacks:** `POST /api/ppob/callback` (no token) → `Services.handle_ref_callback/2`: the adapter's `callback_ref/1` names the service (SBI `ref_1`), its account's adapter verifies (SBI: `rqid` header = password, and the caller's address in `callback_ips`). The caller's address is `ZahlungsWeb.ClientIp.of/2`: `X-Forwarded-For` only from `config :zahlungs, :trusted_proxies` (`TRUSTED_PROXIES` in prod), passed to adapters as header `"x-zahlungs-client-ip"`, always set by the controller.
+- **Catalog:** `Services.search_catalog/2` (SBI's public price list, kept in `Services.CatalogCache` for 10 minutes, never stored) fills the product form; `Services.price_update/1` + `apply_price_update/2` refresh cost and status from the member's prices (`/api/price`).
 
 ### Multi-store
 
