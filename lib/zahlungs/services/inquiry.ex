@@ -14,6 +14,14 @@ defmodule Zahlungs.Services.Inquiry do
     field :sheets, :integer, default: 1
     field :bill_amount, :decimal
     field :inquiry_ref, :string
+    # The ref Zahlungs sent (a bill is paid with the same one), what the
+    # provider adds and its total, and the tariff/power it described.
+    field :ref_id, :string
+    field :provider_admin, :decimal
+    field :provider_total, :decimal
+    field :details, :string
+    # "bill" (tagihan PLN) or "customer" (the owner of a token PLN meter).
+    field :kind, :string, default: "bill"
     field :expires_at, :naive_datetime
     field :used_at, :naive_datetime
 
@@ -24,6 +32,8 @@ defmodule Zahlungs.Services.Inquiry do
 
     timestamps()
   end
+
+  def kinds, do: ~w(bill customer)
 
   @doc "The customer number, cleaned and checked like a transaction's."
   def number_changeset(%__MODULE__{} = inquiry, attrs) do

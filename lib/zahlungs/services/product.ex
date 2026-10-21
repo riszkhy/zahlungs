@@ -21,6 +21,14 @@ defmodule Zahlungs.Services.Product do
     field :cost, :decimal, default: Decimal.new(0)
     field :margin_type, :string, default: "amount"
     field :margin_value, :decimal, default: Decimal.new(0)
+    # Tagihan PLN through an api account: what the shop adds per sheet on top
+    # of the provider's total.
+    field :api_extra_fee, :decimal, default: Decimal.new(0)
+    # What the vendor last said about the product (catalog refresh, or a
+    # transaction's actual cost): its price and whether it can be sold.
+    field :provider_price, :decimal
+    field :provider_status, :string
+    field :provider_checked_at, :naive_datetime
     field :active, :boolean, default: true
     field :deleted_at, :naive_datetime
 
@@ -31,6 +39,9 @@ defmodule Zahlungs.Services.Product do
 
   def categories, do: @categories
   def margin_types, do: @margin_types
+
+  @doc "What the vendor can say about a product."
+  def provider_statuses, do: ~w(normal gangguan kosong tidak_ditemukan)
 
   @doc "Whether the amount is entered per transaction (a bill) rather than fixed."
   def bill?(%__MODULE__{category: "tagihan_pln"}), do: true
@@ -47,6 +58,7 @@ defmodule Zahlungs.Services.Product do
       :cost,
       :margin_type,
       :margin_value,
+      :api_extra_fee,
       :active
     ])
     |> validate_required([:name, :category, :cost, :margin_type, :margin_value])
@@ -56,6 +68,7 @@ defmodule Zahlungs.Services.Product do
     |> validate_inclusion(:category, @categories)
     |> validate_inclusion(:margin_type, @margin_types)
     |> validate_number(:margin_value, greater_than_or_equal_to: 0)
+    |> validate_number(:api_extra_fee, greater_than_or_equal_to: 0)
     |> validate_cost()
     |> Zahlungs.Organizations.put_organization()
   end

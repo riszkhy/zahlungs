@@ -434,6 +434,28 @@ defmodule Zahlungs.ServicesTest do
                Services.create_product(%{name: "Tagihan PLN", category: "tagihan_pln", cost: "0"})
     end
 
+    test "keeps the shop's extra fee on api bills, never negative" do
+      assert {:error, changeset} =
+               Services.create_product(%{
+                 name: "Tagihan PLN",
+                 category: "tagihan_pln",
+                 cost: "0",
+                 api_extra_fee: "-1"
+               })
+
+      assert errors_on(changeset)[:api_extra_fee]
+
+      assert {:ok, bill} =
+               Services.create_product(%{
+                 name: "Tagihan PLN",
+                 category: "tagihan_pln",
+                 cost: "0",
+                 api_extra_fee: "2500"
+               })
+
+      assert Decimal.equal?(bill.api_extra_fee, d("2500"))
+    end
+
     test "keeps the vendor's product code, up to 60 characters" do
       product = service_product_fixture(%{provider_code: "PLNPASCA"})
       assert product.provider_code == "PLNPASCA"
