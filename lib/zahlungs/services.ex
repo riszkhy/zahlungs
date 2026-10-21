@@ -1068,6 +1068,11 @@ defmodule Zahlungs.Services do
     )
   end
 
+  @doc "A service of a deposit account; another account's raises `Ecto.NoResultsError`."
+  def get_account_transaction!(%Deposits.Account{id: account_id}, id) do
+    Repo.one!(from t in Transaction, where: t.id == ^id and t.deposit_account_id == ^account_id)
+  end
+
   @doc "The services of a deposit account waiting for an admin's review, newest first."
   def list_in_review(%Deposits.Account{id: account_id}) do
     Repo.all(

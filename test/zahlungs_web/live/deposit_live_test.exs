@@ -124,6 +124,110 @@ defmodule ZahlungsWeb.DepositLiveTest do
     end
   end
 
+  describe "an SBI account" do
+    test "asks for SBI's credentials and shows the callback URL without a token" do
+      admin = admin_fixture()
+      name = "SBI #{System.unique_integer([:positive])}"
+      attrs = %{"name" => name, "mode" => "api", "provider" => "sbi"}
+
+      socket =
+        DepositLive.Index
+        |> mount_live(admin, action: :new)
+        |> event("validate_account", %{"account" => attrs})
+
+      rendered = html(socket)
+      assert rendered =~ "Member ID"
+      assert rendered =~ "PIN"
+      assert rendered =~ "Password"
+
+      credentials = %{"member_id" => "MM77", "pin" => "4321", "password" => "kata-sandi-sbi"}
+      event(socket, "save_account", %{"account" => Map.put(attrs, "credentials", credentials)})
+      account = Enum.find(Deposits.list_accounts(), &(&1.name == name))
+
+      rendered =
+        DepositLive.Index
+        |> mount_live(admin, action: :edit, params: %{"id" => "#{account.id}"})
+        |> html()
+
+      refute rendered =~ "kata-sandi-sbi"
+      refute rendered =~ "4321"
+      assert rendered =~ "/api/ppob/callback<"
+      refute rendered =~ account.callback_token
+    end
+  end
+
+  describe "services in review" do
+    setup do
+      admin = admin_fixture()
+      account = api_account_fixture()
+      Zahlungs.StoresFixtures.default_store() |> assign_account(account)
+      cashier = Zahlungs.ShiftsFixtures.user_on_shift_fixture()
+      pulsa = service_product_fixture(%{provider_code: "TSEL10"})
+
+      {:ok, tx} =
+        Zahlungs.Services.record(cashier, pulsa.id, %{
+          "customer_ref" => "081234567899",
+          "amount_paid" => "12000"
+        })
+
+      {:ok, _} =
+        Zahlungs.Services.apply_result(tx.id, %{
+          status: :success,
+          token_sn: "SN",
+          provider_ref: "R"
+        })
+
+      {:ok, _} =
+        Zahlungs.Services.apply_result(tx.id, %{status: :refunded, message: "Refund transaksi"})
+
+      %{admin: admin, account: account, tx: tx}
+    end
+
+    defp status_of(tx), do: Zahlungs.Repo.get!(Zahlungs.Services.Transaction, tx.id)
+
+    test "are listed on the account with what the provider said", %{
+      admin: admin,
+      account: account
+    } do
+      rendered = admin |> show(account) |> html()
+      assert rendered =~ "Perlu ditinjau"
+      assert rendered =~ "Refund transaksi"
+      assert rendered =~ "Batalkan dan kembalikan uang"
+      assert rendered =~ "Tetap berhasil"
+    end
+
+    test "refund fails the service", %{admin: admin, account: account, tx: tx} do
+      socket =
+        admin
+        |> show(account)
+        |> event("resolve_review", %{"transaction_id" => tx.id, "decision" => "refund"})
+
+      assert flash(socket, :info) == "Transaksi dibatalkan dan masuk Perlu dikembalikan."
+      assert status_of(tx).status == "failed"
+      refute html(socket) =~ "Batalkan dan kembalikan uang"
+    end
+
+    test "keep leaves it successful", %{admin: admin, account: account, tx: tx} do
+      socket =
+        admin
+        |> show(account)
+        |> event("resolve_review", %{"transaction_id" => "#{tx.id}", "decision" => "keep"})
+
+      assert flash(socket, :info) == "Transaksi tetap berhasil."
+      assert %{status: "success", review_reason: nil} = status_of(tx)
+    end
+
+    test "another account's service is not found", %{admin: admin, tx: tx} do
+      other = api_account_fixture()
+
+      assert_raise Ecto.NoResultsError, fn ->
+        admin
+        |> show(other)
+        |> event("resolve_review", %{"transaction_id" => tx.id, "decision" => "keep"})
+      end
+    end
+  end
+
   describe "an account" do
     setup do
       %{admin: admin_fixture(), account: deposit_account_fixture()}

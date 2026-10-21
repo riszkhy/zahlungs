@@ -6,7 +6,7 @@ defmodule ZahlungsWeb.DepositLive.Index do
   """
   use ZahlungsWeb, :live_view
 
-  alias Zahlungs.{Deposits, Shifts}
+  alias Zahlungs.{Deposits, Services, Shifts}
   alias Zahlungs.Deposits.Account
   alias ZahlungsWeb.AmountInput
 
@@ -120,6 +120,24 @@ defmodule ZahlungsWeb.DepositLive.Index do
     end
   end
 
+  # An answer that contradicted a final status: the admin decides.
+  def handle_event("resolve_review", %{"transaction_id" => id, "decision" => decision}, socket)
+      when decision in ["refund", "keep"] do
+    transaction = Services.get_account_transaction!(socket.assigns.account, id)
+    decision = String.to_existing_atom(decision)
+
+    case Services.resolve_review(transaction, socket.assigns.current_user, decision) do
+      {:ok, _transaction} ->
+        {:noreply, socket |> put_flash(:info, review_message(decision)) |> load_account()}
+
+      {:error, :not_in_review} ->
+        {:noreply, socket |> put_flash(:error, "Transaksi ini sudah ditinjau.") |> load_account()}
+
+      {:error, :forbidden} ->
+        {:noreply, put_flash(socket, :error, "Hanya admin yang bisa meninjau.")}
+    end
+  end
+
   def handle_event("test_connection", _params, socket) do
     case Deposits.ping(socket.assigns.account) do
       :ok -> {:noreply, put_flash(socket, :info, "Koneksi ke penyedia berhasil.")}
@@ -156,8 +174,15 @@ defmodule ZahlungsWeb.DepositLive.Index do
 
     assign(socket,
       balance: Deposits.estimated_balance(account),
-      entries: Deposits.list_entries(account)
+      entries: Deposits.list_entries(account),
+      in_review: Services.list_in_review(account)
     )
+  end
+
+  defp callback_url(account) do
+    if Deposits.callback_by_ref?(account),
+      do: url(~p"/api/ppob/callback"),
+      else: url(~p"/api/ppob/callback/#{account.callback_token}")
   end
 
   # Amounts arrive as typed ("250.000", "250.000,00").
@@ -166,6 +191,9 @@ defmodule ZahlungsWeb.DepositLive.Index do
   defp entry_label(%{kind: "topup", source: "drawer"}), do: "Isi ulang (kas laci)"
   defp entry_label(%{kind: "topup"}), do: "Isi ulang (luar laci)"
   defp entry_label(%{kind: "correction"}), do: "Koreksi"
+
+  defp review_message(:refund), do: "Transaksi dibatalkan dan masuk Perlu dikembalikan."
+  defp review_message(:keep), do: "Transaksi tetap berhasil."
 
   defp form_field(form, field), do: Ecto.Changeset.get_field(form.source, field)
 
@@ -266,6 +294,38 @@ defmodule ZahlungsWeb.DepositLive.Index do
         </form>
       </div>
 
+      <div :if={@in_review != []} id="in-review" class="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-4">
+        <h4 class="font-medium text-amber-900">Perlu ditinjau ({length(@in_review)})</h4>
+        <p class="mt-1 text-xs text-amber-800">
+          Jawaban penyedia bertentangan dengan status transaksi. Periksa ke pelanggan dan aplikasi penyedia, lalu putuskan.
+        </p>
+        <div :for={tx <- @in_review} id={"review-#{tx.id}"} class="mt-3 text-sm">
+          <p>
+            <span class="font-medium">{tx.product_name}</span>
+            · {tx.customer_ref} · {format_money(tx.price)} · {tx.code}
+          </p>
+          <p class="text-xs text-amber-900">{tx.review_reason}</p>
+          <div class="mt-2 flex flex-wrap gap-2">
+            <button
+              :if={tx.status == "success"}
+              type="button"
+              phx-click={JS.push("resolve_review", value: %{transaction_id: tx.id, decision: "refund"})}
+              data-confirm="Batalkan transaksi ini? Uangnya masuk Perlu dikembalikan untuk diserahkan ke pelanggan."
+              class="chip !border-red-300 !text-red-700"
+            >
+              Batalkan dan kembalikan uang
+            </button>
+            <button
+              type="button"
+              phx-click={JS.push("resolve_review", value: %{transaction_id: tx.id, decision: "keep"})}
+              class="chip"
+            >
+              {if tx.status == "success", do: "Tetap berhasil", else: "Tetap gagal"}
+            </button>
+          </div>
+        </div>
+      </div>
+
       <h4 class="mt-6 font-medium">Riwayat</h4>
       <p :if={@entries == []} class="mt-2 text-sm text-gray-500">Belum ada catatan.</p>
       <div :for={entry <- @entries} class="list-card mt-2">
@@ -306,7 +366,7 @@ defmodule ZahlungsWeb.DepositLive.Index do
 
           <p :if={@account.callback_token} class="mt-3 text-sm">
             URL callback untuk penyedia:
-            <code class="block break-all rounded bg-gray-50 p-2 text-xs">{url(~p"/api/ppob/callback/#{@account.callback_token}")}</code>
+            <code class="block break-all rounded bg-gray-50 p-2 text-xs">{callback_url(@account)}</code>
           </p>
         </div>
 

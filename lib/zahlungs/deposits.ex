@@ -78,6 +78,21 @@ defmodule Zahlungs.Deposits do
     end
   end
 
+  @doc """
+  Whether the account's provider calls back without a token in the URL (it
+  names the service itself, e.g. SBI's `ref_1`): its callback URL is then
+  `/api/ppob/callback`, otherwise `/api/ppob/callback/<token>`.
+  """
+  def callback_by_ref?(%Account{provider: key}) do
+    case Provider.adapter(key) do
+      {:ok, adapter} ->
+        Code.ensure_loaded?(adapter) and function_exported?(adapter, :callback_ref, 1)
+
+      :error ->
+        false
+    end
+  end
+
   @doc "Whether credentials are stored (they are never shown back)."
   def credentials_saved?(%Account{credentials: credentials}), do: credentials != nil
 
