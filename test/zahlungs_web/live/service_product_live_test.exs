@@ -5,6 +5,8 @@ defmodule ZahlungsWeb.ServiceProductLiveTest do
   """
   use ZahlungsWeb.ConnCase, async: true
 
+  import Ecto.Query
+
   import Zahlungs.AccountsFixtures
   import Zahlungs.ServicesFixtures
   import ZahlungsWeb.LiveDriver
@@ -63,6 +65,149 @@ defmodule ZahlungsWeb.ServiceProductLiveTest do
       assert flash(socket, :info) =~ "dihapus"
       refute product.id in ids(socket)
     end
+  end
+
+  describe "with an SBI account" do
+    alias Zahlungs.Services.Provider.Sbi.StubClient
+
+    @pricelist %{
+      "PLN Prabayar" => [
+        %{
+          "code" => "PLN20",
+          "name" => "PLN 20.000",
+          "harga" => 20_775,
+          "gangguan" => "Tidak",
+          "tersedia" => "Ya"
+        }
+      ],
+      "PPOB" => [
+        %{
+          "code" => "PLN",
+          "name" => "PLN",
+          "admin_amount" => 3000,
+          "komisi" => 1000,
+          "gangguan" => "Tidak",
+          "tersedia" => "Ya"
+        }
+      ]
+    }
+
+    setup do
+      deposit_account_fixture(%{
+        mode: "api",
+        provider: "sbi",
+        credentials: %{"member_id" => "MM1", "pin" => "1234", "password" => "pw"}
+      })
+
+      %{admin: admin_fixture()}
+    end
+
+    defp field(socket, name), do: Ecto.Changeset.get_field(socket.assigns.form.source, name)
+
+    test "a product is picked from SBI's price list", %{admin: admin} do
+      StubClient.expect("pricelist", {:ok, 200, @pricelist})
+
+      socket =
+        ServiceProductLive.Index
+        |> mount_live(admin, action: :new)
+        |> event("search_catalog", %{"q" => "pln 20"})
+
+      assert html(socket) =~ "PLN20"
+
+      socket = event(socket, "pick_catalog", %{"code" => "PLN20"})
+      assert field(socket, :provider_code) == "PLN20"
+      assert field(socket, :name) == "PLN 20.000"
+      assert field(socket, :category) == "token_pln"
+      assert Decimal.equal?(field(socket, :cost), Decimal.new("20775"))
+    end
+
+    test "a bill shows SBI's admin and commission, and keeps the shop's extra fee", %{
+      admin: admin
+    } do
+      StubClient.expect("pricelist", {:ok, 200, @pricelist})
+
+      socket =
+        ServiceProductLive.Index
+        |> mount_live(admin, action: :new)
+        |> event("search_catalog", %{"q" => "pln"})
+
+      assert html(socket) =~ "Komisi"
+
+      socket = event(socket, "pick_catalog", %{"code" => "PLN"})
+      assert field(socket, :category) == "tagihan_pln"
+      assert html(socket) =~ "Biaya tambahan toko (akun API)"
+
+      name = "Tagihan PLN #{System.unique_integer([:positive])}"
+
+      event(socket, "save", %{
+        "product" => %{
+          "name" => name,
+          "category" => "tagihan_pln",
+          "provider_code" => "PLN",
+          "cost" => "0",
+          "margin_type" => "amount",
+          "margin_value" => "3000",
+          "api_extra_fee" => "2500"
+        }
+      })
+
+      bill = Enum.find(Services.list_products(), &(&1.name == name))
+      assert Decimal.equal?(bill.api_extra_fee, Decimal.new("2500"))
+    end
+
+    test "prices are refreshed from SBI after a look at what changes", %{admin: admin} do
+      pulsa = service_product_fixture(%{provider_code: "T10"})
+
+      StubClient.respond("price", fn _body ->
+        {:ok, 200,
+         %{
+           "data" => %{
+             "kode" => "T10",
+             "harga" => "10300",
+             "gangguan" => "Tidak",
+             "kosong" => "Tidak"
+           }
+         }}
+      end)
+
+      socket = ServiceProductLive.Index |> mount_live(admin) |> event("price_update", %{})
+      rendered = html(socket)
+      assert rendered =~ ~s(id="price-update")
+      assert rendered =~ "Rp 10.150,00"
+      assert rendered =~ "Rp 10.300,00"
+      assert Decimal.equal?(Services.get_product!(pulsa.id).cost, Decimal.new("10150"))
+
+      socket = event(socket, "apply_price_update", %{})
+      assert flash(socket, :info) == "1 produk diperbarui."
+      assert Decimal.equal?(Services.get_product!(pulsa.id).cost, Decimal.new("10300"))
+      refute html(socket) =~ ~s(id="price-update")
+    end
+
+    test "the list shows what SBI says about each product", %{admin: admin} do
+      up = service_product_fixture(%{provider_code: "T10"})
+      down = service_product_fixture(%{provider_code: "T20"})
+
+      Zahlungs.Repo.update_all(
+        from(p in Services.Product, where: p.id == ^up.id),
+        set: [provider_price: Decimal.new("10500")]
+      )
+
+      Zahlungs.Repo.update_all(
+        from(p in Services.Product, where: p.id == ^down.id),
+        set: [provider_status: "gangguan"]
+      )
+
+      rendered = ServiceProductLive.Index |> mount_live(admin) |> html()
+      assert rendered =~ "Modal SBI naik"
+      assert rendered =~ "Gangguan"
+      assert rendered =~ "Perbarui dari SBI"
+    end
+  end
+
+  test "without an SBI account there is no SBI search" do
+    rendered = ServiceProductLive.Index |> mount_live(admin_fixture(), action: :new) |> html()
+    refute rendered =~ "Cari di daftar SBI"
+    refute rendered =~ "Perbarui dari SBI"
   end
 
   describe "the form" do
