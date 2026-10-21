@@ -136,6 +136,52 @@ defmodule Zahlungs.Services.Provider.Sbi do
   end
 
   @doc """
+  SBI's public price list (no credentials), as catalog items. The category is
+  guessed from SBI's group: Pulsa Reguler → pulsa, `* Data` → paket_data, PLN
+  Prabayar → token_pln, PPOB `PLN` → tagihan_pln.
+  """
+  @impl true
+  def catalog(_config) do
+    case client().get_json(Keyword.fetch!(config(), :pricelist_url), 30_000) do
+      {:ok, 200, %{} = groups} ->
+        {:ok,
+         for {group, items} <- groups, is_list(items), %{} = item <- items do
+           catalog_item(group, item)
+         end}
+
+      _ ->
+        {:error, :unavailable}
+    end
+  end
+
+  defp catalog_item(group, item) do
+    code = Reply.text(item["code"])
+
+    %{
+      code: code,
+      name: Reply.text(item["name"]) || code,
+      category_hint: category_hint(group, code),
+      price: Reply.money(item["harga"]),
+      admin: Reply.money(item["admin_amount"]),
+      commission: Reply.money(item["komisi"]),
+      status:
+        cond do
+          item["gangguan"] == "Ya" -> "gangguan"
+          item["tersedia"] == "Tidak" -> "kosong"
+          true -> "normal"
+        end
+    }
+  end
+
+  defp category_hint("Pulsa Reguler", _code), do: "pulsa"
+  defp category_hint("PLN Prabayar", _code), do: "token_pln"
+  defp category_hint("PPOB", "PLN"), do: "tagihan_pln"
+
+  defp category_hint(group, _code) do
+    if String.ends_with?(group, "Data"), do: "paket_data"
+  end
+
+  @doc """
   The member's price and status for each vendor code, at most five requests
   at a time (`opts[:max_concurrency]`). A code SBI doesn't know (RC:97/89) is
   `"tidak_ditemukan"`; one that got no answer is left out.

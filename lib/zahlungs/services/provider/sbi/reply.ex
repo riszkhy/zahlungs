@@ -210,10 +210,11 @@ defmodule Zahlungs.Services.Provider.Sbi.Reply do
 
   defp payload(answer), do: answer |> Jason.encode!() |> String.slice(0, @payload_limit)
 
-  defp text(nil), do: nil
-  defp text(value) when is_binary(value), do: value
-  defp text(value) when is_number(value), do: to_string(value)
-  defp text(_value), do: nil
+  @doc false
+  def text(nil), do: nil
+  def text(value) when is_binary(value), do: value
+  def text(value) when is_number(value), do: to_string(value)
+  def text(_value), do: nil
 
   defp trimmed(value), do: value |> text() |> then(&(&1 && String.trim(&1))) |> nil_if_blank()
 

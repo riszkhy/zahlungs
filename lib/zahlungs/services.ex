@@ -29,7 +29,7 @@ defmodule Zahlungs.Services do
   alias Zahlungs.Accounts.User
   alias Zahlungs.{Deposits, LocalTime, Scope, Shifts, Stores}
   alias Zahlungs.Shifts.Shift
-  alias Zahlungs.Services.{Dispatcher, Inquiry, Product, Provider, Ref, Transaction}
+  alias Zahlungs.Services.{CatalogCache, Dispatcher, Inquiry, Product, Provider, Ref, Transaction}
 
   @category_labels [
     {"pulsa", "Pulsa"},
@@ -899,6 +899,115 @@ defmodule Zahlungs.Services do
     do: NaiveDateTime.diff(now, transaction.inserted_at) >= @settle_by_hand_after
 
   def awaiting_too_long?(_transaction, _now), do: false
+
+  ## Vendor catalog
+
+  @catalog_results 30
+
+  @doc """
+  The organization's first active api deposit account whose provider has a
+  catalog (`Provider` `catalog/1`), or `nil`.
+  """
+  def catalog_account do
+    Enum.find(Deposits.list_active_accounts(), &(Deposits.api?(&1) and catalog_adapter(&1)))
+  end
+
+  defp catalog_adapter(%Deposits.Account{provider: key}) do
+    case Provider.adapter(key) do
+      {:ok, adapter} ->
+        if Code.ensure_loaded?(adapter) and function_exported?(adapter, :catalog, 1),
+          do: adapter
+
+      :error ->
+        nil
+    end
+  end
+
+  @doc """
+  The provider's products whose name or code holds every word of `query`
+  (case aside), at most #{@catalog_results}. The catalog is kept in memory for a while
+  (`Zahlungs.Services.CatalogCache`), never stored.
+  """
+  def search_catalog(%Deposits.Account{} = account, query) do
+    words = query |> to_string() |> String.downcase() |> String.split(~r/\s+/, trim: true)
+
+    with adapter when adapter != nil <- catalog_adapter(account),
+         {:ok, items} <- CatalogCache.fetch(account.provider, fn -> adapter.catalog([]) end) do
+      {:ok, items |> Enum.filter(&catalog_match?(&1, words)) |> Enum.take(@catalog_results)}
+    else
+      _ -> {:error, :unavailable}
+    end
+  end
+
+  defp catalog_match?(item, words) do
+    text = String.downcase("#{item.name} #{item.code}")
+    Enum.all?(words, &String.contains?(text, &1))
+  end
+
+  @doc """
+  What refreshing the products from the provider would change, saving
+  nothing: for each product with a vendor code the provider answered about,
+  `%{product, old_cost, new_cost, new_price, vendor_price, status}`. A bill's
+  cost isn't the vendor's price, so only its status changes.
+  """
+  def price_update(%Deposits.Account{} = account) do
+    products = Enum.reject(list_products(), &blank_code?/1)
+    codes = products |> Enum.map(& &1.provider_code) |> Enum.uniq()
+
+    with {:ok, adapter, credentials} <- Deposits.provider(account),
+         true <- Code.ensure_loaded?(adapter) and function_exported?(adapter, :prices, 2),
+         {:ok, prices} <- adapter.prices(credentials, codes) do
+      rows =
+        for product <- products,
+            info = prices[product.provider_code],
+            info != nil,
+            do: price_row(product, info)
+
+      {:ok, rows}
+    else
+      _ -> {:error, :unavailable}
+    end
+  end
+
+  defp price_row(product, info) do
+    new_cost =
+      if Product.bill?(product) or is_nil(info.price), do: product.cost, else: info.price
+
+    new_price =
+      case price_for(%{product | cost: new_cost}, nil) do
+        {:ok, %{price: price}} -> price
+        {:error, _bill} -> nil
+      end
+
+    %{
+      product: product,
+      old_cost: product.cost,
+      new_cost: new_cost,
+      new_price: new_price,
+      vendor_price: info.price,
+      status: info.status
+    }
+  end
+
+  @doc "Saves the rows of `price_update/1`, in one transaction. Returns `{:ok, count}`."
+  def apply_price_update(%Deposits.Account{}, rows) do
+    checked_at = now()
+
+    Repo.transaction(fn ->
+      Enum.each(rows, fn row ->
+        row.product
+        |> Ecto.Changeset.change(
+          cost: row.new_cost,
+          provider_price: row.vendor_price,
+          provider_status: row.status,
+          provider_checked_at: checked_at
+        )
+        |> Repo.update!()
+      end)
+
+      length(rows)
+    end)
+  end
 
   ## Reviews
 

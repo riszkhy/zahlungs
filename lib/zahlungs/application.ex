@@ -27,6 +27,8 @@ defmodule Zahlungs.Application do
       ZahlungsWeb.LoginThrottle,
       # Sends PPOB services to their provider in the background
       {Task.Supervisor, name: Zahlungs.Services.TaskSupervisor},
+      # Keeps vendors' catalogs in memory for a while
+      Zahlungs.Services.CatalogCache,
       # Start the Endpoint (http/https)
       ZahlungsWeb.Endpoint
       # Start a worker by calling: Zahlungs.Worker.start_link(arg)

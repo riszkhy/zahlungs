@@ -60,6 +60,9 @@ config :zahlungs, Zahlungs.Services.Provider.Sbi,
   client: Zahlungs.Services.Provider.Sbi.StubClient,
   allow_http: true
 
+# Catalogs aren't kept between calls: async tests would see each other's.
+config :zahlungs, Zahlungs.Services.CatalogCache, ttl: 0
+
 # Import local, gitignored credentials (real DB username/password/host/etc) if present.
 if File.exists?(Path.expand("local.secret.exs", __DIR__)) do
   import_config "local.secret.exs"

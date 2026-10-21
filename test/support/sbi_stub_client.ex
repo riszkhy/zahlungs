@@ -41,6 +41,15 @@ defmodule Zahlungs.Services.Provider.Sbi.StubClient do
     :ok
   end
 
+  @doc """
+  Answers every request with `action` by `fun.(body)` once its queue is empty
+  — for requests sent concurrently, whose order a queue can't follow.
+  """
+  def respond(action, fun) when is_function(fun, 1) do
+    :ets.insert(@table, {{self(), {:responder, action}}, fun})
+    :ok
+  end
+
   @doc "The requests the test sent so far, oldest first: `{action, body, headers}`."
   def requests do
     lookup({self(), :requests})
@@ -54,15 +63,37 @@ defmodule Zahlungs.Services.Provider.Sbi.StubClient do
     answer("pricelist", {"pricelist", url, []})
   end
 
-  defp answer(action, request) do
-    owner =
-      Enum.find([self() | Process.get(:"$callers", [])], fn pid -> lookup({pid, action}) != [] end) ||
-        raise "StubClient: no answer queued for #{inspect(action)}"
+  defp answer(action, {_action, body, _headers} = request) do
+    chain = [self() | Process.get(:"$callers", [])]
 
-    [answer | rest] = lookup({owner, action})
-    :ets.insert(@table, {{owner, action}, rest})
+    case Enum.find(chain, fn pid -> lookup({pid, action}) != [] end) do
+      nil ->
+        owner =
+          Enum.find(chain, &responder(&1, action)) ||
+            raise "StubClient: no answer queued for #{inspect(action)}"
+
+        log(owner, request)
+        responder(owner, action).(body)
+
+      owner ->
+        [answer | rest] = lookup({owner, action})
+        :ets.insert(@table, {{owner, action}, rest})
+        log(owner, request)
+        answer
+    end
+  end
+
+  defp responder(pid, action) do
+    case :ets.lookup(@table, {pid, {:responder, action}}) do
+      [{_key, fun}] -> fun
+      [] -> nil
+    end
+  end
+
+  # Concurrent requests of one test may log at once; the order of those is
+  # not promised.
+  defp log(owner, request) do
     :ets.insert(@table, {{owner, :requests}, lookup({owner, :requests}) ++ [request]})
-    answer
   end
 
   defp lookup(key) do
