@@ -9,7 +9,7 @@ defmodule ZahlungsWeb.ClientIp do
 
   @doc "The client's address as text, e.g. `\"183.91.82.154\"`."
   def of(%Plug.Conn{} = conn, trusted \\ Application.get_env(:zahlungs, :trusted_proxies, [])) do
-    peer = conn.remote_ip |> :inet.ntoa() |> to_string()
+    peer = conn.remote_ip |> ipv4() |> :inet.ntoa() |> to_string()
 
     if peer in trusted do
       conn
@@ -22,4 +22,10 @@ defmodule ZahlungsWeb.ClientIp do
       peer
     end
   end
+
+  # A dual-stack listener (prod binds `::`) sees IPv4 peers as `::ffff:a.b.c.d`.
+  defp ipv4({0, 0, 0, 0, 0, 0xFFFF, high, low}),
+    do: {div(high, 256), rem(high, 256), div(low, 256), rem(low, 256)}
+
+  defp ipv4(ip), do: ip
 end

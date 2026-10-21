@@ -121,6 +121,29 @@ defmodule Zahlungs.Services.Provider.SbiReplyTest do
       assert {:ok, %{status: :success, token_sn: nil}} = Reply.transaction(empty)
     end
 
+    test "the inquiry's own row (same ref_1) is not a payment" do
+      # A bill is paid with its inquiry's ref, so a status check during a slow
+      # payment may return the inquiry: never a success.
+      assert {:ok, %{status: :pending}} = Reply.transaction(@inquiry_pln)
+
+      pdf = %{
+        @inquiry_pln
+        | "msg" => "SUKSES CEK TAGIHAN PLNPASC IDPEL:524030445147 @DATA: Nama:SUTARTO"
+      }
+
+      assert {:ok, %{status: :pending}} = Reply.transaction(pdf)
+    end
+
+    test "the SN stops before the shop's balance" do
+      answer = %{
+        @topup_success
+        | "msg" =>
+            "TRX T25.0895352090205 SUKSES, HRG:24493 SN: R240814.1900.210036. SALDO:640555995 REFID:703674299."
+      }
+
+      assert {:ok, %{token_sn: "R240814.1900.210036"}} = Reply.transaction(answer)
+    end
+
     test "status as a string is read too" do
       assert {:ok, %{status: :success}} = Reply.transaction(%{@topup_success | "status" => "1"})
     end

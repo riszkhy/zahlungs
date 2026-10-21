@@ -25,6 +25,14 @@ defmodule ZahlungsWeb.ClientIpTest do
              "1.2.3.4"
   end
 
+  test "an IPv4 peer on a dual-stack listener is its IPv4 address" do
+    mapped = {0, 0, 0, 0, 0, 0xFFFF, 0xB75B, 0x529A}
+    assert ClientIp.of(conn(mapped), []) == "183.91.82.154"
+
+    proxy = {0, 0, 0, 0, 0, 0xFFFF, 0x7F00, 0x0001}
+    assert ClientIp.of(conn(proxy, "183.91.82.154"), ["127.0.0.1"]) == "183.91.82.154"
+  end
+
   test "a trusted proxy that forwarded nothing is the peer" do
     assert ClientIp.of(conn({127, 0, 0, 1}), ["127.0.0.1"]) == "127.0.0.1"
   end

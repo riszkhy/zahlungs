@@ -286,7 +286,9 @@ Berlaku bila akun deposit toko bermode **API** (diatur di `/admin/deposits`).
   (refund setelah berhasil, atau berhasil setelah gagal), status tidak berubah
   sendiri. Kasir melihat tanda "Perlu ditinjau" di riwayat; admin memutuskan di
   halaman akun deposit: **Batalkan dan kembalikan uang** (masuk Perlu
-  dikembalikan) atau **Tetap berhasil / Tetap gagal**.
+  dikembalikan), **Jadikan berhasil** (untuk yang gagal tapi ternyata terlayani;
+  selama ditinjau, uangnya belum boleh dikembalikan) atau **Tetap berhasil /
+  Tetap gagal**.
 - **/admin/deposits** (penyedia SBI): Member ID, PIN, Password (tidak pernah
   ditampilkan lagi); URL callback `…/api/ppob/callback` untuk didaftarkan di
   SBI; Tes koneksi dan Ambil saldo memakai saldo SBI.

@@ -428,7 +428,8 @@ defmodule Zahlungs.ServicesApiTest do
       assert {:ok, %Services.Transaction{}} =
                Services.apply_result(tx.id, %{status: :success, token_sn: "X", provider_ref: "Y"})
 
-      assert %{status: "failed", token_sn: nil, review_reason: reason} = reload(tx)
+      # The SN comes along for the admin who decides (resolve_review/3 :success).
+      assert %{status: "failed", token_sn: "X", review_reason: reason} = reload(tx)
       assert reason =~ "berhasil setelah"
     end
 

@@ -29,15 +29,28 @@ defmodule Zahlungs.Services.Provider.Sbi.Reply do
 
     result =
       case rc_of(msg) do
-        rc when rc in ["31" | @pending_rcs] -> rc(rc, reason(msg))
-        rc when rc in @config_rcs -> rc(rc, reason(msg))
-        _ -> by_status(status(answer["status"]), answer, msg)
+        rc when rc in ["31" | @pending_rcs] ->
+          rc(rc, reason(msg))
+
+        rc when rc in @config_rcs ->
+          rc(rc, reason(msg))
+
+        _ ->
+          if inquiry_row?(msg),
+            do: by_status(2, answer, nil),
+            else: by_status(status(answer["status"]), answer, msg)
       end
 
     {:ok, Map.put(result, :payload, payload(answer))}
   end
 
   def transaction(_answer), do: {:error, :not_found}
+
+  # A bill is paid with its inquiry's ref_1, so SBI may answer a status check
+  # (during a slow payment) with the inquiry itself — successful, but not a
+  # payment. It says so in its message: "INQ …" or "… CEK TAGIHAN …".
+  defp inquiry_row?(nil), do: false
+  defp inquiry_row?(msg), do: msg =~ ~r/^\s*INQ\b|CEK TAGIHAN/i
 
   defp by_status(1, answer, msg) do
     %{
@@ -152,7 +165,7 @@ defmodule Zahlungs.Services.Provider.Sbi.Reply do
   end
 
   defp sn(msg) do
-    case msg && Regex.run(~r/SN\s*:\s*(.*?)\s*(?:REFID\s*:|$)/s, msg) do
+    case msg && Regex.run(~r/SN\s*:\s*(.*?)\s*(?:SALDO\s*:|REFID\s*:|$)/s, msg) do
       [_, sn] -> sn |> String.trim() |> String.trim_trailing(".") |> nil_if_blank()
       _ -> nil
     end

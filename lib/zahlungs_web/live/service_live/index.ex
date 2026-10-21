@@ -344,6 +344,10 @@ defmodule ZahlungsWeb.ServiceLive.Index do
   defp error_message(:not_api), do: "Akun deposit toko ini mode manual."
   defp error_message(:not_manual), do: "Transaksi ini diselesaikan oleh penyedia."
   defp error_message(:not_refundable), do: "Pengembalian ini sudah dicatat."
+
+  defp error_message(:in_review),
+    do: "Transaksi ini sedang ditinjau admin. Jangan kembalikan uang dulu."
+
   defp error_message(:other_store), do: "Transaksi ini milik toko lain."
 
   defp error_message(%Ecto.Changeset{} = changeset) do

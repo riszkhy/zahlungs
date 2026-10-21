@@ -566,7 +566,8 @@ defmodule Zahlungs.Services do
   # The provider charges more than the product's cost: the admin should see it.
   defp note_vendor_price(%Transaction{service_product_id: id}, %{actual_cost: %Decimal{} = cost}) do
     Repo.update_all(
-      from(p in Product, where: p.id == ^id and p.cost < ^cost),
+      # A bill's actual cost is the whole bill, not comparable with its fee.
+      from(p in Product, where: p.id == ^id and p.category != "tagihan_pln" and p.cost < ^cost),
       [set: [provider_price: cost, provider_checked_at: now()]],
       skip_org_id: true
     )
@@ -580,14 +581,28 @@ defmodule Zahlungs.Services do
        ),
        do: hold(transaction, "Penyedia melaporkan refund: " <> (Map.get(r, :message) || "-"))
 
-  defp hold_contradiction(%Transaction{status: "failed"} = transaction, %{status: :success}),
-    do: hold(transaction, "Penyedia melaporkan berhasil setelah transaksi gagal")
+  defp hold_contradiction(%Transaction{status: "success"} = transaction, %{status: :failed} = r),
+    do:
+      hold(
+        transaction,
+        "Penyedia melaporkan gagal setelah berhasil: " <> (Map.get(r, :message) || "-")
+      )
+
+  # The token/SN comes along, for the admin who decides it was a success.
+  defp hold_contradiction(%Transaction{status: "failed"} = transaction, %{status: :success} = r) do
+    hold(transaction, "Penyedia melaporkan berhasil setelah transaksi gagal", %{
+      token_sn: r |> Map.get(:token_sn) |> clip(64),
+      provider_ref: clip(Map.get(r, :provider_ref), 255) || transaction.provider_ref
+    })
+  end
 
   defp hold_contradiction(_transaction, _result), do: :already_final
 
-  defp hold(transaction, reason) do
+  defp hold(transaction, reason, changes \\ %{}) do
     {:ok, held} =
-      transaction |> Ecto.Changeset.change(review_reason: clip(reason, 255)) |> Repo.update()
+      transaction
+      |> Ecto.Changeset.change(Map.put(changes, :review_reason, clip(reason, 255)))
+      |> Repo.update()
 
     held
   end
@@ -1015,12 +1030,15 @@ defmodule Zahlungs.Services do
   An admin decides about an answer that contradicted a final status (see
   `apply_result/2`). `:keep` leaves the status and drops the flag; `:refund`
   (a success the provider took back) fails it, so its money waits under
-  "Perlu dikembalikan" and stops counting against the deposit. Locks the row.
+  "Perlu dikembalikan" and stops counting against the deposit; `:success` (a
+  failure the provider says went through, not refunded yet) makes it a
+  success, counting against the deposit again. Locks the row. While in review
+  a failure is not refunded (`confirm_refund/2` → `{:error, :in_review}`).
 
   Returns `{:ok, transaction}` or `{:error, :forbidden | :not_in_review}`.
   """
   def resolve_review(%Transaction{id: id}, %User{role: "admin"} = admin, decision)
-      when decision in [:keep, :refund] do
+      when decision in [:keep, :refund, :success] do
     fn ->
       case review(lock_transaction(id), admin, decision) do
         {:ok, transaction} -> transaction
@@ -1054,6 +1072,24 @@ defmodule Zahlungs.Services do
       failure_reason: reason,
       resolved_at: now(),
       failed_after_shift_close: shift_closed?(transaction)
+    )
+    |> Repo.update()
+  end
+
+  defp review(
+         %Transaction{status: "failed", refunded_at: nil, review_reason: reason} = transaction,
+         admin,
+         :success
+       )
+       when is_binary(reason) do
+    transaction
+    |> reviewed(admin)
+    |> Ecto.Changeset.change(
+      status: "success",
+      failure_reason: nil,
+      provider_message: nil,
+      failed_after_shift_close: false,
+      resolved_at: now()
     )
     |> Repo.update()
   end
@@ -1218,7 +1254,9 @@ defmodule Zahlungs.Services do
   def list_refunds_due(%Scope{} = scope) do
     Repo.all(
       from t in for_store(Transaction, scope),
-        where: t.channel == "api" and t.status == "failed" and is_nil(t.refunded_at),
+        where:
+          t.channel == "api" and t.status == "failed" and is_nil(t.refunded_at) and
+            is_nil(t.review_reason),
         order_by: [desc: t.resolved_at, desc: t.id]
     )
   end
@@ -1233,7 +1271,7 @@ defmodule Zahlungs.Services do
   paid, never from a drawer.
 
   Returns `{:ok, transaction}` or
-  `{:error, :not_refundable | :no_open_shift | :other_store}`.
+  `{:error, :not_refundable | :in_review | :no_open_shift | :other_store}`.
   """
   def confirm_refund(%Transaction{id: id}, %User{} = user) do
     Repo.put_org_id(user.organization_id)
@@ -1250,6 +1288,10 @@ defmodule Zahlungs.Services do
       _ -> :ok
     end)
   end
+
+  # The provider may have served it after all: an admin decides first.
+  defp refund(%Transaction{review_reason: reason}, _user) when is_binary(reason),
+    do: {:error, :in_review}
 
   defp refund(
          %Transaction{channel: "api", status: "failed", refunded_at: nil} = transaction,

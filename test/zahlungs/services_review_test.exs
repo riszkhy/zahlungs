@@ -53,6 +53,22 @@ defmodule Zahlungs.ServicesReviewTest do
       assert Decimal.equal?(Services.deposit_used(ctx.account), d("10100"))
     end
 
+    test "a bill's actual cost never marks the product (it is the whole bill)", ctx do
+      bill = api_product_fixture()
+      {:ok, inquiry} = Services.inquire(ctx.cashier, bill.id, "530011223341")
+
+      {:ok, tx} =
+        Services.record(ctx.cashier, bill.id, %{
+          "inquiry_id" => inquiry.id,
+          "amount_paid" => "260000"
+        })
+
+      Repo.update_all(from(t in Transaction, where: t.id == ^tx.id), set: [status: "processing"])
+      Services.apply_result(tx.id, success(%{actual_cost: d("246000")}))
+
+      assert is_nil(Services.get_product!(bill.id).provider_price)
+    end
+
     test "an actual cost above the product's cost marks the product", ctx do
       Services.apply_result(ctx.tx.id, success(%{actual_cost: d("10500")}))
       assert Decimal.equal?(Services.get_product!(ctx.pulsa.id).provider_price, d("10500"))
@@ -117,6 +133,18 @@ defmodule Zahlungs.ServicesReviewTest do
       assert_receive {:service_changed, ^id}
     end
 
+    test "a failure after success is held for review", ctx do
+      {:ok, _} = Services.apply_result(ctx.tx.id, success())
+
+      assert {:ok, %Transaction{}} =
+               Services.apply_result(ctx.tx.id, %{status: :failed, message: "Dibatalkan operator"})
+
+      tx = fresh(ctx.tx)
+      assert tx.status == "success"
+      assert tx.review_reason =~ "gagal setelah"
+      assert tx.review_reason =~ "Dibatalkan operator"
+    end
+
     test "a success after failure is held for review", ctx do
       {:ok, _} = Services.apply_result(ctx.tx.id, %{status: :failed, message: "Nomor salah"})
       {:ok, %Transaction{}} = Services.apply_result(ctx.tx.id, success())
@@ -175,6 +203,43 @@ defmodule Zahlungs.ServicesReviewTest do
       {:ok, _} = Services.resolve_review(fresh(ctx.tx), ctx.admin, :keep)
 
       assert Services.resolve_review(fresh(ctx.tx), ctx.admin, :refund) ==
+               {:error, :not_in_review}
+    end
+  end
+
+  describe "a success after failure" do
+    setup ctx do
+      {:ok, _} = Services.apply_result(ctx.tx.id, %{status: :failed, message: "Nomor salah"})
+      {:ok, _} = Services.apply_result(ctx.tx.id, success())
+      :ok
+    end
+
+    test "isn't refunded while in review", ctx do
+      refute ctx.tx.id in Enum.map(Services.list_refunds_due(store_scope()), & &1.id)
+      assert Services.confirm_refund(fresh(ctx.tx), ctx.cashier) == {:error, :in_review}
+      assert is_nil(fresh(ctx.tx).refunded_at)
+    end
+
+    test "can be made a success by an admin; it counts again", ctx do
+      assert {:ok, tx} = Services.resolve_review(fresh(ctx.tx), ctx.admin, :success)
+      assert {tx.status, tx.review_reason, tx.failure_reason} == {"success", nil, nil}
+      assert tx.reviewed_by_id == ctx.admin.id
+      refute ctx.tx.id in Enum.map(Services.list_refunds_due(store_scope()), & &1.id)
+      assert Decimal.equal?(Services.deposit_used(ctx.account), d("10150"))
+      assert money?(Shifts.expected_cash(ctx.shift), "62000")
+    end
+
+    test "keep: stays failed and goes back to refunds due", ctx do
+      assert {:ok, %{status: "failed"}} = Services.resolve_review(fresh(ctx.tx), ctx.admin, :keep)
+      assert ctx.tx.id in Enum.map(Services.list_refunds_due(store_scope()), & &1.id)
+    end
+
+    test ":success is only for a failure not refunded yet", ctx do
+      {:ok, _} = Services.resolve_review(fresh(ctx.tx), ctx.admin, :keep)
+      {:ok, _} = Services.confirm_refund(fresh(ctx.tx), ctx.cashier)
+      {:ok, _} = Services.apply_result(ctx.tx.id, success())
+
+      assert Services.resolve_review(fresh(ctx.tx), ctx.admin, :success) ==
                {:error, :not_in_review}
     end
   end

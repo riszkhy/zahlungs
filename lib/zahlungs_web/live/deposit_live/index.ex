@@ -122,13 +122,14 @@ defmodule ZahlungsWeb.DepositLive.Index do
 
   # An answer that contradicted a final status: the admin decides.
   def handle_event("resolve_review", %{"transaction_id" => id, "decision" => decision}, socket)
-      when decision in ["refund", "keep"] do
+      when decision in ["refund", "keep", "success"] do
     transaction = Services.get_account_transaction!(socket.assigns.account, id)
     decision = String.to_existing_atom(decision)
 
     case Services.resolve_review(transaction, socket.assigns.current_user, decision) do
-      {:ok, _transaction} ->
-        {:noreply, socket |> put_flash(:info, review_message(decision)) |> load_account()}
+      {:ok, reviewed} ->
+        {:noreply,
+         socket |> put_flash(:info, review_message(decision, reviewed)) |> load_account()}
 
       {:error, :not_in_review} ->
         {:noreply, socket |> put_flash(:error, "Transaksi ini sudah ditinjau.") |> load_account()}
@@ -192,8 +193,12 @@ defmodule ZahlungsWeb.DepositLive.Index do
   defp entry_label(%{kind: "topup"}), do: "Isi ulang (luar laci)"
   defp entry_label(%{kind: "correction"}), do: "Koreksi"
 
-  defp review_message(:refund), do: "Transaksi dibatalkan dan masuk Perlu dikembalikan."
-  defp review_message(:keep), do: "Transaksi tetap berhasil."
+  defp review_message(:refund, _transaction),
+    do: "Transaksi dibatalkan dan masuk Perlu dikembalikan."
+
+  defp review_message(:keep, %{status: "success"}), do: "Transaksi tetap berhasil."
+  defp review_message(:keep, _failed), do: "Transaksi tetap gagal."
+  defp review_message(:success, _transaction), do: "Transaksi dijadikan berhasil."
 
   defp form_field(form, field), do: Ecto.Changeset.get_field(form.source, field)
 
@@ -314,6 +319,15 @@ defmodule ZahlungsWeb.DepositLive.Index do
               class="chip !border-red-300 !text-red-700"
             >
               Batalkan dan kembalikan uang
+            </button>
+            <button
+              :if={tx.status == "failed" && is_nil(tx.refunded_at)}
+              type="button"
+              phx-click={JS.push("resolve_review", value: %{transaction_id: tx.id, decision: "success"})}
+              data-confirm="Jadikan berhasil? Uangnya tidak dikembalikan ke pelanggan."
+              class="chip !border-green-300 !text-green-700"
+            >
+              Jadikan berhasil
             </button>
             <button
               type="button"
