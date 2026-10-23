@@ -12,6 +12,8 @@ defmodule Zahlungs.Services.Inquiry do
     field :customer_name, :string
     field :period, :string
     field :sheets, :integer, default: 1
+    # How many months the customer asked to pay (a bill whose provider offers a choice).
+    field :months, :integer
     field :bill_amount, :decimal
     field :inquiry_ref, :string
     # The ref Zahlungs sent (a bill is paid with the same one), what the

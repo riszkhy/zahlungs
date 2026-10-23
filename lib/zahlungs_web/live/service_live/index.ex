@@ -388,7 +388,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
 
   # On an api account, a bill and a token PLN are checked with the provider
   # before the money is taken.
-  defp checked?(%{api: true, selected: %Product{category: "tagihan_pln"}}), do: true
+  defp checked?(%{api: true, selected: %Product{category: "tagihan"}}), do: true
 
   defp checked?(%{api: true, selected: %Product{category: "token_pln", owner_check: check}}),
     do: check
@@ -490,7 +490,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
         <div :if={@api_bill && @inquiry} id="inquiry" class="mt-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm">
           <p class="font-semibold text-gray-800">{@inquiry.customer_name}</p>
           <p class="text-gray-600">
-            {group_digits(@inquiry.customer_ref)}<span :if={@inquiry.period}> · {@inquiry.period}</span><span :if={@inquiry.kind == "bill"}> · {@inquiry.sheets} lembar</span><span :if={@inquiry.details}> · {@inquiry.details}</span>
+            {group_digits(@inquiry.customer_ref)}<span :if={@inquiry.period}> · {@inquiry.period}</span><span :if={@inquiry.kind == "bill"}> · {@inquiry.sheets} bulan</span><span :if={@inquiry.details}> · {@inquiry.details}</span>
           </p>
           <div :if={@inquiry.kind == "bill"}>
             <div class="mt-2 flex justify-between"><span>Tagihan</span><span>{format_money(@inquiry.bill_amount)}</span></div>

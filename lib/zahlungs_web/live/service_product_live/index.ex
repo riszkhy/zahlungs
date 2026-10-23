@@ -93,7 +93,7 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
           |> put_if("category", item.category_hint)
           |> put_if(
             "cost",
-            item.category_hint != "tagihan_pln" && item.price && Decimal.to_string(item.price)
+            item.category_hint != "tagihan" && item.price && Decimal.to_string(item.price)
           )
 
         {:noreply, socket |> assign(:catalog, []) |> change(params, :validate)}
@@ -161,7 +161,7 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
     assign(socket, :products, Services.list_products(category: socket.assigns.category))
   end
 
-  defp bill_form?(form), do: Ecto.Changeset.get_field(form.source, :category) == "tagihan_pln"
+  defp bill_form?(form), do: Ecto.Changeset.get_field(form.source, :category) == "tagihan"
   defp token_form?(form), do: Ecto.Changeset.get_field(form.source, :category) == "token_pln"
 
   defp category_label(category) do
@@ -332,7 +332,7 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
           type="number"
           step="1"
           min="0"
-          label="Biaya tambahan toko (akun API), per lembar di atas total penyedia"
+          label="Biaya tambahan toko (akun API), per bulan di atas total penyedia"
         />
         <.input field={@form[:active]} type="checkbox" label="Aktif (bisa dijual)" />
 

@@ -217,7 +217,7 @@ defmodule Zahlungs.ServicesApiTest do
       assign_account(default_store(), deposit_account_fixture())
 
       bill =
-        service_product_fixture(%{category: "tagihan_pln", cost: "1500", margin_value: "3000"})
+        service_product_fixture(%{category: "tagihan", cost: "1500", margin_value: "3000"})
 
       assert {:ok, tx} =
                Services.record(ctx.cashier, bill.id, %{

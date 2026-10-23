@@ -156,7 +156,7 @@ defmodule Zahlungs.Services.Provider.Sbi do
   @doc """
   SBI's public price list (no credentials), as catalog items. The category is
   guessed from SBI's group: Pulsa Reguler → pulsa, `* Data` → paket_data, PLN
-  Prabayar → token_pln, PPOB `PLN` → tagihan_pln.
+  Prabayar → token_pln, PPOB (every bill) → tagihan.
   """
   @impl true
   def catalog(_config) do
@@ -193,7 +193,7 @@ defmodule Zahlungs.Services.Provider.Sbi do
 
   defp category_hint("Pulsa Reguler", _code), do: "pulsa"
   defp category_hint("PLN Prabayar", _code), do: "token_pln"
-  defp category_hint("PPOB", "PLN"), do: "tagihan_pln"
+  defp category_hint("PPOB", _code), do: "tagihan"
 
   defp category_hint(group, _code) do
     if String.ends_with?(group, "Data"), do: "paket_data"

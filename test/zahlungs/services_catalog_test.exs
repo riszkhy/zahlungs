@@ -95,9 +95,33 @@ defmodule Zahlungs.ServicesCatalogTest do
       assert by_code["TD1"].category_hint == "paket_data"
       assert by_code["TD1"].status == "kosong"
       assert by_code["PP20"].status == "gangguan"
-      assert %{category_hint: "tagihan_pln", price: nil} = by_code["PLN"]
+      assert %{category_hint: "tagihan", price: nil} = by_code["PLN"]
       assert Decimal.equal?(by_code["PLN"].admin, d("3000"))
       assert Decimal.equal?(by_code["PLN"].commission, d("1000"))
+    end
+
+    test "every item of the PPOB group is a Tagihan", ctx do
+      pricelist =
+        Map.put(
+          @pricelist,
+          "PPOB",
+          for code <- ~w(BPJSKS PDAMSLTG TELKOM PGN PLN) do
+            %{
+              "code" => code,
+              "name" => code,
+              "admin_amount" => 2500,
+              "gangguan" => "Tidak",
+              "tersedia" => "Ya"
+            }
+          end
+        )
+
+      StubClient.expect("pricelist", {:ok, 200, pricelist})
+      {:ok, items} = Services.search_catalog(ctx.account, "")
+      ppob = Enum.filter(items, &(&1.code in ~w(BPJSKS PDAMSLTG TELKOM PGN PLN)))
+
+      assert length(ppob) == 5
+      assert Enum.all?(ppob, &(&1.category_hint == "tagihan"))
     end
 
     test "no price list is unavailable", ctx do

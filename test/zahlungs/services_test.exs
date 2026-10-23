@@ -52,7 +52,7 @@ defmodule Zahlungs.ServicesTest do
     test "a bill is the bill plus the admin fee; its cost the bill plus the provider fee" do
       fixed =
         product(
-          category: "tagihan_pln",
+          category: "tagihan",
           cost: d("1500"),
           margin_type: "amount",
           margin_value: d("3000")
@@ -62,7 +62,7 @@ defmodule Zahlungs.ServicesTest do
 
       percent =
         product(
-          category: "tagihan_pln",
+          category: "tagihan",
           cost: d("1500"),
           margin_type: "percent",
           margin_value: d("1")
@@ -74,7 +74,7 @@ defmodule Zahlungs.ServicesTest do
     test "a bill of several sheets pays the admin and provider fees per sheet" do
       fixed =
         product(
-          category: "tagihan_pln",
+          category: "tagihan",
           cost: d("1500"),
           margin_type: "amount",
           margin_value: d("3000")
@@ -85,7 +85,7 @@ defmodule Zahlungs.ServicesTest do
 
       percent =
         product(
-          category: "tagihan_pln",
+          category: "tagihan",
           cost: d("1500"),
           margin_type: "percent",
           margin_value: d("1")
@@ -110,7 +110,7 @@ defmodule Zahlungs.ServicesTest do
     test "a bill without its amount has no price" do
       bill =
         product(
-          category: "tagihan_pln",
+          category: "tagihan",
           cost: d("1500"),
           margin_type: "amount",
           margin_value: d("3000")
@@ -168,7 +168,7 @@ defmodule Zahlungs.ServicesTest do
     test "tagihan PLN needs the bill", ctx do
       bill =
         service_product_fixture(%{
-          category: "tagihan_pln",
+          category: "tagihan",
           cost: "1500",
           margin_value: "3000"
         })
@@ -383,6 +383,20 @@ defmodule Zahlungs.ServicesTest do
       assert Decimal.equal?(by["token_pln"].value, money("52500"))
     end
 
+    test "a bill is reported under the Tagihan category", ctx do
+      bill =
+        service_product_fixture(%{name: "Bill 1378", category: "tagihan", cost: "1500"})
+
+      tx = service_fixture(ctx.cashier, bill, %{"bill_amount" => "100000"})
+      {:ok, _} = Services.mark_success(tx, ctx.cashier, nil)
+
+      report = Services.report(store_scope(), ctx.today, ctx.today)
+      by = Map.new(report.by_category, &{&1.category, &1})
+      assert by["tagihan"].count == 1
+      assert Services.get_transaction!(scope(ctx.cashier), tx.id).category == "tagihan"
+      assert {"tagihan", "Tagihan"} in Services.categories()
+    end
+
     test "one store, all stores of the organization, never another organization", ctx do
       other_store = store_fixture()
       assign_account(other_store, deposit_account_fixture())
@@ -430,15 +444,40 @@ defmodule Zahlungs.ServicesTest do
 
       assert errors_on(changeset)[:cost]
 
-      assert {:ok, _bill} =
-               Services.create_product(%{name: "Tagihan PLN", category: "tagihan_pln", cost: "0"})
+      assert {:ok, bill} =
+               Services.create_product(%{name: "Tagihan PLN", category: "tagihan", cost: "0"})
+
+      assert Zahlungs.Services.Product.bill?(bill)
+    end
+
+    test "the old Tagihan PLN category is gone; a bill may ask for months" do
+      assert {:error, changeset} =
+               Services.create_product(%{name: "X", category: "tagihan" <> "_pln", cost: "0"})
+
+      assert errors_on(changeset)[:category]
+
+      assert {:ok, plain} =
+               Services.create_product(%{name: "BPJS", category: "tagihan", cost: "0"})
+
+      refute plain.ask_months
+
+      assert {:ok, asking} =
+               Services.create_product(%{
+                 name: "BPJS 2",
+                 category: "tagihan",
+                 cost: "0",
+                 ask_months: true
+               })
+
+      assert asking.ask_months
+      assert Services.get_product!(asking.id).ask_months
     end
 
     test "keeps the shop's extra fee on api bills, never negative" do
       assert {:error, changeset} =
                Services.create_product(%{
                  name: "Tagihan PLN",
-                 category: "tagihan_pln",
+                 category: "tagihan",
                  cost: "0",
                  api_extra_fee: "-1"
                })
@@ -448,7 +487,7 @@ defmodule Zahlungs.ServicesTest do
       assert {:ok, bill} =
                Services.create_product(%{
                  name: "Tagihan PLN",
-                 category: "tagihan_pln",
+                 category: "tagihan",
                  cost: "0",
                  api_extra_fee: "2500"
                })

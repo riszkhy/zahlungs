@@ -79,7 +79,7 @@ defmodule Zahlungs.ServicesFixtures do
     attrs
     |> Enum.into(%{
       name: "Tagihan PLN #{System.unique_integer([:positive])}",
-      category: "tagihan_pln",
+      category: "tagihan",
       provider_code: "PLNPASCA",
       cost: "1500",
       margin_value: "3000",

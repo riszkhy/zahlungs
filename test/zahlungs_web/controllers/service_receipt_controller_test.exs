@@ -50,7 +50,7 @@ defmodule ZahlungsWeb.ServiceReceiptControllerTest do
   end
 
   test "a bill shows its amount", %{conn: conn, cashier: cashier} do
-    bill = service_product_fixture(%{category: "tagihan_pln", cost: "1500", margin_value: "3000"})
+    bill = service_product_fixture(%{category: "tagihan", cost: "1500", margin_value: "3000"})
 
     tx =
       service_fixture(cashier, bill, %{
@@ -112,7 +112,8 @@ defmodule ZahlungsWeb.ServiceReceiptControllerTest do
 
     assert response =~ "PELANGGAN 3331"
     assert response =~ "AGU–OKT 2026"
-    assert response =~ "3 lembar"
+    assert response =~ "3 bulan"
+    refute response =~ "lembar"
     assert response =~ "Ref penyedia"
     assert response =~ tx.provider_ref
     assert tx.provider_ref =~ "FAKE-"

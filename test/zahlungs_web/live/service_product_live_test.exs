@@ -134,7 +134,7 @@ defmodule ZahlungsWeb.ServiceProductLiveTest do
       assert html(socket) =~ "Komisi"
 
       socket = event(socket, "pick_catalog", %{"code" => "PLN"})
-      assert field(socket, :category) == "tagihan_pln"
+      assert field(socket, :category) == "tagihan"
       assert html(socket) =~ "Biaya tambahan toko (akun API)"
 
       name = "Tagihan PLN #{System.unique_integer([:positive])}"
@@ -142,7 +142,7 @@ defmodule ZahlungsWeb.ServiceProductLiveTest do
       event(socket, "save", %{
         "product" => %{
           "name" => name,
-          "category" => "tagihan_pln",
+          "category" => "tagihan",
           "provider_code" => "PLN",
           "cost" => "0",
           "margin_type" => "amount",
@@ -226,7 +226,7 @@ defmodule ZahlungsWeb.ServiceProductLiveTest do
     }
 
     test "a bill asks for the provider fee and the admin fee", %{socket: socket} do
-      rendered = socket |> validate(%{@pulsa | "category" => "tagihan_pln"}) |> html()
+      rendered = socket |> validate(%{@pulsa | "category" => "tagihan"}) |> html()
 
       assert rendered =~ "Biaya penyedia"
       assert rendered =~ "Biaya admin"

@@ -35,7 +35,7 @@ defmodule Zahlungs.Services do
     {"pulsa", "Pulsa"},
     {"paket_data", "Paket data"},
     {"token_pln", "Token PLN"},
-    {"tagihan_pln", "Tagihan PLN"}
+    {"tagihan", "Tagihan"}
   ]
 
   @doc "The categories as `{value, label}` pairs, in display order."
@@ -200,10 +200,10 @@ defmodule Zahlungs.Services do
 
   # What the provider is asked about: a bill, or the owner of a token PLN meter.
   defp checkable(%Product{category: category} = product)
-       when category in ["tagihan_pln", "token_pln"] do
+       when category in ["tagihan", "token_pln"] do
     cond do
       blank_code?(product) -> {:error, :no_provider_code}
-      category == "tagihan_pln" -> {:ok, "bill"}
+      category == "tagihan" -> {:ok, "bill"}
       true -> {:ok, "customer"}
     end
   end
@@ -358,7 +358,7 @@ defmodule Zahlungs.Services do
   # unused, not expired. Anything else (a token without the check, like
   # pulsa) is entered.
   defp bill_details("api", %Product{category: category} = product, store, attrs)
-       when category == "tagihan_pln" or (category == "token_pln" and product.owner_check) do
+       when category == "tagihan" or (category == "token_pln" and product.owner_check) do
     case lock_inquiry(attrs["inquiry_id"], store, product) do
       nil ->
         {:error, :inquiry_expired}
@@ -569,7 +569,7 @@ defmodule Zahlungs.Services do
   defp note_vendor_price(%Transaction{service_product_id: id}, %{actual_cost: %Decimal{} = cost}) do
     Repo.update_all(
       # A bill's actual cost is the whole bill, not comparable with its fee.
-      from(p in Product, where: p.id == ^id and p.category != "tagihan_pln" and p.cost < ^cost),
+      from(p in Product, where: p.id == ^id and p.category != "tagihan" and p.cost < ^cost),
       [set: [provider_price: cost, provider_checked_at: now()]],
       skip_org_id: true
     )

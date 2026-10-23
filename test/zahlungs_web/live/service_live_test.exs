@@ -85,11 +85,11 @@ defmodule ZahlungsWeb.ServiceLiveTest do
 
     test "tagihan PLN reads the bill with thousand separators", ctx do
       bill =
-        service_product_fixture(%{category: "tagihan_pln", cost: "1500", margin_value: "3000"})
+        service_product_fixture(%{category: "tagihan", cost: "1500", margin_value: "3000"})
 
       socket =
         ctx.socket
-        |> event("set_category", %{"category" => "tagihan_pln"})
+        |> event("set_category", %{"category" => "tagihan"})
         |> sell(bill, %{
           "customer_ref" => "530011223344",
           "bill_amount" => "245.000",
@@ -218,11 +218,11 @@ defmodule ZahlungsWeb.ServiceLiveTest do
 
     test "amounts typed with a decimal comma keep their size", ctx do
       bill =
-        service_product_fixture(%{category: "tagihan_pln", cost: "1500", margin_value: "3000"})
+        service_product_fixture(%{category: "tagihan", cost: "1500", margin_value: "3000"})
 
       socket =
         ctx.socket
-        |> event("set_category", %{"category" => "tagihan_pln"})
+        |> event("set_category", %{"category" => "tagihan"})
         |> sell(bill, %{
           "customer_ref" => "530011223344",
           "bill_amount" => "245.000,00",
@@ -266,7 +266,7 @@ defmodule ZahlungsWeb.ServiceLiveTest do
 
     defp checked(socket, bill, number) do
       socket
-      |> event("set_category", %{"category" => "tagihan_pln"})
+      |> event("set_category", %{"category" => "tagihan"})
       |> event("select", %{"id" => bill.id})
       |> event("inquire", %{"service" => %{"customer_ref" => number}})
     end
@@ -384,7 +384,7 @@ defmodule ZahlungsWeb.ServiceLiveTest do
 
       assert rendered =~ "PELANGGAN 3331"
       assert rendered =~ "AGU–OKT 2026"
-      assert rendered =~ "3 lembar"
+      assert rendered =~ "3 bulan"
       assert rendered =~ "Rp 744.000,00"
 
       socket =
