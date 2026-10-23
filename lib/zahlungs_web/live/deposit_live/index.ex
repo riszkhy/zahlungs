@@ -410,7 +410,16 @@ defmodule ZahlungsWeb.DepositLive.Index do
               class="form-control"
             />
             <div :if={kind == :secret} class="flex items-center gap-2">
-              <input type="password" name={"account[credentials][#{key}]"} id={"credential-#{key}"} value="" autocomplete="new-password" class="form-control min-w-0 flex-1" />
+              <%!-- The browser keeps what is typed: a re-render (every phx-change) would otherwise reset it to the empty value. --%>
+              <input
+                type="password"
+                name={"account[credentials][#{key}]"}
+                id={"credential-#{key}"}
+                phx-update="ignore"
+                value=""
+                autocomplete="new-password"
+                class="form-control min-w-0 flex-1"
+              />
               <button
                 type="button"
                 phx-click={

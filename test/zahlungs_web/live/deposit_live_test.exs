@@ -175,6 +175,17 @@ defmodule ZahlungsWeb.DepositLiveTest do
       refute rendered =~ ~r/id="credential-member_id"[^>]*type="password"/
     end
 
+    test "PIN and password are left to the browser, so a re-render never empties them" do
+      rendered =
+        DepositLive.Index |> mount_live(admin_fixture(), action: :new) |> sbi_form() |> html()
+
+      for key <- ["pin", "password"] do
+        assert rendered =~ ~r/<input[^>]*id="credential-#{key}"[^>]*phx-update="ignore"/
+      end
+
+      refute rendered =~ ~r/<input[^>]*id="credential-member_id"[^>]*phx-update="ignore"/
+    end
+
     test "a saved member ID is shown back; PIN and password never are" do
       admin = admin_fixture()
 
