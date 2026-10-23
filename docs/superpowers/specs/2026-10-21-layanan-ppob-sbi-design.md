@@ -6,7 +6,8 @@ Dibangun di atas: `docs/superpowers/specs/2026-10-19-layanan-ppob-fase-1-design.
 
 Sumber vendor: `DOKUMEN TEKNIS SBI 2_12_25 (7).pdf` dan koleksi Postman publik
 <https://documenter.getpostman.com/view/15055506/2sA3JRXdwS> (folder **API SIGN**),
-daftar harga publik <https://api.billerindonesia.com/V1/ppob/h2h_umum/pricelist>.
+daftar harga publik <https://bo.smartbiller.co.id/v1/public/h2h-umum/json> (dipindah SBI
+pada 2026-10 dari `https://api.billerindonesia.com/V1/ppob/h2h_umum/pricelist`).
 
 ## Tujuan
 
