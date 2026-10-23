@@ -76,6 +76,33 @@ defmodule Zahlungs.Services.Provider.SbiTest do
                StubClient.requests()
     end
 
+    test "a bill's payment carries the months as periode, signed as before" do
+      StubClient.expect("payment", ok(@topup))
+      StubClient.expect("payment", ok(@topup))
+
+      with_months = request(%{product_code: "BPJSKS", inquiry_ref: "S1", months: 3})
+      without = %{with_months | months: nil}
+
+      Sbi.pay(@credentials, with_months)
+      Sbi.pay(@credentials, without)
+
+      assert [{"payment", with_body, with_headers}, {"payment", without_body, without_headers}] =
+               StubClient.requests()
+
+      assert with_body["periode"] == "3"
+      refute Map.has_key?(without_body, "periode")
+      assert Map.delete(with_body, "periode") == without_body
+      assert with_headers == without_headers
+    end
+
+    test "a topup never carries periode" do
+      StubClient.expect("topup", ok(@topup))
+      Sbi.pay(@credentials, request(%{months: 3}))
+
+      assert [{"topup", body, _headers}] = StubClient.requests()
+      refute Map.has_key?(body, "periode")
+    end
+
     test "no answer, a server error or a page that isn't JSON is a timeout (pending)" do
       StubClient.expect("topup", {:error, :timeout})
       StubClient.expect("topup", {:error, :network})
@@ -105,12 +132,13 @@ defmodule Zahlungs.Services.Provider.SbiTest do
   describe "status/2" do
     test "asks about the ref, signed with empty product and customer" do
       StubClient.expect("status", ok(%{@topup | "status" => 2}))
-      assert {:ok, %{status: :pending}} = Sbi.status(@credentials, request())
+      assert {:ok, %{status: :pending}} = Sbi.status(@credentials, request(%{months: 3}))
 
       assert [{"status", %{"mmid" => "MM123", "ref_1" => "Z1261021153000A1B2C3"} = body, headers}] =
                StubClient.requests()
 
       refute Map.has_key?(body, "product_code")
+      refute Map.has_key?(body, "periode")
 
       assert {"sign", Sign.sign("MM123", "", "", "Z1261021153000A1B2C3", "1234", "rahasia")} in headers
     end
@@ -122,6 +150,44 @@ defmodule Zahlungs.Services.Provider.SbiTest do
   end
 
   describe "inquiry/2" do
+    test "a bill's months go as periode, without changing the signature" do
+      answer = %{"ref_2" => "S1", "status" => 1, "price" => "567000", "msg" => "SUKSES"}
+      StubClient.expect("inquiry", ok(answer))
+      StubClient.expect("inquiry", ok(answer))
+
+      bill = %{
+        ref_id: "Q1",
+        product_code: "BPJSKS",
+        customer_ref: "8888803136606896",
+        kind: :bill
+      }
+
+      Sbi.inquiry(@credentials, Map.put(bill, :months, 3))
+      Sbi.inquiry(@credentials, Map.put(bill, :months, nil))
+
+      assert [{"inquiry", with_body, with_headers}, {"inquiry", without_body, without_headers}] =
+               StubClient.requests()
+
+      assert with_body["periode"] == "3"
+      refute Map.has_key?(without_body, "periode")
+      assert Map.delete(with_body, "periode") == without_body
+      assert with_headers == without_headers
+    end
+
+    test "a request without a months key sends no periode" do
+      StubClient.expect("inquiry", ok(%{"ref_2" => "S1", "status" => 1, "price" => "1"}))
+
+      Sbi.inquiry(@credentials, %{
+        ref_id: "Q1",
+        product_code: "PLN",
+        customer_ref: "546302215889",
+        kind: :bill
+      })
+
+      assert [{"inquiry", body, _}] = StubClient.requests()
+      refute Map.has_key?(body, "periode")
+    end
+
     test "a bill uses its product code; a meter's owner uses CPLNPRA" do
       answer = %{
         "ref_2" => "2406070110697924",

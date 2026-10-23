@@ -38,11 +38,13 @@ defmodule Zahlungs.Services.Provider.Sbi do
 
   @impl true
   def inquiry(credentials, %{ref_id: ref_id, customer_ref: number, kind: kind} = request) do
-    body = %{
-      "ref_1" => ref_id,
-      "product_code" => inquiry_code(kind, request),
-      "customer_id" => number
-    }
+    body =
+      %{
+        "ref_1" => ref_id,
+        "product_code" => inquiry_code(kind, request),
+        "customer_id" => number
+      }
+      |> put_periode(request)
 
     case call(credentials, "inquiry", body, @inquiry_timeout) do
       {:ok, status, answer} -> Reply.inquiry(Reply.envelope(status, answer), kind)
@@ -68,10 +70,22 @@ defmodule Zahlungs.Services.Provider.Sbi do
     {action, body} =
       case Map.get(request, :inquiry_ref) do
         nil -> {"topup", body}
-        ref_2 -> {"payment", Map.put(body, "ref_2", ref_2)}
+        ref_2 -> {"payment", body |> Map.put("ref_2", ref_2) |> put_periode(request)}
       end
 
     credentials |> call(action, body, @pay_timeout) |> transaction_answer()
+  end
+
+  # The months of a bill that asks for them (BPJS), as text. Not one of the
+  # fields SBI signs (`call/4`), and never sent on a topup or a status check.
+  defp put_periode(body, request) do
+    case Map.get(request, :months) do
+      months when is_integer(months) and months > 0 ->
+        Map.put(body, "periode", Integer.to_string(months))
+
+      _ ->
+        body
+    end
   end
 
   @impl true

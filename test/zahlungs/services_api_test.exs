@@ -276,6 +276,8 @@ defmodule Zahlungs.ServicesApiTest do
       assert {inquiry.months, inquiry.sheets} == {3, 3}
       # 570.000 from the provider + 3 months × 1.000
       assert Decimal.equal?(Services.inquiry_price(inquiry).price, d("573000"))
+
+      assert [{"inquiry", %{"periode" => "3"}, _headers}] = StubClient.requests()
     end
 
     test "the provider's own count wins over the months asked", ctx do
@@ -354,6 +356,10 @@ defmodule Zahlungs.ServicesApiTest do
       assert tx.sheets == 3
       assert Decimal.equal?(tx.price, d("573000"))
       assert Services.provider_request(tx).months == 3
+
+      # The payment carries the months that were checked, not the browser's 6.
+      assert [{"inquiry", %{"periode" => "3"}, _}, {"payment", %{"periode" => "3"}, _}] =
+               StubClient.requests()
     end
 
     test "a manual account records the typed bill as one sheet", ctx do
