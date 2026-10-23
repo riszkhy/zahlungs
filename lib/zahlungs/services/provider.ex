@@ -23,6 +23,12 @@ defmodule Zahlungs.Services.Provider do
   @doc "The credential inputs the admin fills in, as `{key, label}`."
   @callback credential_fields() :: [{String.t(), String.t()}]
 
+  @doc """
+  The credential fields that aren't secret (e.g. a member ID): shown as plain
+  text, with their stored value. The others are write-only.
+  """
+  @callback public_credentials() :: [String.t()]
+
   @callback inquiry(credentials, %{product_code: String.t(), customer_ref: String.t()}) ::
               {:ok,
                %{
@@ -64,7 +70,7 @@ defmodule Zahlungs.Services.Provider do
   @doc "The ref a callback is about, for callbacks without a token in the URL."
   @callback callback_ref(params :: map) :: {:ok, String.t()} | :error
 
-  @optional_callbacks balance: 1, catalog: 1, prices: 2, callback_ref: 1
+  @optional_callbacks balance: 1, catalog: 1, prices: 2, callback_ref: 1, public_credentials: 0
 
   @adapters %{"fake" => Zahlungs.Services.Provider.Fake}
 

@@ -32,6 +32,10 @@ defmodule Zahlungs.Services.Provider.Sbi do
   def credential_fields,
     do: [{"member_id", "Member ID"}, {"pin", "PIN"}, {"password", "Password"}]
 
+  # The member ID names the account; the PIN and the password are the secrets.
+  @impl true
+  def public_credentials, do: ["member_id"]
+
   @impl true
   def inquiry(credentials, %{ref_id: ref_id, customer_ref: number, kind: kind} = request) do
     code = if kind == :customer, do: @owner_code, else: request.product_code

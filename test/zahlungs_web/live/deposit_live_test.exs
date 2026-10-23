@@ -156,6 +156,82 @@ defmodule ZahlungsWeb.DepositLiveTest do
     end
   end
 
+  describe "SBI's credential inputs" do
+    defp sbi_form(socket) do
+      event(socket, "validate_account", %{
+        "account" => %{"name" => "SBI", "mode" => "api", "provider" => "sbi"}
+      })
+    end
+
+    test "the member ID is plain text; PIN and password are hidden with a show toggle" do
+      rendered =
+        DepositLive.Index |> mount_live(admin_fixture(), action: :new) |> sbi_form() |> html()
+
+      assert rendered =~ ~r/<input type="text" name="account\[credentials\]\[member_id\]"/
+      assert rendered =~ ~r/<input[^>]*type="password"[^>]*id="credential-pin"/
+      assert rendered =~ ~r/<input[^>]*type="password"[^>]*id="credential-password"/
+      assert rendered =~ "Tampilkan"
+      assert rendered =~ "#credential-pin"
+      refute rendered =~ ~r/id="credential-member_id"[^>]*type="password"/
+    end
+
+    test "a saved member ID is shown back; PIN and password never are" do
+      admin = admin_fixture()
+
+      account =
+        deposit_account_fixture(%{
+          mode: "api",
+          provider: "sbi",
+          credentials: %{"member_id" => "MM77", "pin" => "4321", "password" => "kata-sandi-sbi"}
+        })
+
+      rendered =
+        DepositLive.Index
+        |> mount_live(admin, action: :edit, params: %{"id" => "#{account.id}"})
+        |> html()
+
+      assert rendered =~ ~s(value="MM77")
+      refute rendered =~ "4321"
+      refute rendered =~ "kata-sandi-sbi"
+    end
+  end
+
+  describe "switching an account's provider in the form" do
+    test "the callback URL and the saved hint follow the chosen provider" do
+      admin = admin_fixture()
+      account = api_account_fixture()
+
+      socket =
+        DepositLive.Index
+        |> mount_live(admin, action: :edit, params: %{"id" => "#{account.id}"})
+
+      assert html(socket) =~ account.callback_token
+      assert html(socket) =~ "tersimpan"
+
+      socket =
+        event(socket, "validate_account", %{
+          "account" => %{"name" => account.name, "mode" => "api", "provider" => "sbi"}
+        })
+
+      rendered = html(socket)
+      assert rendered =~ "/api/ppob/callback<"
+      refute rendered =~ account.callback_token
+      # The fake provider's secret is no SBI credential.
+      refute rendered =~ "tersimpan"
+    end
+
+    test "a new SBI account shows its callback URL before saving" do
+      socket =
+        DepositLive.Index
+        |> mount_live(admin_fixture(), action: :new)
+        |> event("validate_account", %{
+          "account" => %{"name" => "SBI", "mode" => "api", "provider" => "sbi"}
+        })
+
+      assert html(socket) =~ "/api/ppob/callback<"
+    end
+  end
+
   describe "services in review" do
     setup do
       admin = admin_fixture()
