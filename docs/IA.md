@@ -36,7 +36,7 @@ Aturan akses berlapis (router):
 │   │     ├─ Cari produk / scan barcode (keyboard & kamera HP)
 │   │     ├─ Keranjang → metode bayar (Tunai; lainnya disabled) → Complete Sale
 │   │     └─ Modal struk: Print receipt · Koreksi/batalkan · New Transaction
-│   ├── /services               Layanan PPOB: catat pulsa/paket/token/tagihan PLN,
+│   ├── /services               Layanan PPOB: catat pulsa/paket/token/tagihan (PLN, BPJS, PDAM…),
 │   │     │                     lalu tandai berhasil (token/SN) atau gagal
 │   │     └── /services/:id/receipt   Struk layanan versi cetak
 │   ├── /catalog                Katalog produk (browse, cari, filter, paginasi)
@@ -252,10 +252,16 @@ Kelola user (admin):
 
 Berlaku bila akun deposit toko bermode **API** (diatur di `/admin/deposits`).
 
-- **Tagihan PLN**: pilih produk → isi ID pelanggan → **Cek tagihan** (ke
-  penyedia) → tampil nama, periode, jumlah lembar, tagihan, biaya admin, total →
-  terima uang → **Bayar**. Mengubah ID pelanggan setelah cek membatalkan hasil
-  cek; hasil cek berlaku 15 menit.
+- **Tagihan** (satu kategori/tab "Tagihan": PLN, BPJS, PDAM, Telkom, PGN):
+  pilih produk → isi ID pelanggan → **Cek tagihan** (ke penyedia) → tampil nama,
+  periode, jumlah bulan, tagihan, biaya admin, total → terima uang → **Bayar**.
+  Mengubah ID pelanggan setelah cek membatalkan hasil cek; hasil cek berlaku 15
+  menit.
+- **Jumlah bulan**: untuk produk tagihan yang dicentang "Tanyakan jumlah bulan
+  saat cek tagihan", kasir memilih **Jumlah bulan** (1-12) sebelum **Cek
+  tagihan**; mengubahnya setelah cek membatalkan hasil cek. Produk tanpa centang
+  tidak menanyakan (dianggap 1 bulan, atau sesuai jawaban penyedia). Pada akun
+  manual, jumlah tagihan diketik kasir dan tidak ada pilihan bulan.
 - **Pulsa, paket data, token PLN**: pilih produk, isi nomor, terima uang →
   **Bayar**. Zahlungs mengirim ke penyedia; tidak ada tombol Berhasil/Gagal.
 - **Menunggu penyedia**: transaksi yang belum dijawab tampil di "Sedang
@@ -266,7 +272,7 @@ Berlaku bila akun deposit toko bermode **API** (diatur di `/admin/deposits`).
   sampai kasir menekan **Uang sudah dikembalikan**. Bila gagalnya setelah shift
   ditutup, pengembalian tunai dicatat sebagai kas keluar di shift yang sedang
   buka.
-- **Struk tagihan** memuat nama pelanggan, periode, jumlah lembar dan referensi
+- **Struk tagihan** memuat nama pelanggan, periode, jumlah bulan dan referensi
   penyedia.
 - **/admin/deposits** (akun API): penyedia, kredensial (tidak pernah
   ditampilkan lagi, hanya "tersimpan"), URL callback untuk didaftarkan ke
@@ -284,7 +290,7 @@ Berlaku bila akun deposit toko bermode **API** (diatur di `/admin/deposits`).
   - **Langsung** (centang "Cek pelanggan dulu" dimatikan di form produk): seperti
     pulsa, isi nomor meter → terima uang → **Bayar**.
 - **Kartu tagihan**: tagihan, admin penyedia, tambahan toko (biaya tambahan
-  per lembar yang diatur admin), total.
+  per bulan yang diatur admin), total.
 - **Perlu ditinjau**: bila SBI menjawab bertentangan dengan status transaksi
   (refund setelah berhasil, atau berhasil setelah gagal), status tidak berubah
   sendiri. Kasir melihat tanda "Perlu ditinjau" di riwayat; admin memutuskan di
@@ -296,8 +302,10 @@ Berlaku bila akun deposit toko bermode **API** (diatur di `/admin/deposits`).
   ditampilkan lagi); URL callback `…/api/ppob/callback` untuk didaftarkan di
   SBI; Tes koneksi dan Ambil saldo memakai saldo SBI.
 - **/admin/services**: **Cari di daftar SBI** di form produk (mengisi kode,
-  nama, modal, kategori; tagihan menampilkan admin dan komisi SBI); kolom
-  **Biaya tambahan toko (akun API)** untuk tagihan; **Kode cek pelanggan (akun
+  nama, modal, kategori; semua item grup "PPOB" SBI disarankan sebagai
+  kategori Tagihan, dengan admin dan komisi SBI); kolom **Biaya tambahan toko
+  (akun API)** (per bulan) dan centang **Tanyakan jumlah bulan saat cek
+  tagihan** untuk tagihan; **Kode cek pelanggan (akun
   API)** untuk token PLN (kosong = bawaan penyedia, SBI: `CPLNPRA`); tombol **Perbarui dari
   SBI** (ringkasan perubahan modal dan status, disimpan setelah disetujui);
   tanda **Gangguan / Kosong / Tidak ditemukan** (tidak bisa dijual lewat akun
