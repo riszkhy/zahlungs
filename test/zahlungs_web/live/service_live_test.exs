@@ -284,6 +284,40 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       })
     end
 
+    test "a token without the owner check is sold like pulsa", ctx do
+      token =
+        service_product_fixture(%{
+          category: "token_pln",
+          provider_code: "PLN20",
+          cost: "20775",
+          margin_value: "1225",
+          owner_check: false
+        })
+
+      socket =
+        ctx.socket
+        |> event("set_category", %{"category" => "token_pln"})
+        |> event("select", %{"id" => token.id})
+
+      rendered = html(socket)
+      refute rendered =~ "Cek pelanggan"
+      assert rendered =~ ~s(phx-submit="record")
+
+      socket =
+        event(socket, "record", %{
+          "service" => %{
+            "customer_ref" => "14123344441",
+            "payment_method" => "cash",
+            "amount_paid" => "22.000"
+          }
+        })
+
+      assert flash(socket, :info) =~ "penyedia"
+
+      assert [%{status: "success", customer_ref: "14123344441"}] =
+               Services.list_shift_transactions(ctx.shift)
+    end
+
     test "a token is bought after checking the meter's owner", ctx do
       token =
         service_product_fixture(%{

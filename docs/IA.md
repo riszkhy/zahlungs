@@ -277,9 +277,12 @@ Berlaku bila akun deposit toko bermode **API** (diatur di `/admin/deposits`).
 
 ## Layanan PPOB lewat Smart Biller Indonesia (SBI)
 
-- **Token PLN** (akun API): pilih produk → isi nomor meter → **Cek
-  pelanggan** → tampil nama dan tarif/daya → terima uang → **Bayar**. Tanpa cek
-  pelanggan, token tidak bisa dibayar.
+- **Token PLN** (akun API), per produk:
+  - **Cek pelanggan dulu** (bawaan): pilih produk → isi nomor meter → **Cek
+    pelanggan** → tampil nama dan tarif/daya → terima uang → **Bayar**. Tanpa cek
+    pelanggan, token tidak bisa dibayar.
+  - **Langsung** (centang "Cek pelanggan dulu" dimatikan di form produk): seperti
+    pulsa, isi nomor meter → terima uang → **Bayar**.
 - **Kartu tagihan**: tagihan, admin penyedia, tambahan toko (biaya tambahan
   per lembar yang diatur admin), total.
 - **Perlu ditinjau**: bila SBI menjawab bertentangan dengan status transaksi

@@ -296,6 +296,10 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
         <.input field={@form[:operator]} type="text" label="Operator (opsional)" />
         <.input field={@form[:provider_code]} type="text" label="Kode produk vendor (untuk akun API)" maxlength="60" />
         <div :if={token_form?(@form)}>
+          <.input field={@form[:owner_check]} type="checkbox" label="Cek pelanggan dulu (akun API)" />
+          <p class="-mt-1 text-xs text-gray-500">
+            Bila tidak dicentang, token dibeli langsung seperti pulsa, tanpa cek nama pemilik meter.
+          </p>
           <.input
             field={@form[:provider_check_code]}
             type="text"

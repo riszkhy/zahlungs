@@ -300,6 +300,24 @@ defmodule Zahlungs.ServicesApiTest do
       assert [{"inquiry", %{"product_code" => "CEKPLN"}, _}] = StubClient.requests()
     end
 
+    test "a token without the owner check is bought directly, like pulsa", ctx do
+      {:ok, token} = Services.update_product(ctx.token, %{owner_check: false})
+
+      assert {:ok, tx} =
+               Services.record(ctx.cashier, token.id, %{
+                 "customer_ref" => "1412-3344-441",
+                 "amount_paid" => "22000"
+               })
+
+      assert {tx.channel, tx.customer_ref, tx.service_inquiry_id} == {"api", "14123344441", nil}
+      assert Decimal.equal?(tx.price, d("22000"))
+      assert is_nil(Services.provider_request(tx).inquiry_ref)
+    end
+
+    test "the owner check is on unless turned off", ctx do
+      assert ctx.token.owner_check
+    end
+
     test "the provider's refusals pass on", ctx do
       assert check(ctx, "14123344446") == {:error, :not_found}
       assert check(ctx, "14123344447") == {:error, :unavailable}

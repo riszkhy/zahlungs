@@ -388,8 +388,10 @@ defmodule ZahlungsWeb.ServiceLive.Index do
 
   # On an api account, a bill and a token PLN are checked with the provider
   # before the money is taken.
-  defp checked?(%{api: true, selected: %Product{category: category}}),
-    do: category in ["tagihan_pln", "token_pln"]
+  defp checked?(%{api: true, selected: %Product{category: "tagihan_pln"}}), do: true
+
+  defp checked?(%{api: true, selected: %Product{category: "token_pln", owner_check: check}}),
+    do: check
 
   defp checked?(_assigns), do: false
 

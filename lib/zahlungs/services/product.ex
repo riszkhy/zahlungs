@@ -19,6 +19,9 @@ defmodule Zahlungs.Services.Product do
     # Token PLN: the vendor's code for the owner check; blank is the
     # provider's default (SBI: CPLNPRA).
     field :provider_check_code, :string
+    # Token PLN through an api account: check the meter's owner before the
+    # sale, or buy it directly like pulsa.
+    field :owner_check, :boolean, default: true
     # Fixed-value products: what the provider takes. Tagihan PLN: the provider's
     # fee on top of the bill.
     field :cost, :decimal, default: Decimal.new(0)
@@ -59,6 +62,7 @@ defmodule Zahlungs.Services.Product do
       :operator,
       :provider_code,
       :provider_check_code,
+      :owner_check,
       :cost,
       :margin_type,
       :margin_value,

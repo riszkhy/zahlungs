@@ -353,11 +353,12 @@ defmodule Zahlungs.Services do
 
   defp sellable_through(_manual, _product), do: :ok
 
-  # An api bill or token PLN comes from its inquiry, locked and checked here:
-  # the shift's store, the same product, unused, not expired. Anything else is
-  # entered.
+  # An api bill, and a token PLN with the owner check, come from their
+  # inquiry, locked and checked here: the shift's store, the same product,
+  # unused, not expired. Anything else (a token without the check, like
+  # pulsa) is entered.
   defp bill_details("api", %Product{category: category} = product, store, attrs)
-       when category in ["tagihan_pln", "token_pln"] do
+       when category == "tagihan_pln" or (category == "token_pln" and product.owner_check) do
     case lock_inquiry(attrs["inquiry_id"], store, product) do
       nil ->
         {:error, :inquiry_expired}
