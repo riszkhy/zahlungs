@@ -226,7 +226,11 @@ Rincian model dan batasannya ada di `docs/SAAS-multi-pemilik.md`.
 5. Satu pulsa kecil → cocokkan SN, potongan saldo, dan callback di log server.
 6. Satu token PLN 20.000 ke meter sendiri.
 7. Satu tagihan PLN milik sendiri.
-8. **Pencocokan saldo** di akun deposit dengan saldo SBI → selisih harus nol.
+8. **Cek tagihan** BPJS Kesehatan dengan "Jumlah bulan" 2 → kartu tagihan
+   menunjukkan 2 bulan dan total SBI mencakup kedua bulan; bayar hanya bila
+   cocok (bila SBI menagih bulan lain, aplikasi menolak dan meminta jumlah
+   bulan yang sama).
+9. **Pencocokan saldo** di akun deposit dengan saldo SBI → selisih harus nol.
    Bila tidak nol, periksa transaksi yang berstatus gagal: kemungkinan SBI
    memotong saldo untuk kode RC yang kita anggap gagal.
 

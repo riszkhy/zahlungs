@@ -1,7 +1,9 @@
 defmodule Zahlungs.Services.Inquiry do
   @moduledoc """
-  A PLN bill as the provider described it (Fase 1): customer, period, sheets
-  and amount. Valid for 15 minutes and used once, by `Zahlungs.Services.record/3`
+  A bill (tagihan) — or a token PLN meter's owner — as the provider described
+  it (Fase 1): customer, period, sheets (months) and amount. For a bill that
+  asks how many months, `months` is what the cashier asked and `sheets` must
+  match it. Valid for 15 minutes and used once, by `Zahlungs.Services.record/3`
   — so what the customer pays comes from here, never from the browser.
   """
   use Ecto.Schema

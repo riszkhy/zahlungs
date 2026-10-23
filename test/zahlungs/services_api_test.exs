@@ -280,13 +280,23 @@ defmodule Zahlungs.ServicesApiTest do
       assert [{"inquiry", %{"periode" => "3"}, _headers}] = StubClient.requests()
     end
 
-    test "the provider's own count wins over the months asked", ctx do
+    test "refuses a bill the provider states for other months than asked", ctx do
       queue_inquiry("SUKSES CEK TAGIHAN @DATA: Nama:BUDI/Jml bulan:2/Blth:JUL 24, AGU 24")
+
+      assert Services.inquire(ctx.cashier, ctx.bpjs.id, "8888803136606896", months: "3") ==
+               {:error,
+                {:rejected, "Penyedia menagih 2 bulan. Pilih 2 bulan lalu cek tagihan lagi."}}
+
+      assert Repo.all(from i in Inquiry, where: i.customer_ref == "8888803136606896") == []
+    end
+
+    test "accepts a bill the provider states for the months asked", ctx do
+      queue_inquiry("SUKSES CEK TAGIHAN @DATA: Nama:BUDI/Jml bulan:3/Blth:JUL 24, AGU 24, SEP 24")
 
       assert {:ok, inquiry} =
                Services.inquire(ctx.cashier, ctx.bpjs.id, "8888803136606896", months: "3")
 
-      assert inquiry.sheets == 2
+      assert {inquiry.months, inquiry.sheets} == {3, 3}
     end
 
     test "no months asked means one", ctx do

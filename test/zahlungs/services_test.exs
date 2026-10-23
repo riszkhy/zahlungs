@@ -451,6 +451,7 @@ defmodule Zahlungs.ServicesTest do
     end
 
     test "the old Tagihan PLN category is gone; a bill may ask for months" do
+      # Built in two pieces so a grep for the old category name in lib and test stays empty.
       assert {:error, changeset} =
                Services.create_product(%{name: "X", category: "tagihan" <> "_pln", cost: "0"})
 

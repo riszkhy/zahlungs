@@ -365,6 +365,27 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       assert StubClient.requests() == []
     end
 
+    test "a bill for other months than asked is refused with a message", ctx do
+      StubClient.expect(
+        "inquiry",
+        {:ok, 200,
+         %{
+           "data" => %{
+             "status" => 1,
+             "ref_2" => "S1",
+             "price" => "378000",
+             "total_payment" => "380000",
+             "msg" => "SUKSES CEK TAGIHAN @DATA: Nama:BUDI/Jml bulan:2/Blth:JUL 24, AGU 24"
+           }
+         }}
+      )
+
+      socket = inquire(ctx.socket, "3")
+
+      assert flash(socket, :error) =~ "Penyedia menagih 2 bulan"
+      assert is_nil(socket.assigns.inquiry)
+    end
+
     test "changing the months after checking drops the result", ctx do
       queue_inquiry()
 

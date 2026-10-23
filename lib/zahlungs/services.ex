@@ -11,9 +11,9 @@ defmodule Zahlungs.Services do
 
     * pulsa, paket data, token PLN: cost = the product's cost,
       price = cost + margin(cost).
-    * tagihan PLN: cost = bill + provider fee × sheets (the product's cost),
-      price = bill + admin fee × sheets (a rupiah margin), or bill + percent of
-      the bill. A bill entered by hand (Fase 0) is one sheet.
+    * a bill (tagihan): cost = bill + provider fee × months (the product's cost),
+      price = bill + admin fee × months (a rupiah margin), or bill + percent of
+      the bill. A bill entered by hand (Fase 0) is one month.
 
   ## Transactions
 
@@ -93,8 +93,9 @@ defmodule Zahlungs.Services do
   ## Price
 
   @doc """
-  The price to the customer and the cost to the shop, for a product and (for
-  tagihan PLN) the bill. A bill without a positive amount has no price.
+  The price to the customer and the cost to the shop, for a product and (for a
+  bill, tagihan) the bill and its months (`sheets`). A bill without a positive
+  amount has no price.
   """
   def price_for(%Product{} = product, bill_amount, sheets \\ 1) do
     if Product.bill?(product) do
@@ -121,7 +122,7 @@ defmodule Zahlungs.Services do
   @inquiry_lifetime 15 * 60
 
   @doc """
-  Asks the provider about a PLN bill, for a cashier on an open shift in a store
+  Asks the provider about a bill (tagihan), or a token PLN meter's owner, for a cashier on an open shift in a store
   with an api deposit account, and keeps the answer for 15 minutes
   (`Zahlungs.Services.Inquiry`). The provider gets 15 seconds.
 
@@ -134,7 +135,11 @@ defmodule Zahlungs.Services do
   `opts[:months]` (a number or text) is how many months the customer pays, for
   a bill product that asks (`ask_months`): blank means 1, 1 to 12 is that many,
   anything else is `{:error, :invalid_months}` before the provider is asked.
-  A product that doesn't ask ignores it.
+  A product that doesn't ask ignores it. The months go to the provider with the
+  payment too, so when its answer states another month count the bill is
+  refused (`{:error, {:rejected, "Penyedia menagih N bulan. ..."}}`, nothing
+  stored) and the cashier asks again for that many; an answer that states no
+  count is taken as the months asked.
   """
   def inquire(%User{} = user, product_id, customer_ref, opts \\ []) do
     Repo.put_org_id(user.organization_id)
@@ -159,7 +164,8 @@ defmodule Zahlungs.Services do
              %{customer_ref: customer_ref || ""}
            ),
          {:ok, inquiry} <- Ecto.Changeset.apply_action(changeset, :insert),
-         {:ok, answer} <- ask_provider(account, product, inquiry) do
+         {:ok, answer} <- ask_provider(account, product, inquiry),
+         :ok <- same_months(months, answer) do
       changeset
       |> Inquiry.answer_changeset(answer)
       |> Ecto.Changeset.put_change(:expires_at, NaiveDateTime.add(now(), @inquiry_lifetime))
@@ -218,6 +224,16 @@ defmodule Zahlungs.Services do
   defp checkable(_product), do: {:error, :product_unavailable}
 
   defp blank_code?(%Product{provider_code: code}), do: code in [nil, ""]
+
+  # The payment goes out with the months asked, so a bill the provider states for
+  # other months must not be priced: the cashier asks again for its months.
+  defp same_months(months, %{sheets: sheets})
+       when is_integer(months) and is_integer(sheets) and sheets != months do
+    {:error,
+     {:rejected, "Penyedia menagih #{sheets} bulan. Pilih #{sheets} bulan lalu cek tagihan lagi."}}
+  end
+
+  defp same_months(_months, _answer), do: :ok
 
   # Only a bill product that asks has months; for anything else they're ignored.
   defp months_asked(%Product{ask_months: true}, "bill", asked), do: parse_months(asked)
