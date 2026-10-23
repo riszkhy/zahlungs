@@ -25,6 +25,12 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       assert conn |> log_in_user(user_fixture()) |> get("/services") |> html_response(200) =~
                "Layanan"
     end
+
+    test "says tagihan, not tagihan PLN, in its subtitle", %{conn: conn} do
+      response = conn |> log_in_user(user_fixture()) |> get("/services") |> html_response(200)
+
+      assert response =~ "Pulsa, paket data, token PLN dan tagihan"
+    end
   end
 
   describe "before selling" do
@@ -247,6 +253,176 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       assert ServiceLive.Index.group_digits("081234567890") == "0812 3456 7890"
       assert ServiceLive.Index.group_digits("6281234567890") == "6281 2345 6789 0"
       assert ServiceLive.Index.group_digits("") == ""
+    end
+  end
+
+  describe "a bill that asks how many months" do
+    alias Zahlungs.Services.Provider.Sbi.StubClient
+
+    setup do
+      assign_account(
+        default_store(),
+        deposit_account_fixture(%{
+          mode: "api",
+          provider: "sbi",
+          credentials: %{"member_id" => "MM1", "pin" => "1234", "password" => "pw"}
+        })
+      )
+
+      cashier = user_on_shift_fixture()
+
+      bpjs =
+        api_product_fixture(%{ask_months: true, provider_code: "BPJSKS", api_extra_fee: "1000"})
+
+      %{
+        cashier: cashier,
+        bpjs: bpjs,
+        shift: Shifts.current_shift(cashier),
+        socket:
+          ServiceLive.Index
+          |> mount_live(cashier)
+          |> event("set_category", %{"category" => "tagihan"})
+          |> event("select", %{"id" => bpjs.id})
+      }
+    end
+
+    defp queue_inquiry do
+      StubClient.expect(
+        "inquiry",
+        {:ok, 200,
+         %{
+           "data" => %{
+             "status" => 1,
+             "ref_2" => "S1",
+             "price" => "567000",
+             "total_payment" => "570000",
+             "msg" => "SUKSES"
+           }
+         }}
+      )
+    end
+
+    defp inquire(socket, months) do
+      event(socket, "inquire", %{
+        "service" => %{"customer_ref" => "8888803136606896", "months" => months}
+      })
+    end
+
+    test "the check form has a months choice from 1 to 12", ctx do
+      rendered = html(ctx.socket)
+
+      assert rendered =~ "Jumlah bulan"
+      assert rendered =~ ~s(name="service[months]")
+      assert rendered =~ ~s(<option value="12")
+      refute rendered =~ ~s(<option value="13")
+      assert rendered =~ ~r/<option value="1" selected/
+    end
+
+    test "a bill that doesn't ask has no months choice", ctx do
+      plain = api_product_fixture(%{provider_code: "PLNPASCA"})
+
+      rendered =
+        ctx.socket
+        |> event("set_category", %{"category" => "tagihan"})
+        |> event("select", %{"id" => plain.id})
+        |> html()
+
+      assert rendered =~ "Cek tagihan"
+      refute rendered =~ "Jumlah bulan"
+      refute rendered =~ ~s(name="service[months]")
+    end
+
+    test "a manual account asks nothing", ctx do
+      assign_account(default_store(), deposit_account_fixture())
+
+      rendered =
+        ServiceLive.Index
+        |> mount_live(ctx.cashier)
+        |> event("set_category", %{"category" => "tagihan"})
+        |> event("select", %{"id" => ctx.bpjs.id})
+        |> html()
+
+      refute rendered =~ "Jumlah bulan"
+      refute rendered =~ ~s(name="service[months]")
+    end
+
+    test "the months chosen are checked and shown on the card", ctx do
+      queue_inquiry()
+      socket = inquire(ctx.socket, "3")
+      rendered = html(socket)
+
+      assert socket.assigns.inquiry.months == 3
+      assert rendered =~ "3 bulan"
+      assert rendered =~ "Rp 573.000,00"
+      assert [{"inquiry", %{"periode" => "3"}, _}] = StubClient.requests()
+    end
+
+    test "other months are refused with a message", ctx do
+      socket = inquire(ctx.socket, "13")
+
+      assert flash(socket, :error) == "Jumlah bulan harus 1–12."
+      assert is_nil(socket.assigns.inquiry)
+      assert StubClient.requests() == []
+    end
+
+    test "changing the months after checking drops the result", ctx do
+      queue_inquiry()
+
+      socket =
+        ctx.socket
+        |> inquire("3")
+        |> event("change", %{"service" => %{"months" => "2"}})
+
+      assert is_nil(socket.assigns.inquiry)
+      assert is_nil(socket.assigns.preview)
+      refute html(socket) =~ ~s(phx-submit="record")
+    end
+
+    test "the same months keep the result", ctx do
+      queue_inquiry()
+
+      socket =
+        ctx.socket
+        |> inquire("3")
+        |> event("change", %{"service" => %{"months" => "3", "payment_method" => "qris"}})
+
+      assert socket.assigns.inquiry.months == 3
+    end
+
+    test "months don't touch the result of a bill that doesn't ask", ctx do
+      api_store_fixture()
+      plain = api_product_fixture()
+
+      socket =
+        ServiceLive.Index
+        |> mount_live(ctx.cashier)
+        |> event("set_category", %{"category" => "tagihan"})
+        |> event("select", %{"id" => plain.id})
+        |> event("inquire", %{"service" => %{"customer_ref" => "530011223331", "months" => "1"}})
+        |> event("change", %{"service" => %{"months" => "2"}})
+
+      assert %{months: nil} = socket.assigns.inquiry
+    end
+
+    test "paying clears the form, months included", ctx do
+      queue_inquiry()
+
+      StubClient.expect(
+        "payment",
+        {:ok, 200, %{"data" => %{"status" => 2, "ref_2" => "S1", "msg" => "PROSES"}}}
+      )
+
+      socket =
+        ctx.socket
+        |> inquire("3")
+        |> event("record", %{
+          "service" => %{"payment_method" => "cash", "amount_paid" => "573.000"}
+        })
+
+      assert flash(socket, :info) =~ "penyedia"
+      assert socket.assigns.form["months"] == "1"
+      assert is_nil(socket.assigns.inquiry)
+      assert [%{sheets: 3}] = Services.list_shift_transactions(ctx.shift)
     end
   end
 

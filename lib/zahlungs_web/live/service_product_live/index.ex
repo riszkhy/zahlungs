@@ -9,7 +9,7 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
   alias Zahlungs.Services
   alias Zahlungs.Services.Product
 
-  # The bill the preview of a tagihan PLN product is shown for.
+  # The bill the preview of a tagihan product is shown for.
   @sample_bill Decimal.new(100_000)
 
   @impl true
@@ -198,7 +198,7 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
     ~H"""
     <.header>
       Produk layanan
-      <:subtitle>Pulsa, paket data, token dan tagihan PLN (khusus admin)</:subtitle>
+      <:subtitle>Pulsa, paket data, token PLN dan tagihan (khusus admin)</:subtitle>
       <:actions>
         <button :if={@catalog_account} type="button" phx-click="price_update" phx-disable-with="Mengambil harga..." class="chip mr-2">
           Perbarui dari SBI
@@ -334,6 +334,12 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
           min="0"
           label="Biaya tambahan toko (akun API), per bulan di atas total penyedia"
         />
+        <div :if={bill_form?(@form)}>
+          <.input field={@form[:ask_months]} type="checkbox" label="Tanyakan jumlah bulan saat cek tagihan" />
+          <p class="-mt-1 text-xs text-gray-500">
+            Untuk tagihan yang bisa dibayar beberapa bulan sekaligus (mis. BPJS). Hanya berlaku di akun API.
+          </p>
+        </div>
         <.input field={@form[:active]} type="checkbox" label="Aktif (bisa dijual)" />
 
         <p :if={@preview && not @preview.bill?} class="mt-3 rounded bg-gray-50 p-3 text-sm">

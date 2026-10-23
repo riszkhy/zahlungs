@@ -45,7 +45,7 @@ defmodule ZahlungsWeb.ReportLive.Services do
     ~H"""
     <.header>
       Laporan layanan
-      <:subtitle>Pulsa, paket data, token dan tagihan PLN yang berhasil (khusus admin)</:subtitle>
+      <:subtitle>Pulsa, paket data, token PLN dan tagihan yang berhasil (khusus admin)</:subtitle>
     </.header>
 
     <form phx-change="filter" class="mt-6 flex flex-wrap items-end gap-3">

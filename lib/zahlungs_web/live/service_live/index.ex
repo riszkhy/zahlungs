@@ -21,6 +21,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
 
   @blank_form %{
     "customer_ref" => "",
+    "months" => "1",
     "bill_amount" => "",
     "payment_method" => "cash",
     "amount_paid" => ""
@@ -74,7 +75,9 @@ defmodule ZahlungsWeb.ServiceLive.Index do
         {:noreply, put_flash(socket, :error, "Pilih produk dulu.")}
 
       product ->
-        case Services.inquire(socket.assigns.current_user, product.id, form["customer_ref"]) do
+        case Services.inquire(socket.assigns.current_user, product.id, form["customer_ref"],
+               months: form["months"]
+             ) do
           {:ok, inquiry} ->
             {:noreply,
              socket
@@ -190,9 +193,20 @@ defmodule ZahlungsWeb.ServiceLive.Index do
   defp drop_stale_inquiry(%{assigns: %{inquiry: nil}} = socket), do: socket
 
   defp drop_stale_inquiry(%{assigns: %{inquiry: inquiry, form: form}} = socket) do
-    if digits(form["customer_ref"]) == inquiry.customer_ref,
+    if digits(form["customer_ref"]) == inquiry.customer_ref and months_kept?(inquiry, form),
       do: socket,
       else: assign(socket, inquiry: nil, preview: nil)
+  end
+
+  # Other months than the ones checked need a new check; an inquiry without
+  # months (a bill that doesn't ask) doesn't care about the field.
+  defp months_kept?(%{months: nil}, _form), do: true
+
+  defp months_kept?(%{months: months}, form) do
+    case Integer.parse(form["months"] || "") do
+      {^months, ""} -> true
+      _ -> false
+    end
   end
 
   # Cash comes back out of the drawer; other payments are refunded the way
@@ -324,6 +338,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
 
   defp error_message(:product_unavailable), do: "Produk ini sudah tidak tersedia."
   defp error_message(:bill_required), do: "Isi nominal tagihan."
+  defp error_message(:invalid_months), do: "Jumlah bulan harus 1–12."
   defp error_message(:insufficient_payment), do: "Uang diterima kurang dari harga."
   defp error_message(:not_processing), do: "Transaksi ini sudah ditandai."
 
@@ -374,6 +389,12 @@ defmodule ZahlungsWeb.ServiceLive.Index do
     end
   end
 
+  # An api bill that asks has the cashier choose the months before the check.
+  defp ask_months?(%{api: true, selected: %Product{category: "tagihan", ask_months: true}}),
+    do: true
+
+  defp ask_months?(_assigns), do: false
+
   # An api service the provider has left waiting may be marked by an admin.
   defp by_hand?(transaction, user),
     do: user.role == "admin" and Services.awaiting_too_long?(transaction)
@@ -401,12 +422,12 @@ defmodule ZahlungsWeb.ServiceLive.Index do
 
   @impl true
   def render(assigns) do
-    assigns = assign(assigns, :api_bill, checked?(assigns))
+    assigns = assign(assigns, api_bill: checked?(assigns), ask_months: ask_months?(assigns))
 
     ~H"""
     <.header>
       Layanan
-      <:subtitle>Pulsa, paket data, token dan tagihan PLN{if @store, do: " · #{@store.name}"}</:subtitle>
+      <:subtitle>Pulsa, paket data, token PLN dan tagihan{if @store, do: " · #{@store.name}"}</:subtitle>
     </.header>
 
     <div :if={is_nil(@shift)} class="mt-6 rounded-lg border border-gray-200 bg-gray-50 p-5">
@@ -481,6 +502,14 @@ defmodule ZahlungsWeb.ServiceLive.Index do
           <label class="block text-sm">
             {if Product.bill?(@selected), do: "ID pelanggan", else: "Nomor meter / ID pelanggan"}
             <input type="text" inputmode="numeric" name="service[customer_ref]" value={@form["customer_ref"]} class="form-control" autocomplete="off" required />
+          </label>
+          <label :if={@ask_months} class="block text-sm">
+            Jumlah bulan
+            <select name="service[months]" class="form-control">
+              <option :for={month <- 1..12} value={month} selected={@form["months"] == to_string(month)}>
+                {month}
+              </option>
+            </select>
           </label>
           <button type="submit" phx-disable-with="Mengecek..." class="btn btn-primary w-full">
             {if Product.bill?(@selected), do: "Cek tagihan", else: "Cek pelanggan"}

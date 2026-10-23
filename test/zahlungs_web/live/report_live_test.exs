@@ -119,6 +119,7 @@ defmodule ZahlungsWeb.ReportLiveTest do
         conn |> log_in_user(admin_fixture()) |> get("/reports/services") |> html_response(200)
 
       assert response =~ "Laporan layanan"
+      assert response =~ "Pulsa, paket data, token PLN dan tagihan yang berhasil"
       assert response =~ "Rp 12.000,00"
       assert response =~ "Rp 1.850,00"
     end

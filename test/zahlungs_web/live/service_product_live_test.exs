@@ -32,6 +32,13 @@ defmodule ZahlungsWeb.ServiceProductLiveTest do
              |> html_response(200) =~
                "Produk layanan"
     end
+
+    test "says tagihan, not tagihan PLN, in its subtitle", %{conn: conn} do
+      response =
+        conn |> log_in_user(admin_fixture()) |> get("/admin/services") |> html_response(200)
+
+      assert response =~ "Pulsa, paket data, token PLN dan tagihan (khusus admin)"
+    end
   end
 
   describe "the list" do
@@ -230,6 +237,25 @@ defmodule ZahlungsWeb.ServiceProductLiveTest do
 
       assert rendered =~ "Biaya penyedia"
       assert rendered =~ "Biaya admin"
+    end
+
+    test "only a bill can ask for the months", %{socket: socket} do
+      refute socket |> validate(@pulsa) |> html() =~ "Tanyakan jumlah bulan saat cek tagihan"
+
+      assert socket |> validate(%{@pulsa | "category" => "tagihan"}) |> html() =~
+               "Tanyakan jumlah bulan saat cek tagihan"
+    end
+
+    test "a bill keeps whether it asks for the months", %{socket: socket} do
+      name = "BPJS #{System.unique_integer([:positive])}"
+      bill = %{@pulsa | "category" => "tagihan", "name" => name}
+
+      event(socket, "save", %{"product" => Map.put(bill, "ask_months", "true")})
+      assert Enum.find(Services.list_products(), &(&1.name == name)).ask_months
+
+      other = "Tagihan #{System.unique_integer([:positive])}"
+      event(socket, "save", %{"product" => %{bill | "name" => other}})
+      refute Enum.find(Services.list_products(), &(&1.name == other)).ask_months
     end
 
     test "the price preview follows the margin, in rupiah or percent", %{socket: socket} do
