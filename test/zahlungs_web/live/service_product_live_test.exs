@@ -255,6 +255,27 @@ defmodule ZahlungsWeb.ServiceProductLiveTest do
       assert is_nil(live_redirect(socket))
     end
 
+    test "a token PLN keeps its owner-check code; other categories don't ask", %{socket: socket} do
+      refute socket |> validate(@pulsa) |> html() =~ "Kode cek pelanggan"
+
+      token = %{@pulsa | "category" => "token_pln"}
+      assert socket |> validate(token) |> html() =~ "Kode cek pelanggan"
+
+      name = "Token #{System.unique_integer([:positive])}"
+
+      event(socket, "save", %{
+        "product" =>
+          Map.merge(token, %{
+            "name" => name,
+            "provider_code" => "PLN20",
+            "provider_check_code" => "CEKPLN"
+          })
+      })
+
+      saved = Enum.find(Services.list_products(), &(&1.name == name))
+      assert {saved.provider_code, saved.provider_check_code} == {"PLN20", "CEKPLN"}
+    end
+
     test "keeps the vendor's product code", %{socket: socket} do
       name = "Pulsa #{System.unique_integer([:positive])}"
       assert html(socket) =~ "Kode produk vendor"

@@ -294,7 +294,8 @@ Berlaku bila akun deposit toko bermode **API** (diatur di `/admin/deposits`).
   SBI; Tes koneksi dan Ambil saldo memakai saldo SBI.
 - **/admin/services**: **Cari di daftar SBI** di form produk (mengisi kode,
   nama, modal, kategori; tagihan menampilkan admin dan komisi SBI); kolom
-  **Biaya tambahan toko (akun API)** untuk tagihan; tombol **Perbarui dari
+  **Biaya tambahan toko (akun API)** untuk tagihan; **Kode cek pelanggan (akun
+  API)** untuk token PLN (kosong = bawaan penyedia, SBI: `CPLNPRA`); tombol **Perbarui dari
   SBI** (ringkasan perubahan modal dan status, disimpan setelah disetujui);
   tanda **Gangguan / Kosong / Tidak ditemukan** (tidak bisa dijual lewat akun
   API) dan **Modal SBI naik**.

@@ -162,6 +162,7 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
   end
 
   defp bill_form?(form), do: Ecto.Changeset.get_field(form.source, :category) == "tagihan_pln"
+  defp token_form?(form), do: Ecto.Changeset.get_field(form.source, :category) == "token_pln"
 
   defp category_label(category) do
     Enum.find_value(Services.categories(), category, fn {value, label} ->
@@ -294,6 +295,18 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
         <.input field={@form[:category]} type="select" label="Kategori" options={Enum.map(Services.categories(), fn {v, l} -> {l, v} end)} />
         <.input field={@form[:operator]} type="text" label="Operator (opsional)" />
         <.input field={@form[:provider_code]} type="text" label="Kode produk vendor (untuk akun API)" maxlength="60" />
+        <div :if={token_form?(@form)}>
+          <.input
+            field={@form[:provider_check_code]}
+            type="text"
+            label="Kode cek pelanggan (akun API)"
+            placeholder="CPLNPRA"
+            maxlength="60"
+          />
+          <p class="-mt-1 text-xs text-gray-500">
+            Dipakai untuk Cek pelanggan sebelum token dibeli. Kosongkan untuk memakai kode bawaan penyedia (SBI: CPLNPRA).
+          </p>
+        </div>
         <.input
           field={@form[:cost]}
           type="number"

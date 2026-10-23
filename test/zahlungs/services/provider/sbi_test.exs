@@ -148,6 +148,30 @@ defmodule Zahlungs.Services.Provider.SbiTest do
              ] = StubClient.requests()
     end
 
+    test "a meter's owner is checked with the product's own check code when it has one" do
+      answer = %{
+        "ref_2" => "S1",
+        "status" => 1,
+        "msg" => "INQ SUKSES",
+        "detail" => %{"data_1" => "Anto"}
+      }
+
+      StubClient.expect("inquiry", ok(answer))
+      StubClient.expect("inquiry", ok(answer))
+
+      owner = %{ref_id: "Q1", product_code: "PLN20", customer_ref: "14123344441", kind: :customer}
+      Sbi.inquiry(@credentials, Map.put(owner, :check_code, "CEKPLN"))
+      Sbi.inquiry(@credentials, Map.put(owner, :check_code, ""))
+
+      assert [
+               {"inquiry", %{"product_code" => "CEKPLN"}, check_headers},
+               {"inquiry", %{"product_code" => "CPLNPRA"}, _}
+             ] = StubClient.requests()
+
+      sign = Sign.sign("MM123", "CEKPLN", "14123344441", "Q1", "1234", "rahasia")
+      assert {"sign", sign} in check_headers
+    end
+
     test "no answer is unavailable" do
       StubClient.expect("inquiry", {:error, :timeout})
       inquiry = %{ref_id: "Q1", product_code: "PLN", customer_ref: "546302215889", kind: :bill}

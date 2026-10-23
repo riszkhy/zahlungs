@@ -277,6 +277,29 @@ defmodule Zahlungs.ServicesApiTest do
       assert buy(ctx, %{"inquiry_id" => inquiry.id}) == {:error, :inquiry_expired}
     end
 
+    test "the owner check goes out with the product's check code", ctx do
+      alias Zahlungs.Services.Provider.Sbi.StubClient
+
+      assign_account(
+        default_store(),
+        deposit_account_fixture(%{
+          mode: "api",
+          provider: "sbi",
+          credentials: %{"member_id" => "MM1", "pin" => "1234", "password" => "pw"}
+        })
+      )
+
+      {:ok, token} = Services.update_product(ctx.token, %{provider_check_code: "CEKPLN"})
+
+      StubClient.expect(
+        "inquiry",
+        {:ok, 200, %{"data" => %{"status" => 1, "ref_2" => "S1", "msg" => "INQ SUKSES"}}}
+      )
+
+      assert {:ok, %{kind: "customer"}} = Services.inquire(ctx.cashier, token.id, "14123344441")
+      assert [{"inquiry", %{"product_code" => "CEKPLN"}, _}] = StubClient.requests()
+    end
+
     test "the provider's refusals pass on", ctx do
       assert check(ctx, "14123344446") == {:error, :not_found}
       assert check(ctx, "14123344447") == {:error, :unavailable}

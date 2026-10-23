@@ -29,6 +29,8 @@ defmodule Zahlungs.Services.Provider do
   """
   @callback public_credentials() :: [String.t()]
 
+  # The request also carries `ref_id`, `kind` (`:bill` | `:customer`) and, for a
+  # token PLN owner check, the product's `check_code` (blank: the default).
   @callback inquiry(credentials, %{product_code: String.t(), customer_ref: String.t()}) ::
               {:ok,
                %{

@@ -221,6 +221,7 @@ defmodule Zahlungs.Services do
             adapter.inquiry(credentials, %{
               ref_id: inquiry.ref_id,
               product_code: product.provider_code,
+              check_code: product.provider_check_code,
               customer_ref: inquiry.customer_ref,
               kind: if(inquiry.kind == "customer", do: :customer, else: :bill)
             })

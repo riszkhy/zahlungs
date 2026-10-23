@@ -7,7 +7,7 @@ defmodule Zahlungs.Services.Provider.Sbi do
 
   | Zahlungs | SBI action |
   | --- | --- |
-  | Cek tagihan / cek pelanggan token | `inquiry` (`CPLNPRA` for a meter's owner) |
+  | Cek tagihan / cek pelanggan token | `inquiry` (a meter's owner: the product's check code, default `CPLNPRA`) |
   | Bayar tagihan | `payment` with the inquiry's `ref_1` and `ref_2` |
   | Pulsa, paket data, token PLN | `topup` |
   | Cek status | `status` |
@@ -38,14 +38,28 @@ defmodule Zahlungs.Services.Provider.Sbi do
 
   @impl true
   def inquiry(credentials, %{ref_id: ref_id, customer_ref: number, kind: kind} = request) do
-    code = if kind == :customer, do: @owner_code, else: request.product_code
-    body = %{"ref_1" => ref_id, "product_code" => code, "customer_id" => number}
+    body = %{
+      "ref_1" => ref_id,
+      "product_code" => inquiry_code(kind, request),
+      "customer_id" => number
+    }
 
     case call(credentials, "inquiry", body, @inquiry_timeout) do
       {:ok, status, answer} -> Reply.inquiry(Reply.envelope(status, answer), kind)
       {:error, _reason} -> {:error, :unavailable}
     end
   end
+
+  # A bill is asked about with its own code. A meter's owner with the
+  # product's check code, or SBI's default (not in every member's price plan).
+  defp inquiry_code(:customer, request) do
+    case Map.get(request, :check_code) do
+      code when is_binary(code) and code != "" -> String.trim(code)
+      _ -> @owner_code
+    end
+  end
+
+  defp inquiry_code(_bill, request), do: request.product_code
 
   @impl true
   def pay(credentials, %{ref_id: ref_id, product_code: code, customer_ref: number} = request) do

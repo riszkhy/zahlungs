@@ -16,6 +16,9 @@ defmodule Zahlungs.Services.Product do
     field :operator, :string
     # The vendor's code for this product (Fase 1, sold through an api account).
     field :provider_code, :string
+    # Token PLN: the vendor's code for the owner check; blank is the
+    # provider's default (SBI: CPLNPRA).
+    field :provider_check_code, :string
     # Fixed-value products: what the provider takes. Tagihan PLN: the provider's
     # fee on top of the bill.
     field :cost, :decimal, default: Decimal.new(0)
@@ -55,6 +58,7 @@ defmodule Zahlungs.Services.Product do
       :category,
       :operator,
       :provider_code,
+      :provider_check_code,
       :cost,
       :margin_type,
       :margin_value,
@@ -65,6 +69,7 @@ defmodule Zahlungs.Services.Product do
     |> validate_length(:name, max: 160)
     |> validate_length(:operator, max: 60)
     |> validate_length(:provider_code, max: 60)
+    |> validate_length(:provider_check_code, max: 60)
     |> validate_inclusion(:category, @categories)
     |> validate_inclusion(:margin_type, @margin_types)
     |> validate_number(:margin_value, greater_than_or_equal_to: 0)
