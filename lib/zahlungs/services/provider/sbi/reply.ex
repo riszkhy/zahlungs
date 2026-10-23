@@ -201,7 +201,7 @@ defmodule Zahlungs.Services.Provider.Sbi.Reply do
   defp months(msg) do
     case msg && Regex.run(~r/Jml bulan\s*:\s*(\d+)/i, msg) do
       [_, n] -> max(String.to_integer(n), 1)
-      _ -> 1
+      _ -> nil
     end
   end
 

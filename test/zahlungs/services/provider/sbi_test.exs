@@ -137,7 +137,7 @@ defmodule Zahlungs.Services.Provider.SbiTest do
       StubClient.expect("inquiry", ok(answer))
 
       bill = %{ref_id: "Q1", product_code: "PLN", customer_ref: "546302215889", kind: :bill}
-      assert {:ok, %{customer_name: "Anto", sheets: 1}} = Sbi.inquiry(@credentials, bill)
+      assert {:ok, %{customer_name: "Anto", sheets: nil}} = Sbi.inquiry(@credentials, bill)
 
       owner = %{bill | product_code: "PLN20", kind: :customer}
       assert {:ok, %{bill_amount: nil}} = Sbi.inquiry(@credentials, owner)

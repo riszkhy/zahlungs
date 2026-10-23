@@ -192,7 +192,7 @@ defmodule Zahlungs.Services.Provider.SbiReplyTest do
     test "a PLN bill from the Postman example" do
       assert {:ok, answer} = Reply.inquiry({:data, @inquiry_pln}, :bill)
       assert answer.customer_name == "Anto"
-      assert {answer.sheets, answer.period, answer.inquiry_ref} == {1, nil, "2406070110697924"}
+      assert {answer.sheets, answer.period, answer.inquiry_ref} == {nil, nil, "2406070110697924"}
       assert Decimal.equal?(answer.bill_amount, d("300000"))
       assert Decimal.equal?(answer.provider_admin, d("2750"))
       assert Decimal.equal?(answer.provider_total, d("302750"))

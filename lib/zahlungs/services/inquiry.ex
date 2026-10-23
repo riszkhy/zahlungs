@@ -52,7 +52,8 @@ defmodule Zahlungs.Services.Inquiry do
     |> change(%{
       customer_name: clip(answer.customer_name, 120),
       period: clip(answer.period, 60),
-      sheets: answer.sheets,
+      # A provider that doesn't say how many months the bill covers: the months asked.
+      sheets: Map.get(answer, :sheets) || get_field(changeset, :months) || 1,
       bill_amount: answer.bill_amount,
       provider_admin: Map.get(answer, :provider_admin),
       provider_total: Map.get(answer, :provider_total) || answer.bill_amount,

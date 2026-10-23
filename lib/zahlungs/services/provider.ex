@@ -18,6 +18,7 @@ defmodule Zahlungs.Services.Provider do
           | %{status: :failed, message: String.t()}
           | %{status: :pending, provider_ref: String.t() | nil}
           | %{status: :refunded, message: String.t()}
+  # A pay/status request also carries `inquiry_ref` (a bill's) and `months`.
   @type request :: %{ref_id: String.t(), product_code: String.t(), customer_ref: String.t()}
 
   @doc "The credential inputs the admin fills in, as `{key, label}`."
@@ -29,14 +30,17 @@ defmodule Zahlungs.Services.Provider do
   """
   @callback public_credentials() :: [String.t()]
 
-  # The request also carries `ref_id`, `kind` (`:bill` | `:customer`) and, for a
-  # token PLN owner check, the product's `check_code` (blank: the default).
+  # The request also carries `ref_id`, `kind` (`:bill` | `:customer`), for a
+  # token PLN owner check the product's `check_code` (blank: the default), and
+  # `months` (1–12, or nil): how many months of a bill the customer pays, when
+  # the product asks. An answer's `sheets` is nil when the provider doesn't say
+  # how many months the bill covers (the months asked, or 1, are used).
   @callback inquiry(credentials, %{product_code: String.t(), customer_ref: String.t()}) ::
               {:ok,
                %{
                  customer_name: String.t(),
                  period: String.t(),
-                 sheets: pos_integer,
+                 sheets: pos_integer | nil,
                  bill_amount: Decimal.t(),
                  inquiry_ref: String.t()
                }}

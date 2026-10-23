@@ -130,8 +130,13 @@ defmodule Zahlungs.Services do
   (not an active bill product), `:no_provider_code`, the provider's
   `:not_found` / `:already_paid` / `:unavailable` / `{:rejected, message}`, or a
   changeset (the customer number).
+
+  `opts[:months]` (a number or text) is how many months the customer pays, for
+  a bill product that asks (`ask_months`): blank means 1, 1 to 12 is that many,
+  anything else is `{:error, :invalid_months}` before the provider is asked.
+  A product that doesn't ask ignores it.
   """
-  def inquire(%User{} = user, product_id, customer_ref) do
+  def inquire(%User{} = user, product_id, customer_ref, opts \\ []) do
     Repo.put_org_id(user.organization_id)
 
     with {:ok, shift} <- open_shift(user),
@@ -139,6 +144,7 @@ defmodule Zahlungs.Services do
          {:ok, account} <- api_account(store),
          {:ok, product} <- sellable_product(product_id),
          {:ok, kind} <- checkable(product),
+         {:ok, months} <- months_asked(product, kind, opts[:months]),
          changeset =
            Inquiry.number_changeset(
              %Inquiry{
@@ -147,7 +153,8 @@ defmodule Zahlungs.Services do
                service_product_id: product.id,
                deposit_account_id: account.id,
                ref_id: Ref.generate("Q", store.id),
-               kind: kind
+               kind: kind,
+               months: months
              },
              %{customer_ref: customer_ref || ""}
            ),
@@ -212,6 +219,28 @@ defmodule Zahlungs.Services do
 
   defp blank_code?(%Product{provider_code: code}), do: code in [nil, ""]
 
+  # Only a bill product that asks has months; for anything else they're ignored.
+  defp months_asked(%Product{ask_months: true}, "bill", asked), do: parse_months(asked)
+  defp months_asked(_product, _kind, _asked), do: {:ok, nil}
+
+  defp parse_months(nil), do: {:ok, 1}
+  defp parse_months(months) when is_integer(months) and months in 1..12, do: {:ok, months}
+
+  defp parse_months(months) when is_binary(months) do
+    case String.trim(months) do
+      "" ->
+        {:ok, 1}
+
+      text ->
+        case Integer.parse(text) do
+          {n, ""} when n in 1..12 -> {:ok, n}
+          _ -> {:error, :invalid_months}
+        end
+    end
+  end
+
+  defp parse_months(_months), do: {:error, :invalid_months}
+
   # The provider gets @inquiry_timeout; past that it counts as unavailable.
   defp ask_provider(account, product, inquiry) do
     case Deposits.provider(account) do
@@ -223,7 +252,8 @@ defmodule Zahlungs.Services do
               product_code: product.provider_code,
               check_code: product.provider_check_code,
               customer_ref: inquiry.customer_ref,
-              kind: if(inquiry.kind == "customer", do: :customer, else: :bill)
+              kind: if(inquiry.kind == "customer", do: :customer, else: :bill),
+              months: inquiry.months
             })
           end)
 
@@ -483,19 +513,20 @@ defmodule Zahlungs.Services do
   # What the provider is sent about a service (pay and status alike).
   def provider_request(%Transaction{} = transaction) do
     # Only a bill is paid against its inquiry; a token PLN's owner check is not.
-    inquiry_ref =
-      transaction.service_inquiry_id &&
-        Repo.one(
-          from i in Inquiry,
-            where: i.id == ^transaction.service_inquiry_id and i.kind == "bill",
-            select: i.inquiry_ref
-        )
+    {inquiry_ref, months} =
+      (transaction.service_inquiry_id &&
+         Repo.one(
+           from i in Inquiry,
+             where: i.id == ^transaction.service_inquiry_id and i.kind == "bill",
+             select: {i.inquiry_ref, i.months}
+         )) || {nil, nil}
 
     %{
       ref_id: transaction.ref_id,
       product_code: transaction.provider_code || product_code(transaction),
       customer_ref: transaction.customer_ref,
-      inquiry_ref: inquiry_ref
+      inquiry_ref: inquiry_ref,
+      months: months
     }
   end
 

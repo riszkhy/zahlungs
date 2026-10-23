@@ -231,6 +231,148 @@ defmodule Zahlungs.ServicesApiTest do
     end
   end
 
+  describe "a bill that asks how many months" do
+    alias Zahlungs.Services.Provider.Sbi.StubClient
+
+    setup do
+      assign_account(
+        default_store(),
+        deposit_account_fixture(%{
+          mode: "api",
+          provider: "sbi",
+          credentials: %{"member_id" => "MM1", "pin" => "1234", "password" => "pw"}
+        })
+      )
+
+      %{
+        cashier: user_on_shift_fixture(),
+        bpjs:
+          api_product_fixture(%{ask_months: true, provider_code: "BPJSKS", api_extra_fee: "1000"})
+      }
+    end
+
+    defp queue_inquiry(msg \\ "SUKSES") do
+      StubClient.expect(
+        "inquiry",
+        {:ok, 200,
+         %{
+           "data" => %{
+             "status" => 1,
+             "ref_2" => "S1",
+             "price" => "567000",
+             "total_payment" => "570000",
+             "msg" => msg
+           }
+         }}
+      )
+    end
+
+    test "keeps the months asked, and prices every one of them", ctx do
+      queue_inquiry()
+
+      assert {:ok, inquiry} =
+               Services.inquire(ctx.cashier, ctx.bpjs.id, "8888803136606896", months: "3")
+
+      assert {inquiry.months, inquiry.sheets} == {3, 3}
+      # 570.000 from the provider + 3 months × 1.000
+      assert Decimal.equal?(Services.inquiry_price(inquiry).price, d("573000"))
+    end
+
+    test "the provider's own count wins over the months asked", ctx do
+      queue_inquiry("SUKSES CEK TAGIHAN @DATA: Nama:BUDI/Jml bulan:2/Blth:JUL 24, AGU 24")
+
+      assert {:ok, inquiry} =
+               Services.inquire(ctx.cashier, ctx.bpjs.id, "8888803136606896", months: "3")
+
+      assert inquiry.sheets == 2
+    end
+
+    test "no months asked means one", ctx do
+      for months <- [nil, "", "  "] do
+        queue_inquiry()
+
+        assert {:ok, inquiry} =
+                 Services.inquire(ctx.cashier, ctx.bpjs.id, "8888803136606896", months: months)
+
+        assert {inquiry.months, inquiry.sheets} == {1, 1}
+      end
+
+      queue_inquiry()
+      assert {:ok, %{months: 1}} = Services.inquire(ctx.cashier, ctx.bpjs.id, "8888803136606896")
+    end
+
+    test "accepts a number as well as text, from 1 to 12", ctx do
+      queue_inquiry()
+
+      assert {:ok, %{months: 12}} =
+               Services.inquire(ctx.cashier, ctx.bpjs.id, "8888803136606896", months: 12)
+
+      queue_inquiry()
+
+      assert {:ok, %{months: 1}} =
+               Services.inquire(ctx.cashier, ctx.bpjs.id, "8888803136606896", months: " 1 ")
+    end
+
+    test "refuses other months before asking the provider", ctx do
+      for months <- ["0", "13", "abc", "3x", "-2", 0, 13] do
+        assert Services.inquire(ctx.cashier, ctx.bpjs.id, "8888803136606896", months: months) ==
+                 {:error, :invalid_months}
+      end
+
+      assert StubClient.requests() == []
+    end
+
+    test "a product that doesn't ask ignores the months", ctx do
+      plain = api_product_fixture(%{provider_code: "PLNPASC"})
+      queue_inquiry()
+
+      assert {:ok, inquiry} =
+               Services.inquire(ctx.cashier, plain.id, "8888803136606896", months: "3")
+
+      assert {inquiry.months, inquiry.sheets} == {nil, 1}
+    end
+
+    test "paying uses what was checked, whatever the browser says", ctx do
+      queue_inquiry()
+
+      assert {:ok, inquiry} =
+               Services.inquire(ctx.cashier, ctx.bpjs.id, "8888803136606896", months: "3")
+
+      StubClient.expect(
+        "payment",
+        {:ok, 200, %{"data" => %{"status" => 2, "ref_2" => "S1", "msg" => "PROSES"}}}
+      )
+
+      assert {:ok, tx} =
+               Services.record(ctx.cashier, ctx.bpjs.id, %{
+                 "inquiry_id" => "#{inquiry.id}",
+                 "months" => "6",
+                 "sheets" => "6",
+                 "amount_paid" => "573000"
+               })
+
+      assert tx.sheets == 3
+      assert Decimal.equal?(tx.price, d("573000"))
+      assert Services.provider_request(tx).months == 3
+    end
+
+    test "a manual account records the typed bill as one sheet", ctx do
+      assign_account(default_store(), deposit_account_fixture())
+
+      assert {:ok, tx} =
+               Services.record(ctx.cashier, ctx.bpjs.id, %{
+                 "customer_ref" => "8888803136606896",
+                 "bill_amount" => "245000",
+                 "months" => "4",
+                 "amount_paid" => "248000"
+               })
+
+      assert {tx.channel, tx.sheets, tx.service_inquiry_id} == {"manual", 1, nil}
+      assert Decimal.equal?(tx.price, d("248000"))
+      assert Services.provider_request(tx).months == nil
+    end
+  end
+
   describe "token PLN on an api account" do
     setup do
       api_store_fixture()
