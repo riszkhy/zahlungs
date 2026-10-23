@@ -86,6 +86,52 @@ defmodule Zahlungs.ServicesCatalogTest do
       assert Decimal.equal?(item.price, d("20775"))
     end
 
+    test "brings each product's brand from SBI's prefix and category", ctx do
+      StubClient.expect(
+        "pricelist",
+        {:ok, 200,
+         %{
+           "Pulsa Reguler" => [
+             %{
+               "code" => "S10",
+               "name" => "TSEL 10",
+               "category" => "TELKOMSEL H2H",
+               "prefix" => "TELKOMSEL",
+               "harga" => 10_100
+             },
+             %{
+               "code" => "BY10",
+               "name" => "BYU 10",
+               "category" => "TELKOMSEL BYU",
+               "prefix" => "TELKOMSEL",
+               "harga" => 10_200
+             },
+             %{
+               "code" => "AX10",
+               "name" => "AXIS 10",
+               "category" => "AXIS NASIONAL",
+               "prefix" => "XL,AXIS",
+               "harga" => 10_300
+             }
+           ],
+           "PLN Prabayar" => [
+             %{
+               "code" => "PLN20",
+               "name" => "PLN 20.000",
+               "category" => "PLN PRABAYAR",
+               "prefix" => "",
+               "harga" => 20_775
+             }
+           ]
+         }}
+      )
+
+      {:ok, items} = Services.search_catalog(ctx.account, "")
+      brands = Map.new(items, &{&1.code, &1.brand})
+
+      assert brands == %{"S10" => "telkomsel", "BY10" => "byu", "AX10" => "axis", "PLN20" => nil}
+    end
+
     test "tells data, bills and what can't be sold apart", ctx do
       StubClient.expect("pricelist", {:ok, 200, @pricelist})
       {:ok, items} = Services.search_catalog(ctx.account, "")

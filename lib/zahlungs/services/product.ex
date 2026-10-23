@@ -75,7 +75,7 @@ defmodule Zahlungs.Services.Product do
     ])
     |> validate_required([:name, :category, :cost, :margin_type, :margin_value])
     |> validate_length(:name, max: 160)
-    |> validate_length(:operator, max: 60)
+    |> validate_inclusion(:operator, Zahlungs.Services.Brand.keys())
     |> validate_length(:provider_code, max: 60)
     |> validate_length(:provider_check_code, max: 60)
     |> validate_inclusion(:category, @categories)

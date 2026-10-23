@@ -7,6 +7,7 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
   use ZahlungsWeb, :live_view
 
   alias Zahlungs.Services
+  alias Zahlungs.Services.Brand
   alias Zahlungs.Services.Product
 
   # The bill the preview of a tagihan product is shown for.
@@ -91,6 +92,7 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
           socket.assigns.form.params
           |> Map.merge(%{"name" => item.name, "provider_code" => item.code})
           |> put_if("category", item.category_hint)
+          |> put_if("operator", item.brand)
           |> put_if(
             "cost",
             item.category_hint != "tagihan" && item.price && Decimal.to_string(item.price)
@@ -163,6 +165,9 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
 
   defp bill_form?(form), do: Ecto.Changeset.get_field(form.source, :category) == "tagihan"
   defp token_form?(form), do: Ecto.Changeset.get_field(form.source, :category) == "token_pln"
+
+  defp brand_form?(form),
+    do: Ecto.Changeset.get_field(form.source, :category) in ~w(pulsa paket_data)
 
   defp category_label(category) do
     Enum.find_value(Services.categories(), category, fn {value, label} ->
@@ -293,7 +298,14 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
       <.form for={@form} id="service-product-form" phx-change="validate" phx-submit="save" class="mt-4 space-y-1">
         <.input field={@form[:name]} type="text" label="Nama (mis. Pulsa Telkomsel 10.000)" required />
         <.input field={@form[:category]} type="select" label="Kategori" options={Enum.map(Services.categories(), fn {v, l} -> {l, v} end)} />
-        <.input field={@form[:operator]} type="text" label="Operator (opsional)" />
+        <.input
+          :if={brand_form?(@form)}
+          field={@form[:operator]}
+          type="select"
+          label="Operator"
+          prompt="Lainnya"
+          options={Brand.options()}
+        />
         <.input field={@form[:provider_code]} type="text" label="Kode produk vendor (untuk akun API)" maxlength="60" />
         <div :if={token_form?(@form)}>
           <.input field={@form[:owner_check]} type="checkbox" label="Cek pelanggan dulu (akun API)" />

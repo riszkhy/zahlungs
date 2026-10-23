@@ -62,6 +62,7 @@ defmodule Zahlungs.Services.Provider do
           price: Decimal.t() | nil,
           admin: Decimal.t() | nil,
           commission: Decimal.t() | nil,
+          brand: String.t() | nil,
           status: String.t()
         }
 

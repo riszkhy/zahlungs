@@ -16,7 +16,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
   use ZahlungsWeb, :live_view
 
   alias Zahlungs.{Deposits, Services, Shifts, Stores}
-  alias Zahlungs.Services.Product
+  alias Zahlungs.Services.{Brand, Product}
   alias ZahlungsWeb.AmountInput
 
   @blank_form %{
@@ -39,7 +39,8 @@ defmodule ZahlungsWeb.ServiceLive.Index do
      socket
      |> assign(page_title: "Layanan", shift: shift, store: store)
      |> assign(sellable: account != nil, api: account != nil and Deposits.api?(account))
-     |> assign(category: "pulsa", selected: nil, form: @blank_form, preview: nil, inquiry: nil)
+     |> assign(category: "pulsa", brand: nil, selected: nil, form: @blank_form)
+     |> assign(preview: nil, inquiry: nil)
      |> load_products()
      |> load_transactions()}
   end
@@ -49,7 +50,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
     if category in Product.categories() do
       {:noreply,
        socket
-       |> assign(category: category, selected: nil, preview: nil, inquiry: nil)
+       |> assign(category: category, brand: nil, selected: nil, preview: nil, inquiry: nil)
        |> load_products()}
     else
       {:noreply, socket}
@@ -63,7 +64,18 @@ defmodule ZahlungsWeb.ServiceLive.Index do
 
   def handle_event("change", %{"service" => params}, socket) do
     form = clean(params, socket.assigns.form)
-    {:noreply, socket |> assign(:form, form) |> drop_stale_inquiry() |> preview()}
+
+    {:noreply,
+     socket |> assign(:form, form) |> detect_brand() |> drop_stale_inquiry() |> preview()}
+  end
+
+  # "" shows every product, "other" the ones without a brand.
+  def handle_event("set_brand", %{"brand" => brand}, socket) do
+    if brand in ["", "other" | Brand.keys()] do
+      {:noreply, socket |> assign(:brand, if(brand != "", do: brand)) |> keep_selected()}
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_event("inquire", %{"service" => params}, socket) do
@@ -188,6 +200,43 @@ defmodule ZahlungsWeb.ServiceLive.Index do
 
   defp recorded_message(_manual),
     do: "Dicatat. Proses di aplikasi penyedia, lalu tandai hasilnya."
+
+  defp brand_category?(category), do: category in ~w(pulsa paket_data)
+
+  # Pulsa and paket data: the number's prefix picks the brand. A number too
+  # short to tell, or one of no known brand, leaves the choice as it was.
+  defp detect_brand(%{assigns: %{category: category, form: form}} = socket) do
+    with true <- brand_category?(category),
+         brand when is_binary(brand) <- Brand.detect(form["customer_ref"]) do
+      socket |> assign(:brand, brand) |> keep_selected()
+    else
+      _ -> socket
+    end
+  end
+
+  # A selected product of another brand is let go, so it isn't sold to this
+  # number; one without a brand stays selected.
+  defp keep_selected(%{assigns: %{selected: nil}} = socket), do: socket
+
+  defp keep_selected(%{assigns: %{selected: selected, brand: brand}} = socket) do
+    if selected.operator in [nil, brand] or brand in [nil, "other"],
+      do: socket,
+      else: assign(socket, selected: nil, preview: nil, inquiry: nil)
+  end
+
+  defp shown?(_product, nil), do: true
+  defp shown?(product, "other"), do: is_nil(product.operator)
+  defp shown?(product, brand), do: product.operator == brand
+
+  defp shown_products(products, brand), do: Enum.filter(products, &shown?(&1, brand))
+
+  # The brands that have products, in the usual order, and "Lainnya" when
+  # some product has none.
+  defp brand_chips(products) do
+    operators = MapSet.new(products, & &1.operator)
+    chips = for {label, key} <- Brand.options(), key in operators, do: {label, key}
+    if nil in operators, do: chips ++ [{"Lainnya", "other"}], else: chips
+  end
 
   # A number changed after Cek tagihan no longer matches what was checked.
   defp drop_stale_inquiry(%{assigns: %{inquiry: nil}} = socket), do: socket
@@ -477,9 +526,32 @@ defmodule ZahlungsWeb.ServiceLive.Index do
           </button>
         </div>
 
+        <div :if={brand_category?(@category)} class="mt-3">
+          <form id="brand-number" phx-change="change" phx-submit="change">
+            <label class="block text-sm">
+              Nomor tujuan
+              <input type="text" inputmode="numeric" name="service[customer_ref]" value={@form["customer_ref"]} class="form-control" autocomplete="off" />
+            </label>
+          </form>
+          <div class="mt-2 flex flex-wrap gap-2">
+            <button type="button" phx-click="set_brand" phx-value-brand="" class={["chip", is_nil(@brand) && "chip-active"]}>
+              Semua
+            </button>
+            <button
+              :for={{label, key} <- brand_chips(@products)}
+              type="button"
+              phx-click="set_brand"
+              phx-value-brand={key}
+              class={["chip", @brand == key && "chip-active"]}
+            >
+              {label}
+            </button>
+          </div>
+        </div>
+
         <div class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
           <button
-            :for={product <- @products}
+            :for={product <- shown_products(@products, @brand)}
             type="button"
             phx-click={JS.push("select", value: %{id: product.id})}
             class={["product-tile", @selected && @selected.id == product.id && "!border-green-700 ring-2 ring-green-200"]}
@@ -550,7 +622,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
           </label>
 
           <div :if={not @api_bill}>
-            <label class="block text-sm">
+            <label :if={not brand_category?(@category)} class="block text-sm">
               Nomor tujuan
               <input type="text" inputmode="numeric" name="service[customer_ref]" value={@form["customer_ref"]} class="form-control" autocomplete="off" required />
             </label>

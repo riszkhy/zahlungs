@@ -111,6 +111,35 @@ defmodule ZahlungsWeb.ServiceProductLiveTest do
 
     defp field(socket, name), do: Ecto.Changeset.get_field(socket.assigns.form.source, name)
 
+    test "a picked pulsa brings its brand", %{admin: admin} do
+      StubClient.expect(
+        "pricelist",
+        {:ok, 200,
+         %{
+           "Pulsa Reguler" => [
+             %{
+               "code" => "T10",
+               "name" => "THREE 10K",
+               "category" => "THREE NASIONAL",
+               "prefix" => "TRI",
+               "harga" => 10_050,
+               "gangguan" => "Tidak",
+               "tersedia" => "Ya"
+             }
+           ]
+         }}
+      )
+
+      socket =
+        ServiceProductLive.Index
+        |> mount_live(admin, action: :new)
+        |> event("search_catalog", %{"q" => "three"})
+        |> event("pick_catalog", %{"code" => "T10"})
+
+      assert field(socket, :operator) == "tri"
+      assert {field(socket, :category), field(socket, :provider_code)} == {"pulsa", "T10"}
+    end
+
     test "a product is picked from SBI's price list", %{admin: admin} do
       StubClient.expect("pricelist", {:ok, 200, @pricelist})
 
@@ -314,6 +343,24 @@ defmodule ZahlungsWeb.ServiceProductLiveTest do
 
       saved = Enum.find(Services.list_products(), &(&1.name == name))
       assert {saved.provider_code, saved.provider_check_code} == {"PLN20", "CEKPLN"}
+    end
+
+    test "pulsa and paket data pick their operator from the brands", %{socket: socket} do
+      rendered = socket |> validate(@pulsa) |> html()
+      assert rendered =~ ~s(name="product[operator]")
+      assert rendered =~ "Telkomsel"
+      assert rendered =~ "Smartfren"
+
+      refute socket |> validate(%{@pulsa | "category" => "tagihan"}) |> html() =~
+               ~s(name="product[operator]")
+
+      name = "Pulsa #{System.unique_integer([:positive])}"
+
+      event(socket, "save", %{
+        "product" => Map.merge(@pulsa, %{"name" => name, "operator" => "indosat"})
+      })
+
+      assert Enum.find(Services.list_products(), &(&1.name == name)).operator == "indosat"
     end
 
     test "keeps the vendor's product code", %{socket: socket} do

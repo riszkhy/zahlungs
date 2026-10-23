@@ -248,6 +248,100 @@ defmodule ZahlungsWeb.ServiceLiveTest do
     end
   end
 
+  describe "brands on pulsa and paket data" do
+    setup do
+      assign_account(default_store(), deposit_account_fixture())
+      cashier = user_on_shift_fixture()
+
+      %{
+        cashier: cashier,
+        shift: Shifts.current_shift(cashier),
+        tsel:
+          service_product_fixture(%{
+            name: "Simpati 10 #{System.unique_integer([:positive])}",
+            operator: "telkomsel"
+          }),
+        isat:
+          service_product_fixture(%{
+            name: "IM3 10 #{System.unique_integer([:positive])}",
+            operator: "indosat"
+          }),
+        other: service_product_fixture(%{name: "Lain 10 #{System.unique_integer([:positive])}"}),
+        socket:
+          ServiceLive.Index
+          |> mount_live(cashier)
+          |> event("set_category", %{"category" => "pulsa"})
+      }
+    end
+
+    defp typed(socket, number),
+      do: event(socket, "change", %{"service" => %{"customer_ref" => number}})
+
+    test "the number comes first, with the brands that have products", ctx do
+      rendered = html(ctx.socket)
+      assert rendered =~ ~s(id="brand-number")
+      assert rendered =~ "Semua"
+      assert rendered =~ "Telkomsel"
+      assert rendered =~ "Indosat"
+      assert rendered =~ "Lainnya"
+      refute rendered =~ ">Smartfren<"
+      assert rendered =~ ctx.tsel.name and rendered =~ ctx.isat.name
+    end
+
+    test "typing the number picks its brand and shows only its products", ctx do
+      socket = typed(ctx.socket, "0812")
+      assert socket.assigns.brand == "telkomsel"
+      rendered = html(socket)
+      assert rendered =~ ctx.tsel.name
+      refute rendered =~ ctx.isat.name
+      refute rendered =~ ctx.other.name
+
+      assert typed(socket, "0857 1234").assigns.brand == "indosat"
+      # Too short, or no brand: the choice stays.
+      assert typed(socket, "021").assigns.brand == "telkomsel"
+    end
+
+    test "a brand can be picked by hand, and Semua shows everything", ctx do
+      socket = ctx.socket |> typed("081234567890") |> event("set_brand", %{"brand" => "indosat"})
+      assert html(socket) =~ ctx.isat.name
+      refute html(socket) =~ ctx.tsel.name
+
+      socket = event(socket, "set_brand", %{"brand" => ""})
+      assert html(socket) =~ ctx.tsel.name and html(socket) =~ ctx.isat.name
+
+      socket = event(socket, "set_brand", %{"brand" => "other"})
+      assert html(socket) =~ ctx.other.name
+      refute html(socket) =~ ctx.tsel.name
+    end
+
+    test "the number typed first is the one sold", ctx do
+      socket =
+        ctx.socket
+        |> typed("0812-3456-7890")
+        |> event("select", %{"id" => ctx.tsel.id})
+        |> event("record", %{
+          "service" => %{"payment_method" => "cash", "amount_paid" => "12.000"}
+        })
+
+      assert flash(socket, :info)
+      assert [%{customer_ref: "081234567890"}] = Services.list_shift_transactions(ctx.shift)
+    end
+
+    test "a number of another brand lets the selected product go", ctx do
+      socket = ctx.socket |> event("select", %{"id" => ctx.tsel.id}) |> typed("0857")
+      assert socket.assigns.selected == nil
+
+      socket = ctx.socket |> event("select", %{"id" => ctx.other.id}) |> typed("0857")
+      assert socket.assigns.selected.id == ctx.other.id
+    end
+
+    test "another category forgets the brand", ctx do
+      socket = ctx.socket |> typed("0812") |> event("set_category", %{"category" => "tagihan"})
+      assert socket.assigns.brand == nil
+      refute html(socket) =~ ~s(id="brand-number")
+    end
+  end
+
   describe "group_digits/1" do
     test "groups a number in fours from the left" do
       assert ServiceLive.Index.group_digits("081234567890") == "0812 3456 7890"

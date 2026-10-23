@@ -243,6 +243,12 @@ Kelola user (admin):
   *diproses*; setelah diproses di aplikasi penyedia, tandai *berhasil* (token/SN)
   atau *gagal* (alasan, uang dikembalikan). Hanya yang mencatat atau admin yang
   boleh menandai.
+- Pulsa dan paket data: nomor tujuan diisi di atas daftar produk; awalan nomor
+  memilih brand (Telkomsel, by.U, Indosat, XL, Axis, Tri, Smartfren) dan
+  daftar hanya menampilkan produk brand itu. Kasir bisa memilih brand lain,
+  "Semua", atau "Lainnya" (produk tanpa brand). Nomor by.U memakai awalan
+  Telkomsel, jadi by.U dipilih sendiri. Brand produk diatur di form produk
+  layanan (otomatis bila produk diambil dari daftar SBI).
 - Shift tidak bisa ditutup selama masih ada layanan *diproses*.
 - **/admin/services**, **/admin/deposits**, **/reports/services**: admin saja.
   Form toko memilih akun deposit yang dipakai toko itu.

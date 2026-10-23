@@ -21,6 +21,7 @@ defmodule Zahlungs.Services.Provider.Sbi do
   """
   @behaviour Zahlungs.Services.Provider
 
+  alias Zahlungs.Services.Brand
   alias Zahlungs.Services.Provider.Sbi.{Reply, Sign}
 
   @inquiry_timeout 15_000
@@ -196,6 +197,7 @@ defmodule Zahlungs.Services.Provider.Sbi do
       price: Reply.money(item["harga"]),
       admin: Reply.money(item["admin_amount"]),
       commission: Reply.money(item["komisi"]),
+      brand: Brand.from_sbi(Reply.text(item["prefix"]), Reply.text(item["category"])),
       status:
         cond do
           item["gangguan"] == "Ya" -> "gangguan"

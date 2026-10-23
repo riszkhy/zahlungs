@@ -496,6 +496,29 @@ defmodule Zahlungs.ServicesTest do
       assert Decimal.equal?(bill.api_extra_fee, d("2500"))
     end
 
+    test "an operator is one of the known brands" do
+      assert {:error, changeset} =
+               Services.create_product(%{
+                 name: "X",
+                 category: "pulsa",
+                 cost: "1",
+                 operator: "Nokia"
+               })
+
+      assert errors_on(changeset)[:operator]
+
+      assert {:ok, %{operator: "telkomsel"}} =
+               Services.create_product(%{
+                 name: "X",
+                 category: "pulsa",
+                 cost: "1",
+                 operator: "telkomsel"
+               })
+
+      assert {:ok, %{operator: nil}} =
+               Services.create_product(%{name: "X", category: "pulsa", cost: "1", operator: ""})
+    end
+
     test "keeps the vendor's product code, up to 60 characters" do
       product = service_product_fixture(%{provider_code: "PLNPASCA"})
       assert product.provider_code == "PLNPASCA"
