@@ -668,6 +668,12 @@ defmodule ZahlungsWeb.CoreComponents do
 
   def format_money(_), do: "Rp 0,00"
 
+  @doc ~S"""
+  Like `format_money/1`, without the cents when they are zero (`Rp 11.659`,
+  `Rp 12.000,50`): prices a cashier reads out, on the Layanan screen.
+  """
+  def format_price(amount), do: String.replace_suffix(format_money(amount), ",00", "")
+
   defp group_thousands(int_string) do
     int_string
     |> String.reverse()

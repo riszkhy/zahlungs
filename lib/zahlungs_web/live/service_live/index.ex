@@ -69,6 +69,12 @@ defmodule ZahlungsWeb.ServiceLive.Index do
      socket |> assign(:form, form) |> detect_brand() |> drop_stale_inquiry() |> preview()}
   end
 
+  def handle_event("clear_number", _params, socket) do
+    form = %{socket.assigns.form | "customer_ref" => ""}
+
+    {:noreply, socket |> assign(form: form, brand: nil) |> drop_stale_inquiry() |> preview()}
+  end
+
   # "" shows every product, "other" the ones without a brand.
   def handle_event("set_brand", %{"brand" => brand}, socket) do
     if brand in ["", "other" | Brand.keys()] do
@@ -204,16 +210,27 @@ defmodule ZahlungsWeb.ServiceLive.Index do
   defp brand_category?(category), do: category in ~w(pulsa paket_data)
 
   # Pulsa and paket data: the number's prefix picks the brand. A number too
-  # short to tell, or one of no known brand, leaves the choice as it was.
+  # short to tell, or one of no known brand, leaves the choice as it was; a
+  # brand with no products here shows them all rather than none.
   defp detect_brand(
          %{assigns: %{category: category, form: form, brand_prefixes: prefixes}} = socket
        ) do
     with true <- brand_category?(category),
          brand when is_binary(brand) <- Brand.detect(form["customer_ref"], prefixes) do
+      brand = if Enum.any?(socket.assigns.products, &(&1.operator == brand)), do: brand
       socket |> assign(:brand, brand) |> keep_selected()
     else
       _ -> socket
     end
+  end
+
+  # The number read back in groups, after the brand chosen or, without one,
+  # the brand its prefix names: "Telkomsel · 0812 3456 7890".
+  defp number_hint(number, brand, prefixes) do
+    grouped = group_digits(digits(number))
+    known = if brand in Brand.keys(), do: brand, else: Brand.detect(number, prefixes)
+
+    if known, do: "#{Brand.label(known)} · #{grouped}", else: grouped
   end
 
   # A selected product of another brand is let go, so it isn't sold to this
@@ -263,11 +280,11 @@ defmodule ZahlungsWeb.ServiceLive.Index do
   # Cash comes back out of the drawer; other payments are refunded the way
   # they were paid, and never from the drawer (they never went into it).
   defp refund_message(%{payment_method: "cash", price: price}),
-    do: "Kembalikan #{format_money(price)} ke pelanggan."
+    do: "Kembalikan #{format_price(price)} ke pelanggan."
 
   defp refund_message(%{payment_method: method, price: price}),
     do:
-      "Kembalikan #{format_money(price)} ke pelanggan lewat #{payment_label(method)}, bukan dari laci."
+      "Kembalikan #{format_price(price)} ke pelanggan lewat #{payment_label(method)}, bukan dari laci."
 
   defp payment_label("qris"), do: "QRIS"
   defp payment_label("card"), do: "kartu"
@@ -289,7 +306,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
     message =
       case socket.assigns.preview do
         %{price: price} ->
-          "Harga #{product.name} berubah menjadi #{format_money(price)}. Sampaikan ke pelanggan, lalu catat lagi."
+          "Harga #{product.name} berubah menjadi #{format_price(price)}. Sampaikan ke pelanggan, lalu catat lagi."
 
         nil ->
           "Harga #{product.name} berubah. Pilih produknya lagi."
@@ -435,7 +452,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
 
   defp tile_price(product) do
     case Services.price_for(product, nil) do
-      {:ok, %{price: price}} -> format_money(price)
+      {:ok, %{price: price}} -> format_price(price)
       {:error, :bill_required} -> "Tagihan + admin"
     end
   end
@@ -530,13 +547,34 @@ defmodule ZahlungsWeb.ServiceLive.Index do
 
         <div :if={brand_category?(@category)} class="mt-3">
           <form id="brand-number" phx-change="change" phx-submit="change">
-            <label class="block text-sm">
-              Nomor tujuan
-              <input type="text" inputmode="numeric" name="service[customer_ref]" value={@form["customer_ref"]} class="form-control" autocomplete="off" />
-            </label>
+            <label class="block text-sm" for="brand-number-input">Nomor tujuan</label>
+            <div class="relative">
+              <input
+                type="text"
+                id="brand-number-input"
+                inputmode="numeric"
+                name="service[customer_ref]"
+                value={@form["customer_ref"]}
+                placeholder="08xx xxxx xxxx"
+                class="form-control pr-10"
+                autocomplete="off"
+              />
+              <button
+                :if={@form["customer_ref"] != ""}
+                type="button"
+                phx-click="clear_number"
+                class="absolute inset-y-0 right-0 px-3 text-lg text-gray-400 hover:text-gray-700"
+                aria-label="Hapus nomor"
+              >
+                ×
+              </button>
+            </div>
+            <p :if={@form["customer_ref"] != ""} id="brand-number-hint" class="mt-1 text-sm font-medium text-gray-700">
+              {number_hint(@form["customer_ref"], @brand, @brand_prefixes)}
+            </p>
           </form>
-          <div class="mt-2 flex flex-wrap gap-2">
-            <button type="button" phx-click="set_brand" phx-value-brand="" class={["chip", is_nil(@brand) && "chip-active"]}>
+          <div class="mt-2 flex flex-wrap gap-2" role="group" aria-label="Brand">
+            <button type="button" phx-click="set_brand" phx-value-brand="" class={["chip chip-sm", is_nil(@brand) && "chip-sm-active"]}>
               Semua
             </button>
             <button
@@ -544,7 +582,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
               type="button"
               phx-click="set_brand"
               phx-value-brand={key}
-              class={["chip", @brand == key && "chip-active"]}
+              class={["chip chip-sm", @brand == key && "chip-sm-active"]}
             >
               {label}
             </button>
@@ -565,10 +603,18 @@ defmodule ZahlungsWeb.ServiceLive.Index do
         <p :if={@products == []} class="mt-3 text-sm text-gray-500">
           Belum ada produk {category_label(@category)}. Admin menambahkannya di menu Produk layanan.
         </p>
+        <p :if={@products != [] and shown_products(@products, @brand) == []} class="mt-3 text-sm text-gray-500">
+          Belum ada produk {Brand.label(if(@brand != "other", do: @brand))}.
+          <button type="button" phx-click="set_brand" phx-value-brand="" class="font-medium text-green-800 underline">
+            Tampilkan semua
+          </button>
+        </p>
       </section>
 
       <section class="cart-panel lg:col-span-2">
-        <p :if={is_nil(@selected)} class="text-sm text-gray-500">Pilih produk di kiri.</p>
+        <p :if={is_nil(@selected)} class="text-sm text-gray-500">
+          {if brand_category?(@category), do: "Isi nomor tujuan, lalu pilih produk.", else: "Pilih produk di kiri."}
+        </p>
 
         <%!-- An api bill or token: check it with the provider first. --%>
         <form :if={@api_bill} phx-change="change" phx-submit="inquire" class="space-y-3">
@@ -596,26 +642,26 @@ defmodule ZahlungsWeb.ServiceLive.Index do
             {group_digits(@inquiry.customer_ref)}<span :if={@inquiry.period}> · {@inquiry.period}</span><span :if={@inquiry.kind == "bill"}> · {@inquiry.sheets} bulan</span><span :if={@inquiry.details}> · {@inquiry.details}</span>
           </p>
           <div :if={@inquiry.kind == "bill"}>
-            <div class="mt-2 flex justify-between"><span>Tagihan</span><span>{format_money(@inquiry.bill_amount)}</span></div>
+            <div class="mt-2 flex justify-between"><span>Tagihan</span><span>{format_price(@inquiry.bill_amount)}</span></div>
             <div class="flex justify-between">
               <span>Admin penyedia</span>
-              <span>{format_money(@inquiry.provider_admin || Decimal.new(0))}</span>
+              <span>{format_price(@inquiry.provider_admin || Decimal.new(0))}</span>
             </div>
             <div class="flex justify-between">
               <span>Tambahan toko</span>
-              <span>{format_money(extra_fee(@preview, @inquiry))}</span>
+              <span>{format_price(extra_fee(@preview, @inquiry))}</span>
             </div>
           </div>
           <div class="mt-1 flex justify-between font-semibold">
             <span>{if @inquiry.kind == "bill", do: "Total", else: "Harga"}</span>
-            <span>{format_money(@preview.price)}</span>
+            <span>{format_price(@preview.price)}</span>
           </div>
         </div>
 
         <form :if={@selected && (not @api_bill or @inquiry)} phx-change="change" phx-submit="record" class={["space-y-3", @api_bill && "mt-4"]}>
           <div :if={not @api_bill} class="flex justify-between gap-2 font-medium">
             <span>{@selected.name}</span>
-            <span :if={@preview}>{format_money(@preview.price)}</span>
+            <span :if={@preview}>{format_price(@preview.price)}</span>
           </div>
 
           <label :if={not @api && Product.bill?(@selected)} class="block text-sm">
@@ -648,7 +694,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
           </label>
           <div :if={@preview && @preview.change} class="flex justify-between font-medium">
             <span>Kembalian</span>
-            <span>{format_money(@preview.change)}</span>
+            <span>{format_price(@preview.change)}</span>
           </div>
 
           <button type="submit" phx-disable-with="Mencatat..." class="btn btn-primary w-full">
@@ -664,7 +710,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
       <div :for={tx <- @processing} id={"processing-#{tx.id}"} class="mt-2 rounded-lg border border-gray-200 p-3">
         <p class="text-sm">
           <span class="font-medium">{tx.product_name}</span>
-          · {group_digits(tx.customer_ref)} · {format_money(tx.price)} · {time(tx, @store)}
+          · {group_digits(tx.customer_ref)} · {format_price(tx.price)} · {time(tx, @store)}
         </p>
 
         <div :if={tx.channel == "api"} class="mt-2 flex flex-wrap items-center justify-between gap-2 text-sm">
@@ -718,7 +764,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
           </.link>
         </span>
         <span class="text-right">
-          <span class="block font-semibold">{format_money(tx.price)}</span>
+          <span class="block font-semibold">{format_price(tx.price)}</span>
           <span class={["inline-block rounded-full px-2 py-0.5 text-xs", tx.status == "success" && "bg-green-100 text-green-700", tx.status == "failed" && "bg-gray-200 text-gray-700"]}>
             {status_label(tx.status)}
           </span>

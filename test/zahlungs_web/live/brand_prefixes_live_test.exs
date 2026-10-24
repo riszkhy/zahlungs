@@ -89,6 +89,7 @@ defmodule ZahlungsWeb.BrandPrefixesLiveTest do
       Services.save_brand_prefixes(form(%{"telkomsel" => "0811, 0812, 0899", "tri" => "0895"}))
 
     assign_account(default_store(), deposit_account_fixture())
+    service_product_fixture(%{operator: "telkomsel"})
     cashier = Zahlungs.ShiftsFixtures.user_on_shift_fixture()
 
     socket =

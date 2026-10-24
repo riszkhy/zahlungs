@@ -18,6 +18,16 @@ defmodule ZahlungsWeb.CoreComponentsTest do
     end
   end
 
+  describe "format_price/1" do
+    test "leaves out zero cents, keeps the others" do
+      assert CoreComponents.format_price(Decimal.new("11659.00")) == "Rp 11.659"
+      assert CoreComponents.format_price(Decimal.new("12000.5")) == "Rp 12.000,50"
+      assert CoreComponents.format_price(1000) == "Rp 1.000"
+      assert CoreComponents.format_price(Decimal.new("-2000")) == "-Rp 2.000"
+      assert CoreComponents.format_price(nil) == "Rp 0"
+    end
+  end
+
   describe "pagination/1" do
     import Phoenix.LiveViewTest, only: [render_component: 2]
 

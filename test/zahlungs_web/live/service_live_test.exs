@@ -122,8 +122,8 @@ defmodule ZahlungsWeb.ServiceLiveTest do
         })
 
       rendered = html(socket)
-      assert rendered =~ "Rp 12.000,00"
-      assert rendered =~ "Rp 8.000,00"
+      assert rendered =~ "Rp 12.000"
+      assert rendered =~ "Rp 8.000"
     end
 
     test "says what went wrong", ctx do
@@ -173,7 +173,7 @@ defmodule ZahlungsWeb.ServiceLiveTest do
           "reason" => "nomor tidak aktif"
         })
 
-      assert flash(socket, :info) == "Kembalikan Rp 12.000,00 ke pelanggan."
+      assert flash(socket, :info) == "Kembalikan Rp 12.000 ke pelanggan."
       assert Services.get_transaction!(store_scope(), failed.id).status == "failed"
 
       again = event(socket, "mark_failed", %{"transaction_id" => failed.id, "reason" => "lagi"})
@@ -207,9 +207,9 @@ defmodule ZahlungsWeb.ServiceLiveTest do
         })
 
       assert flash(socket, :error) =~ "berubah"
-      assert flash(socket, :error) =~ "Rp 13.000,00"
+      assert flash(socket, :error) =~ "Rp 13.000"
       assert Services.list_shift_transactions(ctx.shift) == []
-      assert html(socket) =~ "Rp 13.000,00"
+      assert html(socket) =~ "Rp 13.000"
     end
 
     test "a failed non-cash service is refunded outside the drawer", ctx do
@@ -219,7 +219,7 @@ defmodule ZahlungsWeb.ServiceLiveTest do
         event(ctx.socket, "mark_failed", %{"transaction_id" => qris.id, "reason" => "gagal"})
 
       assert flash(socket, :info) ==
-               "Kembalikan Rp 12.000,00 ke pelanggan lewat QRIS, bukan dari laci."
+               "Kembalikan Rp 12.000 ke pelanggan lewat QRIS, bukan dari laci."
     end
 
     test "amounts typed with a decimal comma keep their size", ctx do
@@ -335,6 +335,45 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       assert socket.assigns.selected.id == ctx.other.id
     end
 
+    test "a number of a brand without products keeps every product", ctx do
+      socket = ctx.socket |> typed("0812") |> typed("0895 1234")
+      assert socket.assigns.brand == nil
+      rendered = html(socket)
+
+      assert rendered =~ ctx.tsel.name and rendered =~ ctx.isat.name and
+               rendered =~ ctx.other.name
+    end
+
+    test "a brand with nothing to show says so, with a way back", ctx do
+      rendered = ctx.socket |> event("set_brand", %{"brand" => "smartfren"}) |> html()
+      assert rendered =~ "Belum ada produk Smartfren."
+      assert rendered =~ "Tampilkan semua"
+    end
+
+    test "the number is read back under the field, with its brand", ctx do
+      rendered = ctx.socket |> typed("081234567890") |> html()
+      assert rendered =~ "Telkomsel · 0812 3456 7890"
+      assert rendered =~ ~s(placeholder="08xx xxxx xxxx")
+    end
+
+    test "the number can be cleared at once", ctx do
+      socket = ctx.socket |> typed("081234567890") |> event("clear_number")
+      assert socket.assigns.form["customer_ref"] == ""
+      assert socket.assigns.brand == nil
+    end
+
+    test "the panel asks for the number first", ctx do
+      assert html(ctx.socket) =~ "Isi nomor tujuan, lalu pilih produk."
+
+      assert ctx.socket |> event("set_category", %{"category" => "tagihan"}) |> html() =~
+               "Pilih produk di kiri."
+    end
+
+    test "brand chips are smaller than the category ones", ctx do
+      rendered = html(ctx.socket)
+      assert rendered =~ ~r/class="chip chip-sm[^"]*"[^>]*>\s*Semua/
+    end
+
     test "another category forgets the brand", ctx do
       socket = ctx.socket |> typed("0812") |> event("set_category", %{"category" => "tagihan"})
       assert socket.assigns.brand == nil
@@ -447,7 +486,7 @@ defmodule ZahlungsWeb.ServiceLiveTest do
 
       assert socket.assigns.inquiry.months == 3
       assert rendered =~ "3 bulan"
-      assert rendered =~ "Rp 573.000,00"
+      assert rendered =~ "Rp 573.000"
       assert [{"inquiry", %{"periode" => "3"}, _}] = StubClient.requests()
     end
 
@@ -630,7 +669,7 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       rendered = html(socket)
       assert rendered =~ "PELANGGAN 4441"
       assert rendered =~ "R1/900VA"
-      assert rendered =~ "Rp 22.000,00"
+      assert rendered =~ "Rp 22.000"
       assert rendered =~ ~s(phx-submit="record")
 
       socket =
@@ -649,8 +688,8 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       rendered = ctx.socket |> checked(ctx.bill, "530011223331") |> html()
       assert rendered =~ "Admin penyedia"
       assert rendered =~ "Tambahan toko"
-      assert rendered =~ "Rp 9.000,00"
-      assert rendered =~ "Rp 744.000,00"
+      assert rendered =~ "Rp 9.000"
+      assert rendered =~ "Rp 744.000"
     end
 
     test "a service held for review says so", ctx do
@@ -676,7 +715,7 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       assert rendered =~ "PELANGGAN 3331"
       assert rendered =~ "AGU–OKT 2026"
       assert rendered =~ "3 bulan"
-      assert rendered =~ "Rp 744.000,00"
+      assert rendered =~ "Rp 744.000"
 
       socket =
         event(socket, "record", %{
