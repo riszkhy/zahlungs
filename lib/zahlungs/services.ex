@@ -29,7 +29,8 @@ defmodule Zahlungs.Services do
   alias Zahlungs.Accounts.User
   alias Zahlungs.{Deposits, LocalTime, Scope, Shifts, Stores}
   alias Zahlungs.Shifts.Shift
-  alias Zahlungs.Services.{CatalogCache, Dispatcher, Inquiry, Product, Provider, Ref, Transaction}
+  alias Zahlungs.Services.{Brand, BrandPrefix, CatalogCache, Dispatcher, Inquiry, Product}
+  alias Zahlungs.Services.{Provider, Ref, Transaction}
 
   @category_labels [
     {"pulsa", "Pulsa"},
@@ -963,6 +964,91 @@ defmodule Zahlungs.Services do
     do: NaiveDateTime.diff(now, transaction.inserted_at) >= @settle_by_hand_after
 
   def awaiting_too_long?(_transaction, _now), do: false
+
+  ## Brand prefixes
+
+  @doc """
+  The mobile number prefixes of each brand, as `%{brand => [prefix]}` with
+  every brand of `Brand.keys/0` (an empty list for one without), each list in
+  order. Kept by the platform operator for every organization.
+  """
+  def brand_prefixes do
+    empty = Map.new(Brand.keys(), &{&1, []})
+
+    from(p in BrandPrefix, order_by: [desc: p.prefix], select: {p.brand, p.prefix})
+    |> Repo.all()
+    |> Enum.reduce(empty, fn {brand, prefix}, acc ->
+      if Map.has_key?(acc, brand), do: Map.update!(acc, brand, &[prefix | &1]), else: acc
+    end)
+  end
+
+  @doc """
+  Replaces every brand's prefixes with the ones typed in `params`
+  (`%{brand => "0811, 0812"}`, separated by commas, semicolons or spaces); a
+  brand left out has none. Each prefix is four digits starting with `08` and
+  belongs to one brand. `{:error, %{brand => message}}` saves nothing.
+  """
+  def save_brand_prefixes(params) when is_map(params) do
+    prefixes = Map.new(Brand.keys(), &{&1, parse_prefixes(params[&1])})
+    errors = prefix_errors(prefixes)
+
+    if errors == %{}, do: replace_prefixes(prefixes), else: {:error, errors}
+  end
+
+  @doc "Puts the default prefixes (`Brand.default_prefixes/0`) back."
+  def reset_brand_prefixes do
+    defaults = Brand.default_prefixes()
+    replace_prefixes(Map.new(Brand.keys(), &{&1, Map.get(defaults, &1, [])}))
+  end
+
+  defp parse_prefixes(text) when is_binary(text) do
+    text |> String.split(~r/[\s,;]+/, trim: true) |> Enum.uniq() |> Enum.sort()
+  end
+
+  defp parse_prefixes(_text), do: []
+
+  defp prefix_errors(prefixes) do
+    owners =
+      for {brand, list} <- prefixes, prefix <- list, reduce: %{} do
+        acc -> Map.update(acc, prefix, [brand], &(&1 ++ [brand]))
+      end
+
+    for {brand, list} <- prefixes,
+        message = prefix_message(brand, list, owners),
+        into: %{},
+        do: {brand, message}
+  end
+
+  defp prefix_message(brand, list, owners) do
+    wrong = Enum.reject(list, &Regex.match?(~r/\A08\d{2}\z/, &1))
+
+    shared =
+      for prefix <- list, others = owners[prefix] -- [brand], others != [] do
+        "#{prefix} juga ada di #{Enum.map_join(others, ", ", &Brand.label/1)}."
+      end
+
+    wrong_message = if wrong != [], do: ["Bukan awalan 4 angka 08xx: #{Enum.join(wrong, ", ")}."]
+
+    case (wrong_message || []) ++ shared do
+      [] -> nil
+      messages -> Enum.join(messages, " ")
+    end
+  end
+
+  defp replace_prefixes(prefixes) do
+    now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+
+    rows =
+      for {brand, list} <- prefixes, prefix <- list do
+        %{brand: brand, prefix: prefix, inserted_at: now, updated_at: now}
+      end
+
+    Repo.transaction(fn ->
+      Repo.delete_all(BrandPrefix)
+      Repo.insert_all(BrandPrefix, rows)
+      brand_prefixes()
+    end)
+  end
 
   ## Vendor catalog
 

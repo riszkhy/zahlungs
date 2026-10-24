@@ -99,6 +99,7 @@ defmodule ZahlungsWeb.Router do
     live_session :require_platform_admin,
       on_mount: [{ZahlungsWeb.UserAuth, :ensure_platform_admin}] do
       live "/organizations", PlatformLive.Organizations, :index
+      live "/brands", PlatformLive.Brands, :index
     end
   end
 

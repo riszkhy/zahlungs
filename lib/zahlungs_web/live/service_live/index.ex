@@ -40,7 +40,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
      |> assign(page_title: "Layanan", shift: shift, store: store)
      |> assign(sellable: account != nil, api: account != nil and Deposits.api?(account))
      |> assign(category: "pulsa", brand: nil, selected: nil, form: @blank_form)
-     |> assign(preview: nil, inquiry: nil)
+     |> assign(preview: nil, inquiry: nil, brand_prefixes: Services.brand_prefixes())
      |> load_products()
      |> load_transactions()}
   end
@@ -205,9 +205,11 @@ defmodule ZahlungsWeb.ServiceLive.Index do
 
   # Pulsa and paket data: the number's prefix picks the brand. A number too
   # short to tell, or one of no known brand, leaves the choice as it was.
-  defp detect_brand(%{assigns: %{category: category, form: form}} = socket) do
+  defp detect_brand(
+         %{assigns: %{category: category, form: form, brand_prefixes: prefixes}} = socket
+       ) do
     with true <- brand_category?(category),
-         brand when is_binary(brand) <- Brand.detect(form["customer_ref"]) do
+         brand when is_binary(brand) <- Brand.detect(form["customer_ref"], prefixes) do
       socket |> assign(:brand, brand) |> keep_selected()
     else
       _ -> socket

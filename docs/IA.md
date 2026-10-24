@@ -232,6 +232,10 @@ Kelola user (admin):
 - **/platform/organizations** (hanya `superadmin`): daftar organisasi + pemilik,
   filter status, Setujui / Tolak / Tangguhkan / Aktifkan lagi, catatan, dan
   catatan tagihan manual.
+- **/platform/brands** (hanya `superadmin`): "Awalan nomor", empat angka
+  pertama nomor HP untuk tiap brand pulsa/paket data, berlaku untuk semua
+  organisasi. Disimpan sekaligus; awalan harus 08xx dan hanya milik satu
+  brand. "Kembalikan bawaan" memakai daftar awal lagi.
 - `superadmin` tidak punya menu kasir maupun admin toko; membuka halaman itu
   mengembalikannya ke `/platform/organizations`.
 - Semua halaman lain hanya menampilkan data organisasi user yang login.
@@ -247,7 +251,8 @@ Kelola user (admin):
   memilih brand (Telkomsel, by.U, Indosat, XL, Axis, Tri, Smartfren) dan
   daftar hanya menampilkan produk brand itu. Kasir bisa memilih brand lain,
   "Semua", atau "Lainnya" (produk tanpa brand). Nomor by.U memakai awalan
-  Telkomsel, jadi by.U dipilih sendiri. Brand produk diatur di form produk
+  Telkomsel, jadi by.U dipilih sendiri. Daftar awalan diatur operator platform
+  di `/platform/brands`. Brand produk diatur di form produk
   layanan (otomatis bila produk diambil dari daftar SBI).
 - Shift tidak bisa ditutup selama masih ada layanan *diproses*.
 - **/admin/services**, **/admin/deposits**, **/reports/services**: admin saja.

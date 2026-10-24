@@ -29,6 +29,19 @@ defmodule Zahlungs.Services.BrandTest do
     end
   end
 
+  test "detect/2 uses the prefixes it is given" do
+    prefixes = %{"telkomsel" => ["0899"], "tri" => []}
+    assert Brand.detect("0899 1234 5678", prefixes) == "telkomsel"
+    assert Brand.detect("0812 3456", prefixes) == nil
+  end
+
+  test "default_prefixes/0 has a list for every brand, by.U's empty" do
+    defaults = Brand.default_prefixes()
+    assert Map.keys(defaults) |> Enum.sort() == Enum.sort(Brand.keys())
+    assert defaults["byu"] == []
+    assert "0812" in defaults["telkomsel"]
+  end
+
   describe "normalize/1" do
     test "turns the names people type into a brand" do
       for {typed, brand} <- [

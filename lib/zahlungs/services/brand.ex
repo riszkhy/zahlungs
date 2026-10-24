@@ -7,6 +7,9 @@ defmodule Zahlungs.Services.Brand do
   A number that moved to another operator keeps its prefix, so detection is
   a suggestion the cashier can override; by.U numbers use Telkomsel's
   prefixes and are picked by hand.
+
+  The prefixes in use are the platform operator's (`/platform/brands`, kept by
+  `Zahlungs.Services.brand_prefixes/0`); the ones here are the defaults.
   """
 
   @brands [
@@ -20,6 +23,7 @@ defmodule Zahlungs.Services.Brand do
   ]
 
   @prefixes %{
+    "byu" => [],
     "telkomsel" => ~w(0811 0812 0813 0821 0822 0823 0851 0852 0853),
     "indosat" => ~w(0814 0815 0816 0855 0856 0857 0858),
     "xl" => ~w(0817 0818 0819 0859 0877 0878),
@@ -27,11 +31,6 @@ defmodule Zahlungs.Services.Brand do
     "tri" => ~w(0895 0896 0897 0898 0899),
     "smartfren" => ~w(0881 0882 0883 0884 0885 0886 0887 0888 0889)
   }
-
-  @by_prefix for {brand, prefixes} <- @prefixes,
-                 prefix <- prefixes,
-                 into: %{},
-                 do: {prefix, brand}
 
   # What people (and old data) call each brand, squeezed to lowercase letters
   # and digits.
@@ -71,11 +70,17 @@ defmodule Zahlungs.Services.Brand do
     Enum.find_value(@brands, key, fn {label, value} -> if value == key, do: label end)
   end
 
+  @doc "The default prefixes of each brand, as `%{brand => [prefix]}`."
+  def default_prefixes, do: @prefixes
+
   @doc """
   The brand a mobile number belongs to, by its first four digits (`+62` and
   `62` read as `0`), or nil when there are fewer digits or no brand uses them.
+  `prefixes` is `%{brand => [prefix]}`, the defaults when not given.
   """
-  def detect(number) when is_binary(number) do
+  def detect(number, prefixes \\ @prefixes)
+
+  def detect(number, prefixes) when is_binary(number) do
     digits = String.replace(number, ~r/\D/, "")
 
     local =
@@ -84,10 +89,14 @@ defmodule Zahlungs.Services.Brand do
         other -> other
       end
 
-    if String.length(local) >= 4, do: Map.get(@by_prefix, String.slice(local, 0, 4))
+    if String.length(local) >= 4, do: brand_of(String.slice(local, 0, 4), prefixes)
   end
 
-  def detect(_number), do: nil
+  def detect(_number, _prefixes), do: nil
+
+  defp brand_of(start, prefixes) do
+    Enum.find_value(prefixes, fn {brand, list} -> if start in list, do: brand end)
+  end
 
   @doc ~s|The brand a typed name stands for (`"TSEL"`, `"by.U"`, `"Indosat Ooredoo"`), or nil.|
   def normalize(name) when is_binary(name) do
