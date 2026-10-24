@@ -250,7 +250,10 @@ Kelola user (admin):
 - Pulsa dan paket data: nomor tujuan diisi di atas daftar produk; awalan nomor
   memilih brand (Telkomsel, by.U, Indosat, XL, Axis, Tri, Smartfren) dan
   daftar hanya menampilkan produk brand itu. Kasir bisa memilih brand lain,
-  "Semua", atau "Lainnya" (produk tanpa brand). Nomor by.U memakai awalan
+  "Semua", atau "Lainnya" (produk tanpa brand). Nomor satu brand tidak pernah
+  menampilkan produk brand lain: bila brand itu belum punya produk, yang tampil
+  produk tanpa brand. Produk yang brand-nya berbeda dengan nomor (dipilih
+  lewat "Semua") diberi peringatan merah di panel. Nomor by.U memakai awalan
   Telkomsel, jadi by.U dipilih sendiri. Daftar awalan diatur operator platform
   di `/platform/brands`. Brand produk diatur di form produk
   layanan (otomatis bila produk diambil dari daftar SBI).

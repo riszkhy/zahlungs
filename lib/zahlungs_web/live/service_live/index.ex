@@ -210,14 +210,12 @@ defmodule ZahlungsWeb.ServiceLive.Index do
   defp brand_category?(category), do: category in ~w(pulsa paket_data)
 
   # Pulsa and paket data: the number's prefix picks the brand. A number too
-  # short to tell, or one of no known brand, leaves the choice as it was; a
-  # brand with no products here shows them all rather than none.
+  # short to tell, or one of no known brand, leaves the choice as it was.
   defp detect_brand(
          %{assigns: %{category: category, form: form, brand_prefixes: prefixes}} = socket
        ) do
     with true <- brand_category?(category),
          brand when is_binary(brand) <- Brand.detect(form["customer_ref"], prefixes) do
-      brand = if Enum.any?(socket.assigns.products, &(&1.operator == brand)), do: brand
       socket |> assign(:brand, brand) |> keep_selected()
     else
       _ -> socket
@@ -247,15 +245,41 @@ defmodule ZahlungsWeb.ServiceLive.Index do
   defp shown?(product, "other"), do: is_nil(product.operator)
   defp shown?(product, brand), do: product.operator == brand
 
-  defp shown_products(products, brand), do: Enum.filter(products, &shown?(&1, brand))
+  # A brand with no products here shows the products without a brand, never
+  # another brand's: those are only for "Semua".
+  defp shown_products(products, brand) do
+    brand = if brand_fallback?(products, brand), do: "other", else: brand
+    Enum.filter(products, &shown?(&1, brand))
+  end
 
-  # The brands that have products, in the usual order, and "Lainnya" when
-  # some product has none.
-  defp brand_chips(products) do
+  defp brand_fallback?(products, brand),
+    do: brand in Brand.keys() and not Enum.any?(products, &(&1.operator == brand))
+
+  # The brands that have products and the one chosen, in the usual order, and
+  # "Lainnya" when some product has none.
+  defp brand_chips(products, brand) do
     operators = MapSet.new(products, & &1.operator)
-    chips = for {label, key} <- Brand.options(), key in operators, do: {label, key}
+
+    chips =
+      for {label, key} <- Brand.options(), key in operators or key == brand, do: {label, key}
+
     if nil in operators, do: chips ++ [{"Lainnya", "other"}], else: chips
   end
+
+  # The brand chosen, or the one the number's prefix names, against the
+  # selected product's: "Nomor ini Tri, produk ini Telkomsel." A by.U product
+  # fits a Telkomsel number (by.U shares its prefixes).
+  defp brand_mismatch(%{operator: product_brand}, number, brand, prefixes)
+       when is_binary(product_brand) do
+    number_brand = if brand in Brand.keys(), do: brand, else: Brand.detect(number, prefixes)
+
+    if (number_brand && number_brand != product_brand) and
+         {number_brand, product_brand} != {"telkomsel", "byu"} do
+      "Nomor ini #{Brand.label(number_brand)}, produk ini #{Brand.label(product_brand)}."
+    end
+  end
+
+  defp brand_mismatch(_product, _number, _brand, _prefixes), do: nil
 
   # A number changed after Cek tagihan no longer matches what was checked.
   defp drop_stale_inquiry(%{assigns: %{inquiry: nil}} = socket), do: socket
@@ -578,7 +602,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
               Semua
             </button>
             <button
-              :for={{label, key} <- brand_chips(@products)}
+              :for={{label, key} <- brand_chips(@products, @brand)}
               type="button"
               phx-click="set_brand"
               phx-value-brand={key}
@@ -588,6 +612,16 @@ defmodule ZahlungsWeb.ServiceLive.Index do
             </button>
           </div>
         </div>
+
+        <p
+          :if={brand_fallback?(@products, @brand) and shown_products(@products, @brand) != []}
+          class="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+        >
+          Belum ada produk {Brand.label(@brand)}. Yang tampil produk tanpa brand.
+          <button type="button" phx-click="set_brand" phx-value-brand="" class="font-medium underline">
+            Tampilkan semua
+          </button>
+        </p>
 
         <div class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
           <button
@@ -663,6 +697,14 @@ defmodule ZahlungsWeb.ServiceLive.Index do
             <span>{@selected.name}</span>
             <span :if={@preview}>{format_price(@preview.price)}</span>
           </div>
+          <p
+            :if={brand_category?(@category) && brand_mismatch(@selected, @form["customer_ref"], @brand, @brand_prefixes)}
+            id="brand-mismatch"
+            role="alert"
+            class="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700"
+          >
+            {brand_mismatch(@selected, @form["customer_ref"], @brand, @brand_prefixes)}
+          </p>
 
           <label :if={not @api && Product.bill?(@selected)} class="block text-sm">
             Nominal tagihan

@@ -335,19 +335,47 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       assert socket.assigns.selected.id == ctx.other.id
     end
 
-    test "a number of a brand without products keeps every product", ctx do
+    test "a number of a brand without products shows only products without a brand", ctx do
       socket = ctx.socket |> typed("0812") |> typed("0895 1234")
-      assert socket.assigns.brand == nil
+      assert socket.assigns.brand == "tri"
       rendered = html(socket)
 
-      assert rendered =~ ctx.tsel.name and rendered =~ ctx.isat.name and
-               rendered =~ ctx.other.name
+      assert rendered =~ ctx.other.name
+      refute rendered =~ ctx.tsel.name
+      refute rendered =~ ctx.isat.name
+      assert rendered =~ "Belum ada produk Tri. Yang tampil produk tanpa brand."
+      assert rendered =~ "Tampilkan semua"
+      # The brand is shown as the chosen chip, though it has no products.
+      assert rendered =~ ~r/class="chip chip-sm chip-sm-active"[^>]*>\s*Tri/
     end
 
-    test "a brand with nothing to show says so, with a way back", ctx do
-      rendered = ctx.socket |> event("set_brand", %{"brand" => "smartfren"}) |> html()
+    test "a brand with nothing at all to show says so, with a way back", ctx do
+      Services.delete_product(ctx.other)
+
+      rendered =
+        ServiceLive.Index
+        |> mount_live(ctx.cashier)
+        |> event("set_category", %{"category" => "pulsa"})
+        |> event("set_brand", %{"brand" => "smartfren"})
+        |> html()
+
       assert rendered =~ "Belum ada produk Smartfren."
+      refute rendered =~ "Yang tampil produk tanpa brand."
       assert rendered =~ "Tampilkan semua"
+      refute rendered =~ ctx.tsel.name
+    end
+
+    test "a product of another brand than the number's is flagged", ctx do
+      socket =
+        ctx.socket
+        |> typed("081234567890")
+        |> event("set_brand", %{"brand" => ""})
+        |> event("select", %{"id" => ctx.isat.id})
+
+      assert html(socket) =~ "Nomor ini Telkomsel, produk ini Indosat."
+
+      socket = event(socket, "select", %{"id" => ctx.tsel.id})
+      refute html(socket) =~ "Nomor ini Telkomsel"
     end
 
     test "the number is read back under the field, with its brand", ctx do
