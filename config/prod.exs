@@ -13,6 +13,9 @@ config :zahlungs, ZahlungsWeb.Endpoint,
   url: [host: "pos.abhendatires.com", port: 80],
   cache_static_manifest: "priv/static/cache_manifest.json"
 
+# Only real PPOB vendors in production: the fake provider never sells.
+config :zahlungs, :provider_adapters, %{"sbi" => Zahlungs.Services.Provider.Sbi}
+
 # Do not print debug messages in production
 config :logger, level: :info
 

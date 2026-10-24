@@ -70,11 +70,56 @@ defmodule Zahlungs.Deposits do
   @doc "Whether Zahlungs talks to the provider for this account (Fase 1)."
   def api?(%Account{mode: mode}), do: mode == "api"
 
-  @doc "The credential fields a provider asks for, as `{key, label}`; `[]` for an unknown one."
+  @doc """
+  The credential inputs a provider asks for, as `{key, label, :text | :secret}`;
+  `[]` for an unknown one. A field is `:secret` unless the adapter lists it in
+  `public_credentials/0`.
+  """
   def credential_fields(provider_key) do
     case Provider.adapter(provider_key) do
-      {:ok, adapter} -> adapter.credential_fields()
+      {:ok, adapter} -> credential_inputs(adapter)
       :error -> []
+    end
+  end
+
+  defp credential_inputs(adapter) do
+    public = public_credentials(adapter)
+    for {key, label} <- adapter.credential_fields(), do: {key, label, input_kind(key, public)}
+  end
+
+  defp input_kind(key, public), do: if(key in public, do: :text, else: :secret)
+
+  @doc """
+  The stored values of the account's credentials that aren't secret (shown
+  back in the form, e.g. SBI's member ID); never a secret one.
+  """
+  def public_credential_values(%Account{provider: key, credentials: encrypted}) do
+    with {:ok, adapter} <- Provider.adapter(key),
+         {:ok, credentials} <- Credentials.decrypt(encrypted) do
+      Map.take(credentials, public_credentials(adapter))
+    else
+      _ -> %{}
+    end
+  end
+
+  defp public_credentials(adapter) do
+    if Code.ensure_loaded?(adapter) and function_exported?(adapter, :public_credentials, 0),
+      do: adapter.public_credentials(),
+      else: []
+  end
+
+  @doc """
+  Whether the account's provider calls back without a token in the URL (it
+  names the service itself, e.g. SBI's `ref_1`): its callback URL is then
+  `/api/ppob/callback`, otherwise `/api/ppob/callback/<token>`.
+  """
+  def callback_by_ref?(%Account{provider: key}) do
+    case Provider.adapter(key) do
+      {:ok, adapter} ->
+        Code.ensure_loaded?(adapter) and function_exported?(adapter, :callback_ref, 1)
+
+      :error ->
+        false
     end
   end
 

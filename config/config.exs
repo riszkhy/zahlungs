@@ -71,6 +71,21 @@ config :phoenix, :json_library, Jason
 
 config :zahlungs, :env, Mix.env()
 
+# PPOB providers an account may pick (Zahlungs.Services.Provider). The fake
+# one is for trying the flow; prod.exs leaves only real vendors.
+config :zahlungs, :provider_adapters, %{
+  "sbi" => Zahlungs.Services.Provider.Sbi,
+  "fake" => Zahlungs.Services.Provider.Fake
+}
+
+# Smart Biller Indonesia (HTTPS JSON API with signed requests).
+config :zahlungs, Zahlungs.Services.Provider.Sbi,
+  base_url: "https://apisbi.mesinr1.com/V1",
+  client: Zahlungs.Services.Provider.Sbi.Client,
+  callback_ips: ["183.91.82.154"],
+  # SBI's public price list (moved in 2026-10 from api.billerindonesia.com).
+  pricelist_url: "https://bo.smartbiller.co.id/v1/public/h2h-umum/json"
+
 # Where the landing page (`/`) tells visitors to reach us. `whatsapp` is the
 # number in international form without the plus sign.
 config :zahlungs, :contact,

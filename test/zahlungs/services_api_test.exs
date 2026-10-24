@@ -107,9 +107,9 @@ defmodule Zahlungs.ServicesApiTest do
       assert {tx.sheets, tx.customer_name, tx.period} == {3, "PELANGGAN 3331", "AGU–OKT 2026"}
       assert Decimal.equal?(tx.bill_amount, d("735000"))
       assert Decimal.equal?(tx.price, d("744000"))
-      assert Decimal.equal?(tx.cost, d("739500"))
+      assert Decimal.equal?(tx.cost, d("735000"))
       assert Decimal.equal?(tx.change_due, d("6000"))
-      assert tx.ref_id == tx.code
+      assert tx.ref_id == inquiry.ref_id
       assert tx.service_inquiry_id == inquiry.id
       assert Repo.get!(Inquiry, inquiry.id).used_at
 
@@ -140,6 +140,60 @@ defmodule Zahlungs.ServicesApiTest do
                {:error, :inquiry_expired}
     end
 
+    test "the bill is paid with the inquiry's ref", ctx do
+      {:ok, inquiry} = Services.inquire(ctx.cashier, ctx.bill.id, "530011223341")
+      assert inquiry.ref_id =~ ~r/^Q#{ctx.store.id}/
+      assert inquiry.kind == "bill"
+      ref_id = inquiry.ref_id
+
+      assert {:ok, tx} = Services.record(ctx.cashier, ctx.bill.id, paying(inquiry))
+      assert tx.ref_id == ref_id
+      assert_received {:fake_provider, :pay, ^ref_id}
+    end
+
+    test "a bill costs the provider's total plus the shop's fee per sheet", ctx do
+      bill = api_product_fixture(%{api_extra_fee: "2000"})
+      {:ok, inquiry} = Services.inquire(ctx.cashier, bill.id, "530011223331")
+
+      assert Decimal.equal?(inquiry.provider_total, d("735000"))
+      assert Decimal.equal?(inquiry.provider_admin, d("0"))
+
+      assert {:ok, tx} = Services.record(ctx.cashier, bill.id, paying(inquiry))
+      assert Decimal.equal?(tx.price, d("741000"))
+      assert Decimal.equal?(tx.cost, d("735000"))
+      assert Decimal.equal?(tx.quoted_cost, d("735000"))
+    end
+
+    test "the vendor code is copied and used", ctx do
+      pulsa = service_product_fixture(%{provider_code: "TSEL10"})
+
+      {:ok, tx} =
+        Services.record(ctx.cashier, pulsa.id, %{
+          "customer_ref" => "081234567894",
+          "amount_paid" => "12000"
+        })
+
+      {:ok, _} = Services.update_product(pulsa, %{provider_code: "TSEL20"})
+      tx = Repo.get!(Services.Transaction, tx.id)
+
+      assert tx.provider_code == "TSEL10"
+      assert Decimal.equal?(tx.quoted_cost, tx.cost)
+      assert Services.provider_request(tx).product_code == "TSEL10"
+    end
+
+    test "api refs are unique across organizations", ctx do
+      pulsa = service_product_fixture(%{provider_code: "TSEL10"})
+
+      {:ok, tx} =
+        Services.record(ctx.cashier, pulsa.id, %{
+          "customer_ref" => "081234567891",
+          "amount_paid" => "12000"
+        })
+
+      assert tx.ref_id =~ ~r/^Z#{ctx.store.id}\d{12}[0-9A-F]{6}$/
+      refute tx.ref_id == tx.code
+    end
+
     test "pulsa on an api account needs a vendor code", ctx do
       pulsa = service_product_fixture()
 
@@ -163,7 +217,7 @@ defmodule Zahlungs.ServicesApiTest do
       assign_account(default_store(), deposit_account_fixture())
 
       bill =
-        service_product_fixture(%{category: "tagihan_pln", cost: "1500", margin_value: "3000"})
+        service_product_fixture(%{category: "tagihan", cost: "1500", margin_value: "3000"})
 
       assert {:ok, tx} =
                Services.record(ctx.cashier, bill.id, %{
@@ -174,6 +228,308 @@ defmodule Zahlungs.ServicesApiTest do
 
       assert {tx.channel, tx.sheets, tx.service_inquiry_id} == {"manual", 1, nil}
       assert Decimal.equal?(tx.price, d("248000"))
+    end
+  end
+
+  describe "a bill that asks how many months" do
+    alias Zahlungs.Services.Provider.Sbi.StubClient
+
+    setup do
+      assign_account(
+        default_store(),
+        deposit_account_fixture(%{
+          mode: "api",
+          provider: "sbi",
+          credentials: %{"member_id" => "MM1", "pin" => "1234", "password" => "pw"}
+        })
+      )
+
+      %{
+        cashier: user_on_shift_fixture(),
+        bpjs:
+          api_product_fixture(%{ask_months: true, provider_code: "BPJSKS", api_extra_fee: "1000"})
+      }
+    end
+
+    defp queue_inquiry(msg \\ "SUKSES") do
+      StubClient.expect(
+        "inquiry",
+        {:ok, 200,
+         %{
+           "data" => %{
+             "status" => 1,
+             "ref_2" => "S1",
+             "price" => "567000",
+             "total_payment" => "570000",
+             "msg" => msg
+           }
+         }}
+      )
+    end
+
+    test "keeps the months asked, and prices every one of them", ctx do
+      queue_inquiry()
+
+      assert {:ok, inquiry} =
+               Services.inquire(ctx.cashier, ctx.bpjs.id, "8888803136606896", months: "3")
+
+      assert {inquiry.months, inquiry.sheets} == {3, 3}
+      # 570.000 from the provider + 3 months × 1.000
+      assert Decimal.equal?(Services.inquiry_price(inquiry).price, d("573000"))
+
+      assert [{"inquiry", %{"periode" => "3"}, _headers}] = StubClient.requests()
+    end
+
+    test "refuses a bill the provider states for other months than asked", ctx do
+      queue_inquiry("SUKSES CEK TAGIHAN @DATA: Nama:BUDI/Jml bulan:2/Blth:JUL 24, AGU 24")
+
+      assert Services.inquire(ctx.cashier, ctx.bpjs.id, "8888803136606896", months: "3") ==
+               {:error,
+                {:rejected, "Penyedia menagih 2 bulan. Pilih 2 bulan lalu cek tagihan lagi."}}
+
+      assert Repo.all(from i in Inquiry, where: i.customer_ref == "8888803136606896") == []
+    end
+
+    test "accepts a bill the provider states for the months asked", ctx do
+      queue_inquiry("SUKSES CEK TAGIHAN @DATA: Nama:BUDI/Jml bulan:3/Blth:JUL 24, AGU 24, SEP 24")
+
+      assert {:ok, inquiry} =
+               Services.inquire(ctx.cashier, ctx.bpjs.id, "8888803136606896", months: "3")
+
+      assert {inquiry.months, inquiry.sheets} == {3, 3}
+    end
+
+    test "no months asked means one", ctx do
+      for months <- [nil, "", "  "] do
+        queue_inquiry()
+
+        assert {:ok, inquiry} =
+                 Services.inquire(ctx.cashier, ctx.bpjs.id, "8888803136606896", months: months)
+
+        assert {inquiry.months, inquiry.sheets} == {1, 1}
+      end
+
+      queue_inquiry()
+      assert {:ok, %{months: 1}} = Services.inquire(ctx.cashier, ctx.bpjs.id, "8888803136606896")
+    end
+
+    test "accepts a number as well as text, from 1 to 12", ctx do
+      queue_inquiry()
+
+      assert {:ok, %{months: 12}} =
+               Services.inquire(ctx.cashier, ctx.bpjs.id, "8888803136606896", months: 12)
+
+      queue_inquiry()
+
+      assert {:ok, %{months: 1}} =
+               Services.inquire(ctx.cashier, ctx.bpjs.id, "8888803136606896", months: " 1 ")
+    end
+
+    test "refuses other months before asking the provider", ctx do
+      for months <- ["0", "13", "abc", "3x", "-2", 0, 13] do
+        assert Services.inquire(ctx.cashier, ctx.bpjs.id, "8888803136606896", months: months) ==
+                 {:error, :invalid_months}
+      end
+
+      assert StubClient.requests() == []
+    end
+
+    test "a product that doesn't ask ignores the months", ctx do
+      plain = api_product_fixture(%{provider_code: "PLNPASC"})
+      queue_inquiry()
+
+      assert {:ok, inquiry} =
+               Services.inquire(ctx.cashier, plain.id, "8888803136606896", months: "3")
+
+      assert {inquiry.months, inquiry.sheets} == {nil, 1}
+    end
+
+    test "paying uses what was checked, whatever the browser says", ctx do
+      queue_inquiry()
+
+      assert {:ok, inquiry} =
+               Services.inquire(ctx.cashier, ctx.bpjs.id, "8888803136606896", months: "3")
+
+      StubClient.expect(
+        "payment",
+        {:ok, 200, %{"data" => %{"status" => 2, "ref_2" => "S1", "msg" => "PROSES"}}}
+      )
+
+      assert {:ok, tx} =
+               Services.record(ctx.cashier, ctx.bpjs.id, %{
+                 "inquiry_id" => "#{inquiry.id}",
+                 "months" => "6",
+                 "sheets" => "6",
+                 "amount_paid" => "573000"
+               })
+
+      assert tx.sheets == 3
+      assert Decimal.equal?(tx.price, d("573000"))
+      assert Services.provider_request(tx).months == 3
+
+      # The payment carries the months that were checked, not the browser's 6.
+      assert [{"inquiry", %{"periode" => "3"}, _}, {"payment", %{"periode" => "3"}, _}] =
+               StubClient.requests()
+    end
+
+    test "a manual account records the typed bill as one sheet", ctx do
+      assign_account(default_store(), deposit_account_fixture())
+
+      assert {:ok, tx} =
+               Services.record(ctx.cashier, ctx.bpjs.id, %{
+                 "customer_ref" => "8888803136606896",
+                 "bill_amount" => "245000",
+                 "months" => "4",
+                 "amount_paid" => "248000"
+               })
+
+      assert {tx.channel, tx.sheets, tx.service_inquiry_id} == {"manual", 1, nil}
+      assert Decimal.equal?(tx.price, d("248000"))
+      assert Services.provider_request(tx).months == nil
+    end
+  end
+
+  describe "token PLN on an api account" do
+    setup do
+      api_store_fixture()
+
+      %{
+        cashier: user_on_shift_fixture(),
+        token:
+          service_product_fixture(%{
+            category: "token_pln",
+            provider_code: "PLN20",
+            cost: "20775",
+            margin_value: "1225"
+          })
+      }
+    end
+
+    defp check(ctx, number), do: Services.inquire(ctx.cashier, ctx.token.id, number)
+
+    defp buy(ctx, attrs) do
+      Services.record(
+        ctx.cashier,
+        ctx.token.id,
+        Map.merge(%{"customer_ref" => "99999999999", "amount_paid" => "22000"}, attrs)
+      )
+    end
+
+    test "is bought only after the meter's owner is checked", ctx do
+      assert buy(ctx, %{}) == {:error, :inquiry_expired}
+
+      assert {:ok, inquiry} = check(ctx, "1412-3344-441")
+
+      assert {inquiry.kind, inquiry.customer_name, inquiry.details} ==
+               {"customer", "PELANGGAN 4441", "R1/900VA"}
+
+      assert is_nil(inquiry.bill_amount)
+
+      assert {:ok, tx} = buy(ctx, %{"inquiry_id" => "#{inquiry.id}"})
+      assert tx.customer_ref == "14123344441"
+      assert {tx.customer_name, tx.customer_details} == {"PELANGGAN 4441", "R1/900VA"}
+      assert Decimal.equal?(tx.price, d("22000"))
+      refute tx.ref_id == inquiry.ref_id
+      assert is_nil(Services.provider_request(tx).inquiry_ref)
+
+      assert buy(ctx, %{"inquiry_id" => inquiry.id}) == {:error, :inquiry_expired}
+    end
+
+    test "the owner check goes out with the product's check code", ctx do
+      alias Zahlungs.Services.Provider.Sbi.StubClient
+
+      assign_account(
+        default_store(),
+        deposit_account_fixture(%{
+          mode: "api",
+          provider: "sbi",
+          credentials: %{"member_id" => "MM1", "pin" => "1234", "password" => "pw"}
+        })
+      )
+
+      {:ok, token} = Services.update_product(ctx.token, %{provider_check_code: "CEKPLN"})
+
+      StubClient.expect(
+        "inquiry",
+        {:ok, 200, %{"data" => %{"status" => 1, "ref_2" => "S1", "msg" => "INQ SUKSES"}}}
+      )
+
+      assert {:ok, %{kind: "customer"}} = Services.inquire(ctx.cashier, token.id, "14123344441")
+      assert [{"inquiry", %{"product_code" => "CEKPLN"}, _}] = StubClient.requests()
+    end
+
+    test "a token without the owner check is bought directly, like pulsa", ctx do
+      {:ok, token} = Services.update_product(ctx.token, %{owner_check: false})
+
+      assert {:ok, tx} =
+               Services.record(ctx.cashier, token.id, %{
+                 "customer_ref" => "1412-3344-441",
+                 "amount_paid" => "22000"
+               })
+
+      assert {tx.channel, tx.customer_ref, tx.service_inquiry_id} == {"api", "14123344441", nil}
+      assert Decimal.equal?(tx.price, d("22000"))
+      assert is_nil(Services.provider_request(tx).inquiry_ref)
+    end
+
+    test "the owner check is on unless turned off", ctx do
+      assert ctx.token.owner_check
+    end
+
+    test "the provider's refusals pass on", ctx do
+      assert check(ctx, "14123344446") == {:error, :not_found}
+      assert check(ctx, "14123344447") == {:error, :unavailable}
+    end
+
+    test "a manual account sells tokens without a check", ctx do
+      assign_account(default_store(), deposit_account_fixture())
+
+      assert {:ok, %{channel: "manual"}} =
+               buy(ctx, %{"customer_ref" => "14123344441"})
+    end
+  end
+
+  describe "what the vendor says about a product" do
+    setup do
+      api_store_fixture()
+
+      %{
+        cashier: user_on_shift_fixture(),
+        pulsa: service_product_fixture(%{provider_code: "TSEL10"})
+      }
+    end
+
+    defp vendor_status(product, status) do
+      Repo.update_all(from(p in Services.Product, where: p.id == ^product.id),
+        set: [provider_status: status]
+      )
+    end
+
+    defp sell_one(ctx) do
+      Services.record(ctx.cashier, ctx.pulsa.id, %{
+        "customer_ref" => "081234567891",
+        "amount_paid" => "12000"
+      })
+    end
+
+    test "a product the vendor can't sell is refused on an api account", ctx do
+      vendor_status(ctx.pulsa, "gangguan")
+      assert sell_one(ctx) == {:error, :product_unavailable}
+
+      vendor_status(ctx.pulsa, "tidak_ditemukan")
+      assert sell_one(ctx) == {:error, :product_unavailable}
+
+      vendor_status(ctx.pulsa, "normal")
+      assert {:ok, _} = sell_one(ctx)
+
+      vendor_status(ctx.pulsa, nil)
+      assert {:ok, _} = sell_one(ctx)
+    end
+
+    test "a manual account doesn't ask", ctx do
+      vendor_status(ctx.pulsa, "kosong")
+      assign_account(default_store(), deposit_account_fixture())
+      assert {:ok, %{channel: "manual"}} = sell_one(ctx)
     end
   end
 
@@ -225,7 +581,11 @@ defmodule Zahlungs.ServicesApiTest do
 
       assert done.sent_at && done.resolved_at
 
-      token = ctx.cashier |> sell(ctx.token, "12345678901") |> reload()
+      {:ok, owner} = Services.inquire(ctx.cashier, ctx.token.id, "12345678901")
+
+      token =
+        ctx.cashier |> sell(ctx.token, "12345678901", %{"inquiry_id" => owner.id}) |> reload()
+
       assert token.status == "success"
       assert token.token_sn =~ ~r/^\d{20}$/
 
@@ -254,16 +614,22 @@ defmodule Zahlungs.ServicesApiTest do
       refute_received {:fake_provider, :pay, ^ref_id}
     end
 
-    test "a late answer for a settled service is ignored", ctx do
+    test "a late answer never changes a settled service", ctx do
       tx = sell(ctx.cashier, ctx.pulsa, "081234567899")
 
       assert {:ok, %Services.Transaction{status: "failed"}} =
                Services.apply_result(tx.id, %{status: :failed, message: "Gagal di penyedia"})
 
-      assert Services.apply_result(tx.id, %{status: :success, token_sn: "X", provider_ref: "Y"}) ==
+      assert Services.apply_result(tx.id, %{status: :failed, message: "lagi"}) ==
                {:ok, :already_final}
 
-      assert reload(tx).status == "failed"
+      # A contradicting one is held for an admin instead (see services_review_test).
+      assert {:ok, %Services.Transaction{}} =
+               Services.apply_result(tx.id, %{status: :success, token_sn: "X", provider_ref: "Y"})
+
+      # The SN comes along for the admin who decides (resolve_review/3 :success).
+      assert %{status: "failed", token_sn: "X", review_reason: reason} = reload(tx)
+      assert reason =~ "berhasil setelah"
     end
 
     test "changes are broadcast to the store", ctx do

@@ -39,9 +39,20 @@ defmodule Zahlungs.Services.Transaction do
     field :period, :string
     field :failed_after_shift_close, :boolean, default: false
     field :refunded_at, :naive_datetime
+    # Copies of what was sent and answered: the vendor's code, the cost as
+    # quoted when recorded (`cost` becomes the vendor's actual charge), the last
+    # raw answer, and the tariff/power from a token PLN check.
+    field :provider_code, :string
+    field :quoted_cost, :decimal
+    field :provider_payload, :string
+    field :customer_details, :string
+    # An answer that contradicts the final status, for an admin to decide.
+    field :review_reason, :string
+    field :reviewed_at, :naive_datetime
 
     belongs_to :service_inquiry, Zahlungs.Services.Inquiry
     belongs_to :refunded_by, Zahlungs.Accounts.User
+    belongs_to :reviewed_by, Zahlungs.Accounts.User
 
     belongs_to :store, Zahlungs.Stores.Store
     belongs_to :shift, Zahlungs.Shifts.Shift

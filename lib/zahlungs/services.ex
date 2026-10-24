@@ -11,9 +11,9 @@ defmodule Zahlungs.Services do
 
     * pulsa, paket data, token PLN: cost = the product's cost,
       price = cost + margin(cost).
-    * tagihan PLN: cost = bill + provider fee × sheets (the product's cost),
-      price = bill + admin fee × sheets (a rupiah margin), or bill + percent of
-      the bill. A bill entered by hand (Fase 0) is one sheet.
+    * a bill (tagihan): cost = bill + provider fee × months (the product's cost),
+      price = bill + admin fee × months (a rupiah margin), or bill + percent of
+      the bill. A bill entered by hand (Fase 0) is one month.
 
   ## Transactions
 
@@ -29,13 +29,14 @@ defmodule Zahlungs.Services do
   alias Zahlungs.Accounts.User
   alias Zahlungs.{Deposits, LocalTime, Scope, Shifts, Stores}
   alias Zahlungs.Shifts.Shift
-  alias Zahlungs.Services.{Dispatcher, Inquiry, Product, Transaction}
+  alias Zahlungs.Services.{Brand, BrandPrefix, CatalogCache, Dispatcher, Inquiry, Product}
+  alias Zahlungs.Services.{Provider, Ref, Transaction}
 
   @category_labels [
     {"pulsa", "Pulsa"},
     {"paket_data", "Paket data"},
     {"token_pln", "Token PLN"},
-    {"tagihan_pln", "Tagihan PLN"}
+    {"tagihan", "Tagihan"}
   ]
 
   @doc "The categories as `{value, label}` pairs, in display order."
@@ -93,8 +94,9 @@ defmodule Zahlungs.Services do
   ## Price
 
   @doc """
-  The price to the customer and the cost to the shop, for a product and (for
-  tagihan PLN) the bill. A bill without a positive amount has no price.
+  The price to the customer and the cost to the shop, for a product and (for a
+  bill, tagihan) the bill and its months (`sheets`). A bill without a positive
+  amount has no price.
   """
   def price_for(%Product{} = product, bill_amount, sheets \\ 1) do
     if Product.bill?(product) do
@@ -121,7 +123,7 @@ defmodule Zahlungs.Services do
   @inquiry_lifetime 15 * 60
 
   @doc """
-  Asks the provider about a PLN bill, for a cashier on an open shift in a store
+  Asks the provider about a bill (tagihan), or a token PLN meter's owner, for a cashier on an open shift in a store
   with an api deposit account, and keeps the answer for 15 minutes
   (`Zahlungs.Services.Inquiry`). The provider gets 15 seconds.
 
@@ -130,27 +132,41 @@ defmodule Zahlungs.Services do
   (not an active bill product), `:no_provider_code`, the provider's
   `:not_found` / `:already_paid` / `:unavailable` / `{:rejected, message}`, or a
   changeset (the customer number).
+
+  `opts[:months]` (a number or text) is how many months the customer pays, for
+  a bill product that asks (`ask_months`): blank means 1, 1 to 12 is that many,
+  anything else is `{:error, :invalid_months}` before the provider is asked.
+  A product that doesn't ask ignores it. The months go to the provider with the
+  payment too, so when its answer states another month count the bill is
+  refused (`{:error, {:rejected, "Penyedia menagih N bulan. ..."}}`, nothing
+  stored) and the cashier asks again for that many; an answer that states no
+  count is taken as the months asked.
   """
-  def inquire(%User{} = user, product_id, customer_ref) do
+  def inquire(%User{} = user, product_id, customer_ref, opts \\ []) do
     Repo.put_org_id(user.organization_id)
 
     with {:ok, shift} <- open_shift(user),
          store = Stores.get_store!(shift.store_id),
          {:ok, account} <- api_account(store),
          {:ok, product} <- sellable_product(product_id),
-         :ok <- bill_with_code(product),
+         {:ok, kind} <- checkable(product),
+         {:ok, months} <- months_asked(product, kind, opts[:months]),
          changeset =
            Inquiry.number_changeset(
              %Inquiry{
                store_id: store.id,
                user_id: user.id,
                service_product_id: product.id,
-               deposit_account_id: account.id
+               deposit_account_id: account.id,
+               ref_id: Ref.generate("Q", store.id),
+               kind: kind,
+               months: months
              },
              %{customer_ref: customer_ref || ""}
            ),
-         {:ok, %{customer_ref: number}} <- Ecto.Changeset.apply_action(changeset, :insert),
-         {:ok, answer} <- ask_provider(account, product, number) do
+         {:ok, inquiry} <- Ecto.Changeset.apply_action(changeset, :insert),
+         {:ok, answer} <- ask_provider(account, product, inquiry),
+         :ok <- same_months(months, answer) do
       changeset
       |> Inquiry.answer_changeset(answer)
       |> Ecto.Changeset.put_change(:expires_at, NaiveDateTime.add(now(), @inquiry_lifetime))
@@ -162,10 +178,24 @@ defmodule Zahlungs.Services do
     end
   end
 
-  @doc "What an inquired bill costs the customer and the shop: `%{price, cost}`."
-  def inquiry_price(%Inquiry{service_product: %Product{} = product} = inquiry) do
-    {:ok, price} = price_for(product, inquiry.bill_amount, inquiry.sheets)
+  @doc """
+  What an inquired bill costs the customer and the shop: `%{price, cost}`. The
+  customer pays the provider's total (bill and the provider's admin) plus the
+  shop's `api_extra_fee` per sheet; the shop's cost is the provider's total
+  until the provider says what it actually charged.
+  """
+  def inquiry_price(%Inquiry{kind: "customer", service_product: %Product{} = product}) do
+    {:ok, price} = price_for(product, nil)
     price
+  end
+
+  def inquiry_price(%Inquiry{service_product: %Product{} = product} = inquiry) do
+    total = inquiry.provider_total || inquiry.bill_amount
+
+    %{
+      price: Decimal.add(total, Decimal.mult(product.api_extra_fee, inquiry.sheets)),
+      cost: total
+    }
   end
 
   defp open_shift(user) do
@@ -182,25 +212,65 @@ defmodule Zahlungs.Services do
     end
   end
 
-  defp bill_with_code(product) do
+  # What the provider is asked about: a bill, or the owner of a token PLN meter.
+  defp checkable(%Product{category: category} = product)
+       when category in ["tagihan", "token_pln"] do
     cond do
-      not Product.bill?(product) -> {:error, :product_unavailable}
       blank_code?(product) -> {:error, :no_provider_code}
-      true -> :ok
+      category == "tagihan" -> {:ok, "bill"}
+      true -> {:ok, "customer"}
     end
   end
 
+  defp checkable(_product), do: {:error, :product_unavailable}
+
   defp blank_code?(%Product{provider_code: code}), do: code in [nil, ""]
 
+  # The payment goes out with the months asked, so a bill the provider states for
+  # other months must not be priced: the cashier asks again for its months.
+  defp same_months(months, %{sheets: sheets})
+       when is_integer(months) and is_integer(sheets) and sheets != months do
+    {:error,
+     {:rejected, "Penyedia menagih #{sheets} bulan. Pilih #{sheets} bulan lalu cek tagihan lagi."}}
+  end
+
+  defp same_months(_months, _answer), do: :ok
+
+  # Only a bill product that asks has months; for anything else they're ignored.
+  defp months_asked(%Product{ask_months: true}, "bill", asked), do: parse_months(asked)
+  defp months_asked(_product, _kind, _asked), do: {:ok, nil}
+
+  defp parse_months(nil), do: {:ok, 1}
+  defp parse_months(months) when is_integer(months) and months in 1..12, do: {:ok, months}
+
+  defp parse_months(months) when is_binary(months) do
+    case String.trim(months) do
+      "" ->
+        {:ok, 1}
+
+      text ->
+        case Integer.parse(text) do
+          {n, ""} when n in 1..12 -> {:ok, n}
+          _ -> {:error, :invalid_months}
+        end
+    end
+  end
+
+  defp parse_months(_months), do: {:error, :invalid_months}
+
   # The provider gets @inquiry_timeout; past that it counts as unavailable.
-  defp ask_provider(account, product, number) do
+  defp ask_provider(account, product, inquiry) do
     case Deposits.provider(account) do
       {:ok, adapter, credentials} ->
         task =
           Task.async(fn ->
             adapter.inquiry(credentials, %{
+              ref_id: inquiry.ref_id,
               product_code: product.provider_code,
-              customer_ref: number
+              check_code: product.provider_check_code,
+              customer_ref: inquiry.customer_ref,
+              kind: if(inquiry.kind == "customer", do: :customer, else: :bill),
+              months: inquiry.months
             })
           end)
 
@@ -263,7 +333,7 @@ defmodule Zahlungs.Services do
          channel = if(Deposits.api?(account), do: "api", else: "manual"),
          :ok <- sellable_through(channel, product),
          {:ok, bill} <- bill_details(channel, product, store, attrs),
-         {:ok, %{price: price, cost: cost}} <- price_for(product, bill.amount, bill.sheets),
+         {:ok, %{price: price, cost: cost}} <- priced(product, bill),
          :ok <- check_quoted_price(attrs["expected_price"], price),
          {:ok, payment} <- settle(attrs, price),
          :ok <- use_inquiry(bill.inquiry) do
@@ -276,13 +346,16 @@ defmodule Zahlungs.Services do
         service_product_id: product.id,
         deposit_account_id: account.id,
         code: code,
-        ref_id: code,
+        ref_id: transaction_ref(channel, store, code, bill.inquiry),
+        provider_code: if(channel == "api", do: product.provider_code),
+        quoted_cost: cost,
         channel: channel,
         category: product.category,
         product_name: product.name,
         bill_amount: bill.amount,
         sheets: bill.sheets,
         customer_name: bill.customer_name,
+        customer_details: bill.customer_details,
         period: bill.period,
         service_inquiry_id: bill.inquiry && bill.inquiry.id,
         price: price,
@@ -298,15 +371,41 @@ defmodule Zahlungs.Services do
     end
   end
 
-  # Through the provider, a product needs the vendor's code.
-  defp sellable_through("api", product),
-    do: if(blank_code?(product), do: {:error, :no_provider_code}, else: :ok)
+  # A bill from an inquiry is priced from the provider's answer; anything else
+  # from the product.
+  defp priced(%Product{} = product, %{inquiry: %Inquiry{kind: "bill"} = inquiry}),
+    do: {:ok, inquiry_price(%{inquiry | service_product: product})}
+
+  defp priced(product, bill), do: price_for(product, bill.amount, bill.sheets)
+
+  # What the provider knows the service by: a bill keeps its inquiry's ref (the
+  # provider pays the bill it was asked about); other api services get their
+  # own, unique across organizations; a manual one is its code.
+  defp transaction_ref("api", _store, _code, %Inquiry{kind: "bill", ref_id: ref_id})
+       when is_binary(ref_id),
+       do: ref_id
+
+  defp transaction_ref("api", store, _code, _inquiry), do: Ref.generate("Z", store.id)
+  defp transaction_ref(_manual, _store, code, _inquiry), do: code
+
+  # Through the provider, a product needs the vendor's code, and one the vendor
+  # last said it can't sell (out of order, out of stock, unknown) is refused.
+  defp sellable_through("api", product) do
+    cond do
+      blank_code?(product) -> {:error, :no_provider_code}
+      product.provider_status not in [nil, "normal"] -> {:error, :product_unavailable}
+      true -> :ok
+    end
+  end
 
   defp sellable_through(_manual, _product), do: :ok
 
-  # An api bill is paid from its inquiry, locked and checked here: the shift's
-  # store, the same product, unused, not expired. Anything else is entered.
-  defp bill_details("api", %Product{category: "tagihan_pln"} = product, store, attrs) do
+  # An api bill, and a token PLN with the owner check, come from their
+  # inquiry, locked and checked here: the shift's store, the same product,
+  # unused, not expired. Anything else (a token without the check, like
+  # pulsa) is entered.
+  defp bill_details("api", %Product{category: category} = product, store, attrs)
+       when category == "tagihan" or (category == "token_pln" and product.owner_check) do
     case lock_inquiry(attrs["inquiry_id"], store, product) do
       nil ->
         {:error, :inquiry_expired}
@@ -318,6 +417,7 @@ defmodule Zahlungs.Services do
            sheets: inquiry.sheets,
            customer_ref: inquiry.customer_ref,
            customer_name: inquiry.customer_name,
+           customer_details: inquiry.details,
            period: inquiry.period,
            inquiry: inquiry
          }}
@@ -331,6 +431,7 @@ defmodule Zahlungs.Services do
        sheets: 1,
        customer_ref: nil,
        customer_name: nil,
+       customer_details: nil,
        period: nil,
        inquiry: nil
      }}
@@ -428,21 +529,27 @@ defmodule Zahlungs.Services do
   @doc false
   # What the provider is sent about a service (pay and status alike).
   def provider_request(%Transaction{} = transaction) do
-    product = Repo.get!(Product, transaction.service_product_id)
-
-    inquiry_ref =
-      transaction.service_inquiry_id &&
-        Repo.one(
-          from i in Inquiry, where: i.id == ^transaction.service_inquiry_id, select: i.inquiry_ref
-        )
+    # Only a bill is paid against its inquiry; a token PLN's owner check is not.
+    {inquiry_ref, months} =
+      (transaction.service_inquiry_id &&
+         Repo.one(
+           from i in Inquiry,
+             where: i.id == ^transaction.service_inquiry_id and i.kind == "bill",
+             select: {i.inquiry_ref, i.months}
+         )) || {nil, nil}
 
     %{
       ref_id: transaction.ref_id,
-      product_code: product.provider_code,
+      product_code: transaction.provider_code || product_code(transaction),
       customer_ref: transaction.customer_ref,
-      inquiry_ref: inquiry_ref
+      inquiry_ref: inquiry_ref,
+      months: months
     }
   end
+
+  # Services recorded before vendor codes were copied read the product's.
+  defp product_code(%Transaction{service_product_id: id}),
+    do: Repo.one(from p in Product, where: p.id == ^id, select: p.provider_code)
 
   # Background work has no user: the store says whose data this is.
   defp enter_store_organization(%Transaction{store_id: store_id}) do
@@ -461,21 +568,23 @@ defmodule Zahlungs.Services do
 
   A failure on a shift already closed is flagged `failed_after_shift_close`:
   the closed shift's figures stay as they were (see `shift_totals/1`).
-  Every change is broadcast to the store (`subscribe/1`).
+
+  An answer may also carry `actual_cost` (what the provider charged: it
+  becomes `cost`, and marks the product's `provider_price` when above the
+  product's cost) and `payload` (the raw answer, kept up to 4000 characters).
+  `:refunded` on a processing service is a failure.
+
+  An answer that contradicts a final status — a refund after success, or a
+  success after failure — changes nothing but `review_reason`, for an admin to
+  decide (`resolve_review/3`). Every change is broadcast to the store
+  (`subscribe/1`).
   """
   def apply_result(transaction_id, result) do
     fn ->
       case lock_transaction(transaction_id) do
-        %Transaction{status: "processing"} = transaction ->
-          {:ok, updated} =
-            transaction
-            |> Ecto.Changeset.change(result_changes(transaction, result))
-            |> Repo.update()
-
-          updated
-
-        _ ->
-          :already_final
+        %Transaction{status: "processing"} = transaction -> settle_result(transaction, result)
+        %Transaction{} = transaction -> hold_contradiction(transaction, result)
+        nil -> :already_final
       end
     end
     |> Repo.transaction()
@@ -484,6 +593,72 @@ defmodule Zahlungs.Services do
       _ -> :ok
     end)
   end
+
+  defp settle_result(transaction, result) do
+    {:ok, updated} =
+      transaction
+      |> Ecto.Changeset.change(result_changes(transaction, result))
+      |> Ecto.Changeset.change(answer_copies(result))
+      |> Repo.update()
+
+    note_vendor_price(updated, result)
+    updated
+  end
+
+  defp answer_copies(result) do
+    %{
+      cost: Map.get(result, :actual_cost),
+      provider_payload: clip(Map.get(result, :payload), 4000)
+    }
+    |> Map.reject(fn {_field, value} -> is_nil(value) end)
+  end
+
+  # The provider charges more than the product's cost: the admin should see it.
+  defp note_vendor_price(%Transaction{service_product_id: id}, %{actual_cost: %Decimal{} = cost}) do
+    Repo.update_all(
+      # A bill's actual cost is the whole bill, not comparable with its fee.
+      from(p in Product, where: p.id == ^id and p.category != "tagihan" and p.cost < ^cost),
+      [set: [provider_price: cost, provider_checked_at: now()]],
+      skip_org_id: true
+    )
+  end
+
+  defp note_vendor_price(_transaction, _result), do: :ok
+
+  defp hold_contradiction(
+         %Transaction{status: "success"} = transaction,
+         %{status: :refunded} = r
+       ),
+       do: hold(transaction, "Penyedia melaporkan refund: " <> (Map.get(r, :message) || "-"))
+
+  defp hold_contradiction(%Transaction{status: "success"} = transaction, %{status: :failed} = r),
+    do:
+      hold(
+        transaction,
+        "Penyedia melaporkan gagal setelah berhasil: " <> (Map.get(r, :message) || "-")
+      )
+
+  # The token/SN comes along, for the admin who decides it was a success.
+  defp hold_contradiction(%Transaction{status: "failed"} = transaction, %{status: :success} = r) do
+    hold(transaction, "Penyedia melaporkan berhasil setelah transaksi gagal", %{
+      token_sn: r |> Map.get(:token_sn) |> clip(64),
+      provider_ref: clip(Map.get(r, :provider_ref), 255) || transaction.provider_ref
+    })
+  end
+
+  defp hold_contradiction(_transaction, _result), do: :already_final
+
+  defp hold(transaction, reason, changes \\ %{}) do
+    {:ok, held} =
+      transaction
+      |> Ecto.Changeset.change(Map.put(changes, :review_reason, clip(reason, 255)))
+      |> Repo.update()
+
+    held
+  end
+
+  defp result_changes(transaction, %{status: :refunded} = result),
+    do: result_changes(transaction, %{result | status: :failed})
 
   defp result_changes(_transaction, %{status: :success} = result) do
     %{
@@ -626,6 +801,59 @@ defmodule Zahlungs.Services do
     end
   end
 
+  @doc """
+  A provider's callback without a token in the URL (Smart Biller
+  Indonesia's): each adapter with `callback_ref/1` reads the ref from `params`;
+  it must name an api service whose account uses that adapter; then the
+  adapter checks the caller with that account's credentials, and the result
+  goes through `apply_result/2`. Refs are unique across organizations, so the
+  service is looked up in all of them, and its store's organization entered.
+
+  Returns `{:ok, :applied | :already_final}` or
+  `{:error, :unknown_ref | :invalid_signature}`.
+  """
+  def handle_ref_callback(params, headers) do
+    Enum.find_value(ref_readers(), {:error, :unknown_ref}, fn {key, adapter} ->
+      with {:ok, ref_id} <- adapter.callback_ref(params),
+           {:ok, transaction, account} <- ref_transaction(ref_id, key) do
+        settle_callback(transaction, account, params, headers)
+      else
+        _ -> nil
+      end
+    end)
+  end
+
+  defp ref_readers do
+    for {key, adapter} <- Provider.adapters(),
+        Code.ensure_loaded?(adapter) and function_exported?(adapter, :callback_ref, 1),
+        do: {key, adapter}
+  end
+
+  defp ref_transaction(ref_id, adapter_key) when is_binary(ref_id) do
+    with %Transaction{} = transaction <-
+           Repo.one(from t in Transaction, where: t.ref_id == ^ref_id and t.channel == "api"),
+         _ = enter_store_organization(transaction),
+         %Deposits.Account{provider: ^adapter_key} = account <-
+           Deposits.get_account!(transaction.deposit_account_id) do
+      {:ok, transaction, account}
+    else
+      _ -> :error
+    end
+  end
+
+  defp settle_callback(transaction, account, params, headers) do
+    case verify_callback(account, params, headers) do
+      {:ok, ref_id, result} when ref_id == transaction.ref_id ->
+        case apply_result(transaction.id, result) do
+          {:ok, %Transaction{}} -> {:ok, :applied}
+          {:ok, :already_final} -> {:ok, :already_final}
+        end
+
+      _ ->
+        {:error, :invalid_signature}
+    end
+  end
+
   defp callback_account(token) do
     case Deposits.get_account_by_callback_token(token) do
       nil ->
@@ -736,6 +964,294 @@ defmodule Zahlungs.Services do
     do: NaiveDateTime.diff(now, transaction.inserted_at) >= @settle_by_hand_after
 
   def awaiting_too_long?(_transaction, _now), do: false
+
+  ## Brand prefixes
+
+  @doc """
+  The mobile number prefixes of each brand, as `%{brand => [prefix]}` with
+  every brand of `Brand.keys/0` (an empty list for one without), each list in
+  order. Kept by the platform operator for every organization.
+  """
+  def brand_prefixes do
+    empty = Map.new(Brand.keys(), &{&1, []})
+
+    from(p in BrandPrefix, order_by: [desc: p.prefix], select: {p.brand, p.prefix})
+    |> Repo.all()
+    |> Enum.reduce(empty, fn {brand, prefix}, acc ->
+      if Map.has_key?(acc, brand), do: Map.update!(acc, brand, &[prefix | &1]), else: acc
+    end)
+  end
+
+  @doc """
+  Replaces every brand's prefixes with the ones typed in `params`
+  (`%{brand => "0811, 0812"}`, separated by commas, semicolons or spaces); a
+  brand left out has none. Each prefix is four digits starting with `08` and
+  belongs to one brand. `{:error, %{brand => message}}` saves nothing.
+  """
+  def save_brand_prefixes(params) when is_map(params) do
+    prefixes = Map.new(Brand.keys(), &{&1, parse_prefixes(params[&1])})
+    errors = prefix_errors(prefixes)
+
+    if errors == %{}, do: replace_prefixes(prefixes), else: {:error, errors}
+  end
+
+  @doc "Puts the default prefixes (`Brand.default_prefixes/0`) back."
+  def reset_brand_prefixes do
+    defaults = Brand.default_prefixes()
+    replace_prefixes(Map.new(Brand.keys(), &{&1, Map.get(defaults, &1, [])}))
+  end
+
+  defp parse_prefixes(text) when is_binary(text) do
+    text |> String.split(~r/[\s,;]+/, trim: true) |> Enum.uniq() |> Enum.sort()
+  end
+
+  defp parse_prefixes(_text), do: []
+
+  defp prefix_errors(prefixes) do
+    owners =
+      for {brand, list} <- prefixes, prefix <- list, reduce: %{} do
+        acc -> Map.update(acc, prefix, [brand], &(&1 ++ [brand]))
+      end
+
+    for {brand, list} <- prefixes,
+        message = prefix_message(brand, list, owners),
+        into: %{},
+        do: {brand, message}
+  end
+
+  defp prefix_message(brand, list, owners) do
+    wrong = Enum.reject(list, &Regex.match?(~r/\A08\d{2}\z/, &1))
+
+    shared =
+      for prefix <- list, others = owners[prefix] -- [brand], others != [] do
+        "#{prefix} juga ada di #{Enum.map_join(others, ", ", &Brand.label/1)}."
+      end
+
+    wrong_message = if wrong != [], do: ["Bukan awalan 4 angka 08xx: #{Enum.join(wrong, ", ")}."]
+
+    case (wrong_message || []) ++ shared do
+      [] -> nil
+      messages -> Enum.join(messages, " ")
+    end
+  end
+
+  defp replace_prefixes(prefixes) do
+    now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+
+    rows =
+      for {brand, list} <- prefixes, prefix <- list do
+        %{brand: brand, prefix: prefix, inserted_at: now, updated_at: now}
+      end
+
+    Repo.transaction(fn ->
+      Repo.delete_all(BrandPrefix)
+      Repo.insert_all(BrandPrefix, rows)
+      brand_prefixes()
+    end)
+  end
+
+  ## Vendor catalog
+
+  @catalog_results 30
+
+  @doc """
+  The organization's first active api deposit account whose provider has a
+  catalog (`Provider` `catalog/1`), or `nil`.
+  """
+  def catalog_account do
+    Enum.find(Deposits.list_active_accounts(), &(Deposits.api?(&1) and catalog_adapter(&1)))
+  end
+
+  defp catalog_adapter(%Deposits.Account{provider: key}) do
+    case Provider.adapter(key) do
+      {:ok, adapter} ->
+        if Code.ensure_loaded?(adapter) and function_exported?(adapter, :catalog, 1),
+          do: adapter
+
+      :error ->
+        nil
+    end
+  end
+
+  @doc """
+  The provider's products whose name or code holds every word of `query`
+  (case aside), at most #{@catalog_results}. The catalog is kept in memory for a while
+  (`Zahlungs.Services.CatalogCache`), never stored.
+  """
+  def search_catalog(%Deposits.Account{} = account, query) do
+    words = query |> to_string() |> String.downcase() |> String.split(~r/\s+/, trim: true)
+
+    with adapter when adapter != nil <- catalog_adapter(account),
+         {:ok, items} <- CatalogCache.fetch(account.provider, fn -> adapter.catalog([]) end) do
+      {:ok, items |> Enum.filter(&catalog_match?(&1, words)) |> Enum.take(@catalog_results)}
+    else
+      _ -> {:error, :unavailable}
+    end
+  end
+
+  defp catalog_match?(item, words) do
+    text = String.downcase("#{item.name} #{item.code}")
+    Enum.all?(words, &String.contains?(text, &1))
+  end
+
+  @doc """
+  What refreshing the products from the provider would change, saving
+  nothing: for each product with a vendor code the provider answered about,
+  `%{product, old_cost, new_cost, new_price, vendor_price, status}`. A bill's
+  cost isn't the vendor's price, so only its status changes.
+  """
+  def price_update(%Deposits.Account{} = account) do
+    products = Enum.reject(list_products(), &blank_code?/1)
+    codes = products |> Enum.map(& &1.provider_code) |> Enum.uniq()
+
+    with {:ok, adapter, credentials} <- Deposits.provider(account),
+         true <- Code.ensure_loaded?(adapter) and function_exported?(adapter, :prices, 2),
+         {:ok, prices} <- adapter.prices(credentials, codes) do
+      rows =
+        for product <- products,
+            info = prices[product.provider_code],
+            info != nil,
+            do: price_row(product, info)
+
+      {:ok, rows}
+    else
+      _ -> {:error, :unavailable}
+    end
+  end
+
+  defp price_row(product, info) do
+    new_cost =
+      if Product.bill?(product) or is_nil(info.price), do: product.cost, else: info.price
+
+    new_price =
+      case price_for(%{product | cost: new_cost}, nil) do
+        {:ok, %{price: price}} -> price
+        {:error, _bill} -> nil
+      end
+
+    %{
+      product: product,
+      old_cost: product.cost,
+      new_cost: new_cost,
+      new_price: new_price,
+      vendor_price: info.price,
+      status: info.status
+    }
+  end
+
+  @doc "Saves the rows of `price_update/1`, in one transaction. Returns `{:ok, count}`."
+  def apply_price_update(%Deposits.Account{}, rows) do
+    checked_at = now()
+
+    Repo.transaction(fn ->
+      Enum.each(rows, fn row ->
+        row.product
+        |> Ecto.Changeset.change(
+          cost: row.new_cost,
+          provider_price: row.vendor_price,
+          provider_status: row.status,
+          provider_checked_at: checked_at
+        )
+        |> Repo.update!()
+      end)
+
+      length(rows)
+    end)
+  end
+
+  ## Reviews
+
+  @doc """
+  An admin decides about an answer that contradicted a final status (see
+  `apply_result/2`). `:keep` leaves the status and drops the flag; `:refund`
+  (a success the provider took back) fails it, so its money waits under
+  "Perlu dikembalikan" and stops counting against the deposit; `:success` (a
+  failure the provider says went through, not refunded yet) makes it a
+  success, counting against the deposit again. Locks the row. While in review
+  a failure is not refunded (`confirm_refund/2` → `{:error, :in_review}`).
+
+  Returns `{:ok, transaction}` or `{:error, :forbidden | :not_in_review}`.
+  """
+  def resolve_review(%Transaction{id: id}, %User{role: "admin"} = admin, decision)
+      when decision in [:keep, :refund, :success] do
+    fn ->
+      case review(lock_transaction(id), admin, decision) do
+        {:ok, transaction} -> transaction
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end
+    |> Repo.transaction()
+    |> tap(fn
+      {:ok, transaction} -> broadcast(transaction)
+      _ -> :ok
+    end)
+  end
+
+  def resolve_review(%Transaction{}, %User{}, _decision), do: {:error, :forbidden}
+
+  defp review(%Transaction{review_reason: reason} = transaction, admin, :keep)
+       when is_binary(reason) do
+    transaction |> reviewed(admin) |> Repo.update()
+  end
+
+  defp review(
+         %Transaction{status: "success", review_reason: reason} = transaction,
+         admin,
+         :refund
+       )
+       when is_binary(reason) do
+    transaction
+    |> reviewed(admin)
+    |> Ecto.Changeset.change(
+      status: "failed",
+      failure_reason: reason,
+      resolved_at: now(),
+      failed_after_shift_close: shift_closed?(transaction)
+    )
+    |> Repo.update()
+  end
+
+  defp review(
+         %Transaction{status: "failed", refunded_at: nil, review_reason: reason} = transaction,
+         admin,
+         :success
+       )
+       when is_binary(reason) do
+    transaction
+    |> reviewed(admin)
+    |> Ecto.Changeset.change(
+      status: "success",
+      failure_reason: nil,
+      provider_message: nil,
+      failed_after_shift_close: false,
+      resolved_at: now()
+    )
+    |> Repo.update()
+  end
+
+  defp review(_transaction, _admin, _decision), do: {:error, :not_in_review}
+
+  defp reviewed(transaction, admin) do
+    Ecto.Changeset.change(transaction,
+      review_reason: nil,
+      reviewed_at: now(),
+      reviewed_by_id: admin.id
+    )
+  end
+
+  @doc "A service of a deposit account; another account's raises `Ecto.NoResultsError`."
+  def get_account_transaction!(%Deposits.Account{id: account_id}, id) do
+    Repo.one!(from t in Transaction, where: t.id == ^id and t.deposit_account_id == ^account_id)
+  end
+
+  @doc "The services of a deposit account waiting for an admin's review, newest first."
+  def list_in_review(%Deposits.Account{id: account_id}) do
+    Repo.all(
+      from t in Transaction,
+        where: t.deposit_account_id == ^account_id and not is_nil(t.review_reason),
+        order_by: [desc: t.updated_at, desc: t.id]
+    )
+  end
 
   ## Reading
 
@@ -873,7 +1389,9 @@ defmodule Zahlungs.Services do
   def list_refunds_due(%Scope{} = scope) do
     Repo.all(
       from t in for_store(Transaction, scope),
-        where: t.channel == "api" and t.status == "failed" and is_nil(t.refunded_at),
+        where:
+          t.channel == "api" and t.status == "failed" and is_nil(t.refunded_at) and
+            is_nil(t.review_reason),
         order_by: [desc: t.resolved_at, desc: t.id]
     )
   end
@@ -888,7 +1406,7 @@ defmodule Zahlungs.Services do
   paid, never from a drawer.
 
   Returns `{:ok, transaction}` or
-  `{:error, :not_refundable | :no_open_shift | :other_store}`.
+  `{:error, :not_refundable | :in_review | :no_open_shift | :other_store}`.
   """
   def confirm_refund(%Transaction{id: id}, %User{} = user) do
     Repo.put_org_id(user.organization_id)
@@ -905,6 +1423,10 @@ defmodule Zahlungs.Services do
       _ -> :ok
     end)
   end
+
+  # The provider may have served it after all: an admin decides first.
+  defp refund(%Transaction{review_reason: reason}, _user) when is_binary(reason),
+    do: {:error, :in_review}
 
   defp refund(
          %Transaction{channel: "api", status: "failed", refunded_at: nil} = transaction,

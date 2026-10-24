@@ -26,11 +26,16 @@ defmodule Zahlungs.Services.ProviderFakeTest do
     do: Fake.inquiry(@creds, %{product_code: "PLNPASCA", customer_ref: customer_ref})
 
   describe "the registry" do
-    test "knows the fake adapter and nothing else" do
+    test "knows the registered adapters and nothing else" do
       assert Provider.adapter("fake") == {:ok, Fake}
       assert Provider.adapter("nope") == :error
       assert Provider.adapter(nil) == :error
-      assert Provider.options() == [{"Penyedia tiruan (uji coba)", "fake"}]
+      # Options follow the registry; "broken" (test only) has no label to offer.
+      assert Provider.options() == [
+               {"Smart Biller Indonesia (SBI)", "sbi"},
+               {"Penyedia tiruan (uji coba)", "fake"}
+             ]
+
       assert Fake.credential_fields() == [{"secret", "Secret callback"}]
     end
   end

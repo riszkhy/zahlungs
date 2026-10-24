@@ -36,7 +36,7 @@ Aturan akses berlapis (router):
 │   │     ├─ Cari produk / scan barcode (keyboard & kamera HP)
 │   │     ├─ Keranjang → metode bayar (Tunai; lainnya disabled) → Complete Sale
 │   │     └─ Modal struk: Print receipt · Koreksi/batalkan · New Transaction
-│   ├── /services               Layanan PPOB: catat pulsa/paket/token/tagihan PLN,
+│   ├── /services               Layanan PPOB: catat pulsa/paket/token/tagihan (PLN, BPJS, PDAM…),
 │   │     │                     lalu tandai berhasil (token/SN) atau gagal
 │   │     └── /services/:id/receipt   Struk layanan versi cetak
 │   ├── /catalog                Katalog produk (browse, cari, filter, paginasi)
@@ -232,6 +232,10 @@ Kelola user (admin):
 - **/platform/organizations** (hanya `superadmin`): daftar organisasi + pemilik,
   filter status, Setujui / Tolak / Tangguhkan / Aktifkan lagi, catatan, dan
   catatan tagihan manual.
+- **/platform/brands** (hanya `superadmin`): "Awalan nomor", empat angka
+  pertama nomor HP untuk tiap brand pulsa/paket data, berlaku untuk semua
+  organisasi. Disimpan sekaligus; awalan harus 08xx dan hanya milik satu
+  brand. "Kembalikan bawaan" memakai daftar awal lagi.
 - `superadmin` tidak punya menu kasir maupun admin toko; membuka halaman itu
   mengembalikannya ke `/platform/organizations`.
 - Semua halaman lain hanya menampilkan data organisasi user yang login.
@@ -243,6 +247,13 @@ Kelola user (admin):
   *diproses*; setelah diproses di aplikasi penyedia, tandai *berhasil* (token/SN)
   atau *gagal* (alasan, uang dikembalikan). Hanya yang mencatat atau admin yang
   boleh menandai.
+- Pulsa dan paket data: nomor tujuan diisi di atas daftar produk; awalan nomor
+  memilih brand (Telkomsel, by.U, Indosat, XL, Axis, Tri, Smartfren) dan
+  daftar hanya menampilkan produk brand itu. Kasir bisa memilih brand lain,
+  "Semua", atau "Lainnya" (produk tanpa brand). Nomor by.U memakai awalan
+  Telkomsel, jadi by.U dipilih sendiri. Daftar awalan diatur operator platform
+  di `/platform/brands`. Brand produk diatur di form produk
+  layanan (otomatis bila produk diambil dari daftar SBI).
 - Shift tidak bisa ditutup selama masih ada layanan *diproses*.
 - **/admin/services**, **/admin/deposits**, **/reports/services**: admin saja.
   Form toko memilih akun deposit yang dipakai toko itu.
@@ -252,10 +263,16 @@ Kelola user (admin):
 
 Berlaku bila akun deposit toko bermode **API** (diatur di `/admin/deposits`).
 
-- **Tagihan PLN**: pilih produk → isi ID pelanggan → **Cek tagihan** (ke
-  penyedia) → tampil nama, periode, jumlah lembar, tagihan, biaya admin, total →
-  terima uang → **Bayar**. Mengubah ID pelanggan setelah cek membatalkan hasil
-  cek; hasil cek berlaku 15 menit.
+- **Tagihan** (satu kategori/tab "Tagihan": PLN, BPJS, PDAM, Telkom, PGN):
+  pilih produk → isi ID pelanggan → **Cek tagihan** (ke penyedia) → tampil nama,
+  periode, jumlah bulan, tagihan, biaya admin, total → terima uang → **Bayar**.
+  Mengubah ID pelanggan setelah cek membatalkan hasil cek; hasil cek berlaku 15
+  menit.
+- **Jumlah bulan**: untuk produk tagihan yang dicentang "Tanyakan jumlah bulan
+  saat cek tagihan", kasir memilih **Jumlah bulan** (1-12) sebelum **Cek
+  tagihan**; mengubahnya setelah cek membatalkan hasil cek. Produk tanpa centang
+  tidak menanyakan (dianggap 1 bulan, atau sesuai jawaban penyedia). Pada akun
+  manual, jumlah tagihan diketik kasir dan tidak ada pilihan bulan.
 - **Pulsa, paket data, token PLN**: pilih produk, isi nomor, terima uang →
   **Bayar**. Zahlungs mengirim ke penyedia; tidak ada tombol Berhasil/Gagal.
 - **Menunggu penyedia**: transaksi yang belum dijawab tampil di "Sedang
@@ -266,7 +283,7 @@ Berlaku bila akun deposit toko bermode **API** (diatur di `/admin/deposits`).
   sampai kasir menekan **Uang sudah dikembalikan**. Bila gagalnya setelah shift
   ditutup, pengembalian tunai dicatat sebagai kas keluar di shift yang sedang
   buka.
-- **Struk tagihan** memuat nama pelanggan, periode, jumlah lembar dan referensi
+- **Struk tagihan** memuat nama pelanggan, periode, jumlah bulan dan referensi
   penyedia.
 - **/admin/deposits** (akun API): penyedia, kredensial (tidak pernah
   ditampilkan lagi, hanya "tersimpan"), URL callback untuk didaftarkan ke
@@ -274,3 +291,35 @@ Berlaku bila akun deposit toko bermode **API** (diatur di `/admin/deposits`).
   pencocokan). **/admin/services**: kolom "Kode produk vendor".
 - **`POST /api/ppob/callback/:token`**: dipanggil penyedia, bukan orang;
   tanpa login, diverifikasi dengan token akun dan tanda tangan penyedia.
+
+## Layanan PPOB lewat Smart Biller Indonesia (SBI)
+
+- **Token PLN** (akun API), per produk:
+  - **Cek pelanggan dulu** (bawaan): pilih produk → isi nomor meter → **Cek
+    pelanggan** → tampil nama dan tarif/daya → terima uang → **Bayar**. Tanpa cek
+    pelanggan, token tidak bisa dibayar.
+  - **Langsung** (centang "Cek pelanggan dulu" dimatikan di form produk): seperti
+    pulsa, isi nomor meter → terima uang → **Bayar**.
+- **Kartu tagihan**: tagihan, admin penyedia, tambahan toko (biaya tambahan
+  per bulan yang diatur admin), total.
+- **Perlu ditinjau**: bila SBI menjawab bertentangan dengan status transaksi
+  (refund setelah berhasil, atau berhasil setelah gagal), status tidak berubah
+  sendiri. Kasir melihat tanda "Perlu ditinjau" di riwayat; admin memutuskan di
+  halaman akun deposit: **Batalkan dan kembalikan uang** (masuk Perlu
+  dikembalikan), **Jadikan berhasil** (untuk yang gagal tapi ternyata terlayani;
+  selama ditinjau, uangnya belum boleh dikembalikan) atau **Tetap berhasil /
+  Tetap gagal**.
+- **/admin/deposits** (penyedia SBI): Member ID, PIN, Password (tidak pernah
+  ditampilkan lagi); URL callback `…/api/ppob/callback` untuk didaftarkan di
+  SBI; Tes koneksi dan Ambil saldo memakai saldo SBI.
+- **/admin/services**: **Cari di daftar SBI** di form produk (mengisi kode,
+  nama, modal, kategori; semua item grup "PPOB" SBI disarankan sebagai
+  kategori Tagihan, dengan admin dan komisi SBI); kolom **Biaya tambahan toko
+  (akun API)** (per bulan) dan centang **Tanyakan jumlah bulan saat cek
+  tagihan** untuk tagihan; **Kode cek pelanggan (akun
+  API)** untuk token PLN (kosong = bawaan penyedia, SBI: `CPLNPRA`); tombol **Perbarui dari
+  SBI** (ringkasan perubahan modal dan status, disimpan setelah disetujui);
+  tanda **Gangguan / Kosong / Tidak ditemukan** (tidak bisa dijual lewat akun
+  API) dan **Modal SBI naik**.
+- **`POST /api/ppob/callback`** (tanpa token): callback SBI, dikenali dari
+  `ref_1`, dipercaya hanya dengan header `rqid` (password akun) dari IP SBI.

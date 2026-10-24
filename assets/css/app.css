@@ -144,6 +144,17 @@
   @apply border-green-700 bg-green-700 text-white;
 }
 
+/* A second row of chips under a first (brands under a category): smaller,
+   and outlined when active, so the two rows don't read as one. */
+.chip-sm {
+  @apply px-3 text-xs;
+  min-height: 36px;
+}
+
+.chip-sm-active {
+  @apply border-green-700 bg-green-50 font-medium text-green-800;
+}
+
 .product-tile {
   @apply rounded-lg border border-gray-200 bg-white p-3 text-left text-sm shadow-sm;
   min-height: 88px;

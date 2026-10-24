@@ -48,11 +48,20 @@ config :zahlungs, :prune_login_log, false
 config :zahlungs, :service_dispatch, :inline
 config :zahlungs, :service_status_checker, false
 
-# A provider whose status check raises, beside the fake one (test/support).
+# A provider whose status check raises, beside the fake one (test/support),
+# and SBI on a stub client: no test ever calls Smart Biller Indonesia.
 config :zahlungs, :provider_adapters, %{
   "fake" => Zahlungs.Services.Provider.Fake,
-  "broken" => Zahlungs.Services.Provider.Broken
+  "broken" => Zahlungs.Services.Provider.Broken,
+  "sbi" => Zahlungs.Services.Provider.Sbi
 }
+
+config :zahlungs, Zahlungs.Services.Provider.Sbi,
+  client: Zahlungs.Services.Provider.Sbi.StubClient,
+  allow_http: true
+
+# Catalogs aren't kept between calls: async tests would see each other's.
+config :zahlungs, Zahlungs.Services.CatalogCache, ttl: 0
 
 # Import local, gitignored credentials (real DB username/password/host/etc) if present.
 if File.exists?(Path.expand("local.secret.exs", __DIR__)) do

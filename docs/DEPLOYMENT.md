@@ -16,6 +16,7 @@ sepenuhnya lewat **environment variables** (`config/runtime.exs`).
 | `UTC_OFFSET_HOURS`     |       | `7` (WIB; `8` WITA, `9` WIT)              | Zona waktu toko: menentukan awal "hari ini" di laporan dan jam yang ditampilkan |
 | `MAIL_FROM`            |       | `kasir@tokosaya.id`                       | Alamat pengirim email akun (hanya berguna bila mailer sudah dikonfigurasi) |
 | `FORCE_SSL`            |       | `true` / `1` (default off)                | Redirect HTTP→HTTPS + HSTS; **hanya** jika di belakang reverse proxy TLS (trust `x-forwarded-proto`) |
+| `TRUSTED_PROXIES`      |       | `127.0.0.1` (dipisah koma)                | Alamat reverse proxy yang `X-Forwarded-For`-nya dipercaya; wajib bila callback PPOB (SBI) lewat proxy |
 | `DATABASE_SSL`         |       | `true` / `1` (default off)                | TLS ke database (managed MariaDB)                       |
 | `HTTPS_PORT`           |       | `4001`                                    | Aktifkan listener HTTPS di app sendiri (LAN tanpa proxy) — perlu cert + key |
 | `SSL_CERT_PATH`        |       | `/app/priv/cert/selfsigned.pem`           | Path absolut sertifikat (wajib bila `HTTPS_PORT` diset) |
@@ -197,8 +198,41 @@ Rincian model dan batasannya ada di `docs/SAAS-multi-pemilik.md`.
 - Pengecek status berjalan di dalam aplikasi (tidak perlu cron). Bila server
   mati saat ada transaksi menunggu, transaksi itu dicek lagi begitu aplikasi
   hidup.
-- Belum ada adapter vendor sungguhan; "Penyedia tiruan (uji coba)" hanya untuk
-  mencoba alurnya. Jangan dipakai untuk berjualan.
+- Di produksi hanya **Smart Biller Indonesia (SBI)** yang bisa dipilih;
+  "Penyedia tiruan (uji coba)" hanya ada di dev.
+
+### SBI: syarat server
+
+- **IP publik tetap.** SBI menolak permintaan dari IP yang belum didaftarkan
+  (RC:92 "Invalid IP"): daftarkan IP server di SBI sebelum uji coba.
+- **URL callback** `https://<PHX_HOST>/api/ppob/callback` (tanpa token)
+  didaftarkan di SBI. Callback hanya diterima dari IP SBI `183.91.82.154`
+  dengan header `rqid` = password akun.
+- **Di belakang reverse proxy** (nginx, Caddy), set `TRUSTED_PROXIES` ke
+  alamat proxy (mis. `127.0.0.1`), dipisah koma bila lebih dari satu. Tanpa
+  itu, semua callback tampak datang dari proxy dan ditolak (401); transaksi
+  tetap selesai lewat pengecekan status, hanya lebih lambat.
+
+### SBI: uji coba dengan deposit kecil (SBI tidak punya sandbox)
+
+1. Server di VPS dengan HTTPS dan IP tetap; IP didaftarkan ke SBI;
+   `https://<domain>/api/ppob/callback` terdaftar di SBI; `TRUSTED_PROXIES`
+   diset bila ada reverse proxy.
+2. `/admin/deposits` → akun baru mode API, penyedia SBI, isi Member ID, PIN,
+   Password → **Tes koneksi** → **Ambil saldo** (tidak memotong saldo).
+3. Pilih akun itu di form toko. Tambah produk lewat **Cari di daftar SBI**:
+   pulsa nominal terkecil, token PLN 20.000, tagihan PLN (kode `PLN`).
+4. **Cek tagihan** dan **Cek pelanggan** token (tidak memotong saldo).
+5. Satu pulsa kecil → cocokkan SN, potongan saldo, dan callback di log server.
+6. Satu token PLN 20.000 ke meter sendiri.
+7. Satu tagihan PLN milik sendiri.
+8. **Cek tagihan** BPJS Kesehatan dengan "Jumlah bulan" 2 → kartu tagihan
+   menunjukkan 2 bulan dan total SBI mencakup kedua bulan; bayar hanya bila
+   cocok (bila SBI menagih bulan lain, aplikasi menolak dan meminta jumlah
+   bulan yang sama).
+9. **Pencocokan saldo** di akun deposit dengan saldo SBI → selisih harus nol.
+   Bila tidak nol, periksa transaksi yang berstatus gagal: kemungkinan SBI
+   memotong saldo untuk kode RC yang kita anggap gagal.
 
 ## 9. Rollback
 

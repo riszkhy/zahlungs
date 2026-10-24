@@ -124,6 +124,197 @@ defmodule ZahlungsWeb.DepositLiveTest do
     end
   end
 
+  describe "an SBI account" do
+    test "asks for SBI's credentials and shows the callback URL without a token" do
+      admin = admin_fixture()
+      name = "SBI #{System.unique_integer([:positive])}"
+      attrs = %{"name" => name, "mode" => "api", "provider" => "sbi"}
+
+      socket =
+        DepositLive.Index
+        |> mount_live(admin, action: :new)
+        |> event("validate_account", %{"account" => attrs})
+
+      rendered = html(socket)
+      assert rendered =~ "Member ID"
+      assert rendered =~ "PIN"
+      assert rendered =~ "Password"
+
+      credentials = %{"member_id" => "MM77", "pin" => "4321", "password" => "kata-sandi-sbi"}
+      event(socket, "save_account", %{"account" => Map.put(attrs, "credentials", credentials)})
+      account = Enum.find(Deposits.list_accounts(), &(&1.name == name))
+
+      rendered =
+        DepositLive.Index
+        |> mount_live(admin, action: :edit, params: %{"id" => "#{account.id}"})
+        |> html()
+
+      refute rendered =~ "kata-sandi-sbi"
+      refute rendered =~ "4321"
+      assert rendered =~ "/api/ppob/callback<"
+      refute rendered =~ account.callback_token
+    end
+  end
+
+  describe "SBI's credential inputs" do
+    defp sbi_form(socket) do
+      event(socket, "validate_account", %{
+        "account" => %{"name" => "SBI", "mode" => "api", "provider" => "sbi"}
+      })
+    end
+
+    test "the member ID is plain text; PIN and password are hidden with a show toggle" do
+      rendered =
+        DepositLive.Index |> mount_live(admin_fixture(), action: :new) |> sbi_form() |> html()
+
+      assert rendered =~ ~r/<input type="text" name="account\[credentials\]\[member_id\]"/
+      assert rendered =~ ~r/<input[^>]*type="password"[^>]*id="credential-pin"/
+      assert rendered =~ ~r/<input[^>]*type="password"[^>]*id="credential-password"/
+      assert rendered =~ "Tampilkan"
+      assert rendered =~ "#credential-pin"
+      refute rendered =~ ~r/id="credential-member_id"[^>]*type="password"/
+    end
+
+    test "PIN and password are left to the browser, so a re-render never empties them" do
+      rendered =
+        DepositLive.Index |> mount_live(admin_fixture(), action: :new) |> sbi_form() |> html()
+
+      for key <- ["pin", "password"] do
+        assert rendered =~ ~r/<input[^>]*id="credential-#{key}"[^>]*phx-update="ignore"/
+      end
+
+      refute rendered =~ ~r/<input[^>]*id="credential-member_id"[^>]*phx-update="ignore"/
+    end
+
+    test "a saved member ID is shown back; PIN and password never are" do
+      admin = admin_fixture()
+
+      account =
+        deposit_account_fixture(%{
+          mode: "api",
+          provider: "sbi",
+          credentials: %{"member_id" => "MM77", "pin" => "4321", "password" => "kata-sandi-sbi"}
+        })
+
+      rendered =
+        DepositLive.Index
+        |> mount_live(admin, action: :edit, params: %{"id" => "#{account.id}"})
+        |> html()
+
+      assert rendered =~ ~s(value="MM77")
+      refute rendered =~ "4321"
+      refute rendered =~ "kata-sandi-sbi"
+    end
+  end
+
+  describe "switching an account's provider in the form" do
+    test "the callback URL and the saved hint follow the chosen provider" do
+      admin = admin_fixture()
+      account = api_account_fixture()
+
+      socket =
+        DepositLive.Index
+        |> mount_live(admin, action: :edit, params: %{"id" => "#{account.id}"})
+
+      assert html(socket) =~ account.callback_token
+      assert html(socket) =~ "tersimpan"
+
+      socket =
+        event(socket, "validate_account", %{
+          "account" => %{"name" => account.name, "mode" => "api", "provider" => "sbi"}
+        })
+
+      rendered = html(socket)
+      assert rendered =~ "/api/ppob/callback<"
+      refute rendered =~ account.callback_token
+      # The fake provider's secret is no SBI credential.
+      refute rendered =~ "tersimpan"
+    end
+
+    test "a new SBI account shows its callback URL before saving" do
+      socket =
+        DepositLive.Index
+        |> mount_live(admin_fixture(), action: :new)
+        |> event("validate_account", %{
+          "account" => %{"name" => "SBI", "mode" => "api", "provider" => "sbi"}
+        })
+
+      assert html(socket) =~ "/api/ppob/callback<"
+    end
+  end
+
+  describe "services in review" do
+    setup do
+      admin = admin_fixture()
+      account = api_account_fixture()
+      Zahlungs.StoresFixtures.default_store() |> assign_account(account)
+      cashier = Zahlungs.ShiftsFixtures.user_on_shift_fixture()
+      pulsa = service_product_fixture(%{provider_code: "TSEL10"})
+
+      {:ok, tx} =
+        Zahlungs.Services.record(cashier, pulsa.id, %{
+          "customer_ref" => "081234567899",
+          "amount_paid" => "12000"
+        })
+
+      {:ok, _} =
+        Zahlungs.Services.apply_result(tx.id, %{
+          status: :success,
+          token_sn: "SN",
+          provider_ref: "R"
+        })
+
+      {:ok, _} =
+        Zahlungs.Services.apply_result(tx.id, %{status: :refunded, message: "Refund transaksi"})
+
+      %{admin: admin, account: account, tx: tx}
+    end
+
+    defp status_of(tx), do: Zahlungs.Repo.get!(Zahlungs.Services.Transaction, tx.id)
+
+    test "are listed on the account with what the provider said", %{
+      admin: admin,
+      account: account
+    } do
+      rendered = admin |> show(account) |> html()
+      assert rendered =~ "Perlu ditinjau"
+      assert rendered =~ "Refund transaksi"
+      assert rendered =~ "Batalkan dan kembalikan uang"
+      assert rendered =~ "Tetap berhasil"
+    end
+
+    test "refund fails the service", %{admin: admin, account: account, tx: tx} do
+      socket =
+        admin
+        |> show(account)
+        |> event("resolve_review", %{"transaction_id" => tx.id, "decision" => "refund"})
+
+      assert flash(socket, :info) == "Transaksi dibatalkan dan masuk Perlu dikembalikan."
+      assert status_of(tx).status == "failed"
+      refute html(socket) =~ "Batalkan dan kembalikan uang"
+    end
+
+    test "keep leaves it successful", %{admin: admin, account: account, tx: tx} do
+      socket =
+        admin
+        |> show(account)
+        |> event("resolve_review", %{"transaction_id" => "#{tx.id}", "decision" => "keep"})
+
+      assert flash(socket, :info) == "Transaksi tetap berhasil."
+      assert %{status: "success", review_reason: nil} = status_of(tx)
+    end
+
+    test "another account's service is not found", %{admin: admin, tx: tx} do
+      other = api_account_fixture()
+
+      assert_raise Ecto.NoResultsError, fn ->
+        admin
+        |> show(other)
+        |> event("resolve_review", %{"transaction_id" => tx.id, "decision" => "keep"})
+      end
+    end
+  end
+
   describe "an account" do
     setup do
       %{admin: admin_fixture(), account: deposit_account_fixture()}

@@ -33,6 +33,15 @@ if config_env() == :prod do
       """
 
   # Shop time zone as a fixed UTC offset in hours (default 7 = WIB).
+  # Reverse proxies whose X-Forwarded-For is believed (comma-separated
+  # addresses), e.g. "127.0.0.1" for nginx on the same machine. PPOB callbacks
+  # are checked against the caller's address (ZahlungsWeb.ClientIp).
+  config :zahlungs,
+         :trusted_proxies,
+         (System.get_env("TRUSTED_PROXIES") || "")
+         |> String.split(",", trim: true)
+         |> Enum.map(&String.trim/1)
+
   if utc_offset = System.get_env("UTC_OFFSET_HOURS") do
     config :zahlungs, :utc_offset_hours, String.to_integer(utc_offset)
   end

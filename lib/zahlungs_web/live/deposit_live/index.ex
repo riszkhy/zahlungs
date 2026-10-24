@@ -6,7 +6,7 @@ defmodule ZahlungsWeb.DepositLive.Index do
   """
   use ZahlungsWeb, :live_view
 
-  alias Zahlungs.{Deposits, Shifts}
+  alias Zahlungs.{Deposits, Services, Shifts}
   alias Zahlungs.Deposits.Account
   alias ZahlungsWeb.AmountInput
 
@@ -120,6 +120,25 @@ defmodule ZahlungsWeb.DepositLive.Index do
     end
   end
 
+  # An answer that contradicted a final status: the admin decides.
+  def handle_event("resolve_review", %{"transaction_id" => id, "decision" => decision}, socket)
+      when decision in ["refund", "keep", "success"] do
+    transaction = Services.get_account_transaction!(socket.assigns.account, id)
+    decision = String.to_existing_atom(decision)
+
+    case Services.resolve_review(transaction, socket.assigns.current_user, decision) do
+      {:ok, reviewed} ->
+        {:noreply,
+         socket |> put_flash(:info, review_message(decision, reviewed)) |> load_account()}
+
+      {:error, :not_in_review} ->
+        {:noreply, socket |> put_flash(:error, "Transaksi ini sudah ditinjau.") |> load_account()}
+
+      {:error, :forbidden} ->
+        {:noreply, put_flash(socket, :error, "Hanya admin yang bisa meninjau.")}
+    end
+  end
+
   def handle_event("test_connection", _params, socket) do
     case Deposits.ping(socket.assigns.account) do
       :ok -> {:noreply, put_flash(socket, :info, "Koneksi ke penyedia berhasil.")}
@@ -156,9 +175,39 @@ defmodule ZahlungsWeb.DepositLive.Index do
 
     assign(socket,
       balance: Deposits.estimated_balance(account),
-      entries: Deposits.list_entries(account)
+      entries: Deposits.list_entries(account),
+      in_review: Services.list_in_review(account)
     )
   end
+
+  # The URL for the provider chosen in the form (saved or not): one that names
+  # the service itself has no token; another needs the account's token, which
+  # exists once the account is saved in api mode.
+  defp callback_url(account, form) do
+    chosen = %{account | provider: form_field(form, :provider)}
+
+    cond do
+      Deposits.callback_by_ref?(chosen) -> url(~p"/api/ppob/callback")
+      account.callback_token -> url(~p"/api/ppob/callback/#{account.callback_token}")
+      true -> nil
+    end
+  end
+
+  # A public credential as typed in this form, else as stored (for the stored
+  # provider only).
+  defp public_value(account, form, key) do
+    typed = get_in(form.params, ["credentials", key])
+
+    cond do
+      is_binary(typed) -> typed
+      credentials_kept?(account, form) -> Deposits.public_credential_values(account)[key]
+      true -> nil
+    end
+  end
+
+  # Stored credentials belong to the stored provider only.
+  defp credentials_kept?(account, form),
+    do: Deposits.credentials_saved?(account) and account.provider == form_field(form, :provider)
 
   # Amounts arrive as typed ("250.000", "250.000,00").
   defp digits(value), do: AmountInput.parse(value)
@@ -166,6 +215,13 @@ defmodule ZahlungsWeb.DepositLive.Index do
   defp entry_label(%{kind: "topup", source: "drawer"}), do: "Isi ulang (kas laci)"
   defp entry_label(%{kind: "topup"}), do: "Isi ulang (luar laci)"
   defp entry_label(%{kind: "correction"}), do: "Koreksi"
+
+  defp review_message(:refund, _transaction),
+    do: "Transaksi dibatalkan dan masuk Perlu dikembalikan."
+
+  defp review_message(:keep, %{status: "success"}), do: "Transaksi tetap berhasil."
+  defp review_message(:keep, _failed), do: "Transaksi tetap gagal."
+  defp review_message(:success, _transaction), do: "Transaksi dijadikan berhasil."
 
   defp form_field(form, field), do: Ecto.Changeset.get_field(form.source, field)
 
@@ -266,6 +322,47 @@ defmodule ZahlungsWeb.DepositLive.Index do
         </form>
       </div>
 
+      <div :if={@in_review != []} id="in-review" class="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-4">
+        <h4 class="font-medium text-amber-900">Perlu ditinjau ({length(@in_review)})</h4>
+        <p class="mt-1 text-xs text-amber-800">
+          Jawaban penyedia bertentangan dengan status transaksi. Periksa ke pelanggan dan aplikasi penyedia, lalu putuskan.
+        </p>
+        <div :for={tx <- @in_review} id={"review-#{tx.id}"} class="mt-3 text-sm">
+          <p>
+            <span class="font-medium">{tx.product_name}</span>
+            · {tx.customer_ref} · {format_money(tx.price)} · {tx.code}
+          </p>
+          <p class="text-xs text-amber-900">{tx.review_reason}</p>
+          <div class="mt-2 flex flex-wrap gap-2">
+            <button
+              :if={tx.status == "success"}
+              type="button"
+              phx-click={JS.push("resolve_review", value: %{transaction_id: tx.id, decision: "refund"})}
+              data-confirm="Batalkan transaksi ini? Uangnya masuk Perlu dikembalikan untuk diserahkan ke pelanggan."
+              class="chip !border-red-300 !text-red-700"
+            >
+              Batalkan dan kembalikan uang
+            </button>
+            <button
+              :if={tx.status == "failed" && is_nil(tx.refunded_at)}
+              type="button"
+              phx-click={JS.push("resolve_review", value: %{transaction_id: tx.id, decision: "success"})}
+              data-confirm="Jadikan berhasil? Uangnya tidak dikembalikan ke pelanggan."
+              class="chip !border-green-300 !text-green-700"
+            >
+              Jadikan berhasil
+            </button>
+            <button
+              type="button"
+              phx-click={JS.push("resolve_review", value: %{transaction_id: tx.id, decision: "keep"})}
+              class="chip"
+            >
+              {if tx.status == "success", do: "Tetap berhasil", else: "Tetap gagal"}
+            </button>
+          </div>
+        </div>
+      </div>
+
       <h4 class="mt-6 font-medium">Riwayat</h4>
       <p :if={@entries == []} class="mt-2 text-sm text-gray-500">Belum ada catatan.</p>
       <div :for={entry <- @entries} class="list-card mt-2">
@@ -295,18 +392,53 @@ defmodule ZahlungsWeb.DepositLive.Index do
             options={Zahlungs.Services.Provider.options()}
           />
 
-          <%!-- Credentials are write-only: the inputs start empty, and a blank one keeps what is stored. --%>
-          <label :for={{key, label} <- Deposits.credential_fields(form_field(@account_form, :provider))} class="mt-2 block text-sm">
-            {label}
-            <span :if={Deposits.credentials_saved?(@account)} class="text-xs text-gray-500">
-              (tersimpan, kosongkan bila tidak diganti)
-            </span>
-            <input type="password" name={"account[credentials][#{key}]"} value="" autocomplete="new-password" class="form-control" />
-          </label>
+          <%!-- Secret credentials are write-only: the inputs start empty, and a blank one keeps what is stored. A public one (a member ID) shows its stored value. --%>
+          <div :for={{key, label, kind} <- Deposits.credential_fields(form_field(@account_form, :provider))} class="mt-2 text-sm">
+            <label for={"credential-#{key}"} class="block">
+              {label}
+              <span :if={kind == :secret and credentials_kept?(@account, @account_form)} class="text-xs text-gray-500">
+                (tersimpan, kosongkan bila tidak diganti)
+              </span>
+            </label>
+            <input
+              :if={kind == :text}
+              type="text"
+              name={"account[credentials][#{key}]"}
+              id={"credential-#{key}"}
+              value={public_value(@account, @account_form, key)}
+              autocomplete="off"
+              class="form-control"
+            />
+            <div :if={kind == :secret} class="flex items-center gap-2">
+              <%!-- The browser keeps what is typed: a re-render (every phx-change) would otherwise reset it to the empty value. --%>
+              <input
+                type="password"
+                name={"account[credentials][#{key}]"}
+                id={"credential-#{key}"}
+                phx-update="ignore"
+                value=""
+                autocomplete="new-password"
+                class="form-control min-w-0 flex-1"
+              />
+              <button
+                type="button"
+                phx-click={
+                  JS.toggle_attribute({"type", "text", "password"}, to: "#credential-#{key}")
+                  |> JS.toggle(to: "#show-#{key}")
+                  |> JS.toggle(to: "#hide-#{key}")
+                }
+                class="chip"
+                aria-controls={"credential-#{key}"}
+              >
+                <span id={"show-#{key}"}>Tampilkan</span>
+                <span id={"hide-#{key}"} class="hidden">Sembunyikan</span>
+              </button>
+            </div>
+          </div>
 
-          <p :if={@account.callback_token} class="mt-3 text-sm">
+          <p :if={callback_url(@account, @account_form)} class="mt-3 text-sm">
             URL callback untuk penyedia:
-            <code class="block break-all rounded bg-gray-50 p-2 text-xs">{url(~p"/api/ppob/callback/#{@account.callback_token}")}</code>
+            <code class="block break-all rounded bg-gray-50 p-2 text-xs">{callback_url(@account, @account_form)}</code>
           </p>
         </div>
 

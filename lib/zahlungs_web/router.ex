@@ -29,6 +29,7 @@ defmodule ZahlungsWeb.Router do
   scope "/api", ZahlungsWeb do
     pipe_through :api
 
+    post "/ppob/callback", PpobCallbackController, :create_by_ref
     post "/ppob/callback/:token", PpobCallbackController, :create
   end
 
@@ -98,6 +99,7 @@ defmodule ZahlungsWeb.Router do
     live_session :require_platform_admin,
       on_mount: [{ZahlungsWeb.UserAuth, :ensure_platform_admin}] do
       live "/organizations", PlatformLive.Organizations, :index
+      live "/brands", PlatformLive.Brands, :index
     end
   end
 

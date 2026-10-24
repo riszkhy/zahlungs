@@ -61,11 +61,12 @@ defmodule ZahlungsWeb.Layouts do
     """
   end
 
-  # The platform operator has no point of sale, only the organizations page.
+  # The platform operator has no point of sale, only the platform pages.
   defp primary_links(%{role: "superadmin"}), do: platform_links()
   defp primary_links(_user), do: cashier_links()
 
-  defp platform_links, do: [{"Organisasi", ~p"/platform/organizations"}]
+  defp platform_links,
+    do: [{"Organisasi", ~p"/platform/organizations"}, {"Awalan nomor", ~p"/platform/brands"}]
 
   @doc """
   The full menu, grouped, in a drawer that slides in from the right. Opened by
