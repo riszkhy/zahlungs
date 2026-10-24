@@ -10,6 +10,7 @@ defmodule Zahlungs.Services.Product do
 
   @categories ~w(pulsa paket_data token_pln tagihan)
   @margin_types ~w(amount percent)
+  @price_roundings [0, 100, 500, 1000]
 
   schema "service_products" do
     field :name, :string
@@ -33,6 +34,9 @@ defmodule Zahlungs.Services.Product do
     # A tagihan through an api account: what the shop adds per month on top
     # of the provider's total.
     field :api_extra_fee, :decimal, default: Decimal.new(0)
+    # The price to the customer, rounded up to this multiple of rupiah (0: not
+    # rounded); the cost is not.
+    field :price_rounding, :integer, default: 0
     # What the vendor last said about the product (catalog refresh, or a
     # transaction's actual cost): its price and whether it can be sold.
     field :provider_price, :decimal
@@ -48,6 +52,7 @@ defmodule Zahlungs.Services.Product do
 
   def categories, do: @categories
   def margin_types, do: @margin_types
+  def price_roundings, do: @price_roundings
 
   @doc "What the vendor can say about a product."
   def provider_statuses, do: ~w(normal gangguan kosong tidak_ditemukan)
@@ -71,6 +76,7 @@ defmodule Zahlungs.Services.Product do
       :margin_type,
       :margin_value,
       :api_extra_fee,
+      :price_rounding,
       :active
     ])
     |> validate_required([:name, :category, :cost, :margin_type, :margin_value])
@@ -80,6 +86,7 @@ defmodule Zahlungs.Services.Product do
     |> validate_length(:provider_check_code, max: 60)
     |> validate_inclusion(:category, @categories)
     |> validate_inclusion(:margin_type, @margin_types)
+    |> validate_inclusion(:price_rounding, @price_roundings)
     |> validate_number(:margin_value, greater_than_or_equal_to: 0)
     |> validate_number(:api_extra_fee, greater_than_or_equal_to: 0)
     |> validate_cost()

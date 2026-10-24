@@ -7,7 +7,9 @@ defmodule Zahlungs.Services do
   ## Price
 
   `margin(x)` is the product's rupiah margin, or `x × percent / 100` rounded up
-  to the whole rupiah.
+  to the whole rupiah. A product with `price_rounding` (100, 500 or 1000)
+  rounds the price below up to that multiple; the cost is never rounded, so
+  the difference is the shop's.
 
     * pulsa, paket data, token PLN: cost = the product's cost,
       price = cost + margin(cost).
@@ -105,15 +107,15 @@ defmodule Zahlungs.Services do
       if Decimal.gt?(bill, 0) do
         {:ok,
          %{
-           price: Decimal.add(bill, bill_margin(product, bill, sheets)),
+           price: rounded(product, Decimal.add(bill, bill_margin(product, bill, sheets))),
            cost: Decimal.add(bill, Decimal.mult(product.cost, sheets))
          }}
       else
         {:error, :bill_required}
       end
     else
-      {:ok,
-       %{price: Decimal.add(product.cost, margin(product, product.cost)), cost: product.cost}}
+      price = Decimal.add(product.cost, margin(product, product.cost))
+      {:ok, %{price: rounded(product, price), cost: product.cost}}
     end
   end
 
@@ -193,7 +195,8 @@ defmodule Zahlungs.Services do
     total = inquiry.provider_total || inquiry.bill_amount
 
     %{
-      price: Decimal.add(total, Decimal.mult(product.api_extra_fee, inquiry.sheets)),
+      price:
+        rounded(product, Decimal.add(total, Decimal.mult(product.api_extra_fee, inquiry.sheets))),
       cost: total
     }
   end
@@ -1544,6 +1547,13 @@ defmodule Zahlungs.Services do
   end
 
   defp margin(%Product{margin_value: amount}, _base), do: amount
+
+  # Up to the product's multiple of rupiah; a price already on it stays.
+  defp rounded(%Product{price_rounding: step}, price) when is_integer(step) and step > 0 do
+    price |> Decimal.div(step) |> Decimal.round(0, :ceiling) |> Decimal.mult(step)
+  end
+
+  defp rounded(_product, price), do: price
 
   defp to_decimal(nil), do: Decimal.new(0)
   defp to_decimal(%Decimal{} = d), do: d

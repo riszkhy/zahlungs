@@ -363,6 +363,20 @@ defmodule ZahlungsWeb.ServiceProductLiveTest do
       assert Enum.find(Services.list_products(), &(&1.name == name)).operator == "indosat"
     end
 
+    test "picks how the price is rounded", %{socket: socket} do
+      rendered = html(socket)
+      assert rendered =~ ~s(name="product[price_rounding]")
+      assert rendered =~ "Ke atas 1.000"
+
+      name = "Pulsa #{System.unique_integer([:positive])}"
+
+      event(socket, "save", %{
+        "product" => Map.merge(@pulsa, %{"name" => name, "price_rounding" => "500"})
+      })
+
+      assert Enum.find(Services.list_products(), &(&1.name == name)).price_rounding == 500
+    end
+
     test "keeps the vendor's product code", %{socket: socket} do
       name = "Pulsa #{System.unique_integer([:positive])}"
       assert html(socket) =~ "Kode produk vendor"

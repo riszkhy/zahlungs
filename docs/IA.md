@@ -260,6 +260,9 @@ Kelola user (admin):
 - Shift tidak bisa ditutup selama masih ada layanan *diproses*.
 - **/admin/services**, **/admin/deposits**, **/reports/services**: admin saja.
   Form toko memilih akun deposit yang dipakai toko itu.
+- Produk layanan punya "Pembulatan harga" (tidak / ke atas 100 / 500 /
+  1.000): harga ke pelanggan, termasuk total tagihan, dibulatkan ke atas;
+  modal tidak, selisihnya masuk margin.
 - Layanan tidak masuk laporan penjualan barang maupun angka di Home.
 
 ## Layanan PPOB (Fase 1, lewat API penyedia)

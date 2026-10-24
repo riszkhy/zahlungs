@@ -352,6 +352,15 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
             Untuk tagihan yang bisa dibayar beberapa bulan sekaligus (mis. BPJS). Hanya berlaku di akun API.
           </p>
         </div>
+        <.input
+          field={@form[:price_rounding]}
+          type="select"
+          label="Pembulatan harga"
+          options={[{"Tidak dibulatkan", 0}, {"Ke atas 100", 100}, {"Ke atas 500", 500}, {"Ke atas 1.000", 1000}]}
+        />
+        <p class="-mt-1 text-xs text-gray-500">
+          Harga ke pelanggan dibulatkan ke atas (mis. 11.659 → 11.700 dengan 100). Modal tidak berubah; selisihnya masuk margin.
+        </p>
         <.input field={@form[:active]} type="checkbox" label="Aktif (bisa dijual)" />
 
         <p :if={@preview && not @preview.bill?} class="mt-3 rounded bg-gray-50 p-3 text-sm">

@@ -365,6 +365,24 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       refute rendered =~ ctx.tsel.name
     end
 
+    test "a tile shows the rounded price", ctx do
+      service_product_fixture(%{
+        name: "Bulat 10 #{System.unique_integer([:positive])}",
+        margin_value: "1659",
+        price_rounding: "1000"
+      })
+
+      rendered =
+        ServiceLive.Index
+        |> mount_live(ctx.cashier)
+        |> event("set_category", %{"category" => "pulsa"})
+        |> html()
+
+      # 10.150 + 1.659 = 11.809 → 12.000
+      assert rendered =~ "Rp 12.000"
+      refute rendered =~ "Rp 11.809"
+    end
+
     test "a product of another brand than the number's is flagged", ctx do
       socket =
         ctx.socket

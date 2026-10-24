@@ -107,6 +107,66 @@ defmodule Zahlungs.ServicesTest do
       assert_price(Services.price_for(token, nil, 3), "52500", "50150")
     end
 
+    test "a product that rounds its price rounds it up, never down" do
+      pulsa = fn rounding ->
+        product(
+          category: "pulsa",
+          cost: d("10150"),
+          margin_type: "percent",
+          margin_value: d("14.87"),
+          price_rounding: rounding
+        )
+      end
+
+      # 10150 × 1.1487 = 11659.3 → 11660 before rounding
+      assert_price(Services.price_for(pulsa.(0), nil), "11660", "10150")
+      assert_price(Services.price_for(pulsa.(100), nil), "11700", "10150")
+      assert_price(Services.price_for(pulsa.(500), nil), "12000", "10150")
+      assert_price(Services.price_for(pulsa.(1000), nil), "12000", "10150")
+
+      # A price already round stays.
+      round =
+        product(
+          category: "pulsa",
+          cost: d("10150"),
+          margin_type: "amount",
+          margin_value: d("1850"),
+          price_rounding: 1000
+        )
+
+      assert_price(Services.price_for(round, nil), "12000", "10150")
+    end
+
+    test "a bill's total is rounded up; its cost is not" do
+      bill =
+        product(
+          category: "tagihan",
+          cost: d("785"),
+          margin_type: "amount",
+          margin_value: d("2500"),
+          price_rounding: 500
+        )
+
+      # 211.208 + 2.500 = 213.708 → 214.000
+      assert_price(Services.price_for(bill, d("211208")), "214000", "211993")
+    end
+
+    test "inquiry_price/1 rounds an api bill's total up" do
+      inquiry = %Zahlungs.Services.Inquiry{
+        kind: "bill",
+        bill_amount: d("209208"),
+        provider_total: d("211993"),
+        sheets: 1,
+        service_product:
+          product(category: "tagihan", api_extra_fee: d("1000"), price_rounding: 1000)
+      }
+
+      # 211.993 + 1.000 = 212.993 → 213.000; cost stays the provider's total
+      assert %{price: price, cost: cost} = Services.inquiry_price(inquiry)
+      assert Decimal.equal?(price, d("213000"))
+      assert Decimal.equal?(cost, d("211993"))
+    end
+
     test "a bill without its amount has no price" do
       bill =
         product(
@@ -494,6 +554,18 @@ defmodule Zahlungs.ServicesTest do
                })
 
       assert Decimal.equal?(bill.api_extra_fee, d("2500"))
+    end
+
+    test "a price rounds to none, 100, 500 or 1000" do
+      attrs = %{name: "X", category: "pulsa", cost: "1"}
+
+      assert {:ok, %{price_rounding: 0}} = Services.create_product(attrs)
+
+      assert {:ok, %{price_rounding: 500}} =
+               Services.create_product(Map.put(attrs, :price_rounding, "500"))
+
+      assert {:error, changeset} = Services.create_product(Map.put(attrs, :price_rounding, "250"))
+      assert errors_on(changeset)[:price_rounding]
     end
 
     test "an operator is one of the known brands" do
