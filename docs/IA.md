@@ -257,6 +257,10 @@ Kelola user (admin):
   Telkomsel, jadi by.U dipilih sendiri. Daftar awalan diatur operator platform
   di `/platform/brands`. Brand produk diatur di form produk
   layanan (otomatis bila produk diambil dari daftar SBI).
+- Di ponsel / tablet tegak, /services seperti Kasir: bilah di bawah layar
+  menampilkan produk terpilih dan harganya (Bayar / Cek tagihan); panel
+  pembayaran naik menutupi daftar saat produk diketuk, dan menutup setelah
+  dicatat. Tablet mendatar dan layar lebar: panel di samping.
 - Shift tidak bisa ditutup selama masih ada layanan *diproses*.
 - **/admin/services**, **/admin/deposits**, **/reports/services**: admin saja.
   Form toko memilih akun deposit yang dipakai toko itu.

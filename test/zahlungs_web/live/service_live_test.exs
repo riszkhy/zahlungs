@@ -427,6 +427,85 @@ defmodule ZahlungsWeb.ServiceLiveTest do
     end
   end
 
+  describe "on a phone" do
+    setup do
+      assign_account(default_store(), deposit_account_fixture())
+      cashier = user_on_shift_fixture()
+
+      product =
+        service_product_fixture(%{name: "Ponsel 10 #{System.unique_integer([:positive])}"})
+
+      %{
+        cashier: cashier,
+        product: product,
+        socket:
+          ServiceLive.Index
+          |> mount_live(cashier)
+          |> event("set_category", %{"category" => "pulsa"})
+      }
+    end
+
+    test "the bar at the bottom waits for a product", ctx do
+      rendered = html(ctx.socket)
+      assert rendered =~ ~s(id="service-bar")
+      assert rendered =~ "Pilih produk"
+      assert rendered =~ ~r/<button[^>]*id="service-bar-open"[^>]*disabled/
+      refute ctx.socket.assigns.panel_open
+    end
+
+    test "picking a product opens the panel, and the bar shows it", ctx do
+      socket = event(ctx.socket, "select", %{"id" => ctx.product.id})
+      assert socket.assigns.panel_open
+
+      rendered = html(socket)
+      assert rendered =~ "cart-panel-open"
+      assert rendered =~ ~r/id="service-bar".*#{ctx.product.name}.*Rp 12.000/s
+      refute rendered =~ ~r/<button[^>]*id="service-bar-open"[^>]*disabled/
+    end
+
+    test "Tutup closes the panel and keeps the product", ctx do
+      socket =
+        ctx.socket
+        |> event("select", %{"id" => ctx.product.id})
+        |> event("toggle_panel")
+
+      refute socket.assigns.panel_open
+      assert socket.assigns.selected.id == ctx.product.id
+      refute html(socket) =~ "cart-panel-open"
+
+      assert event(socket, "toggle_panel").assigns.panel_open
+    end
+
+    test "a recorded service closes the panel", ctx do
+      socket =
+        ctx.socket
+        |> event("select", %{"id" => ctx.product.id})
+        |> event("record", %{
+          "service" => %{
+            "customer_ref" => "081234567890",
+            "payment_method" => "cash",
+            "amount_paid" => "12.000"
+          }
+        })
+
+      assert flash(socket, :info)
+      refute socket.assigns.panel_open
+    end
+
+    test "another category closes the panel", ctx do
+      socket =
+        ctx.socket
+        |> event("select", %{"id" => ctx.product.id})
+        |> event("set_category", %{"category" => "tagihan"})
+
+      refute socket.assigns.panel_open
+    end
+
+    test "tablets lying flat show the panel beside the tiles", ctx do
+      assert html(ctx.socket) =~ "md:landscape:grid-cols-5"
+    end
+  end
+
   describe "group_digits/1" do
     test "groups a number in fours from the left" do
       assert ServiceLive.Index.group_digits("081234567890") == "0812 3456 7890"

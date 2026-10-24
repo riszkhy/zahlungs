@@ -39,7 +39,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
      socket
      |> assign(page_title: "Layanan", shift: shift, store: store)
      |> assign(sellable: account != nil, api: account != nil and Deposits.api?(account))
-     |> assign(category: "pulsa", brand: nil, selected: nil, form: @blank_form)
+     |> assign(category: "pulsa", brand: nil, selected: nil, form: @blank_form, panel_open: false)
      |> assign(preview: nil, inquiry: nil, brand_prefixes: Services.brand_prefixes())
      |> load_products()
      |> load_transactions()}
@@ -51,6 +51,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
       {:noreply,
        socket
        |> assign(category: category, brand: nil, selected: nil, preview: nil, inquiry: nil)
+       |> assign(:panel_open, false)
        |> load_products()}
     else
       {:noreply, socket}
@@ -59,7 +60,16 @@ defmodule ZahlungsWeb.ServiceLive.Index do
 
   def handle_event("select", %{"id" => id}, socket) do
     selected = Enum.find(socket.assigns.products, &(to_string(&1.id) == to_string(id)))
-    {:noreply, socket |> assign(selected: selected, inquiry: nil) |> preview()}
+
+    {:noreply,
+     socket |> assign(selected: selected, inquiry: nil, panel_open: selected != nil) |> preview()}
+  end
+
+  # Portrait: the panel slides over the tiles (beside them on a wide screen,
+  # where this changes nothing).
+  def handle_event("toggle_panel", _params, socket) do
+    {:noreply,
+     assign(socket, :panel_open, socket.assigns.selected != nil and not socket.assigns.panel_open)}
   end
 
   def handle_event("change", %{"service" => params}, socket) do
@@ -122,7 +132,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
             {:noreply,
              socket
              |> put_flash(:info, recorded_message(transaction))
-             |> assign(form: @blank_form, preview: nil, inquiry: nil)
+             |> assign(form: @blank_form, preview: nil, inquiry: nil, panel_open: false)
              |> load_transactions()}
 
           {:error, :price_changed} ->
@@ -238,7 +248,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
   defp keep_selected(%{assigns: %{selected: selected, brand: brand}} = socket) do
     if selected.operator in [nil, brand] or brand in [nil, "other"],
       do: socket,
-      else: assign(socket, selected: nil, preview: nil, inquiry: nil)
+      else: assign(socket, selected: nil, preview: nil, inquiry: nil, panel_open: false)
   end
 
   defp shown?(_product, nil), do: true
@@ -508,6 +518,17 @@ defmodule ZahlungsWeb.ServiceLive.Index do
 
   defp checked?(_assigns), do: false
 
+  # What the bar at the bottom of a portrait screen offers for the product.
+  defp bar_action(%{panel_open: true}), do: "Tutup"
+
+  defp bar_action(%{api_bill: true, inquiry: nil, selected: %Product{} = product}),
+    do: if(Product.bill?(product), do: "Cek tagihan", else: "Cek pelanggan")
+
+  defp bar_action(_assigns), do: "Bayar"
+
+  defp bar_price(%{price: price}, _product), do: format_price(price)
+  defp bar_price(_preview, product), do: tile_price(product)
+
   # The shop's extra fee on an inquired bill: the price above the provider's total.
   defp extra_fee(%{price: price}, inquiry),
     do: Decimal.sub(price, inquiry.provider_total || inquiry.bill_amount)
@@ -555,8 +576,8 @@ defmodule ZahlungsWeb.ServiceLive.Index do
       </div>
     </section>
 
-    <div :if={@sellable} class="mt-6 grid gap-4 lg:grid-cols-5">
-      <section class="lg:col-span-3">
+    <div :if={@sellable} class="mt-6 grid gap-4 lg:grid-cols-5 md:landscape:grid-cols-5">
+      <section class="lg:col-span-3 md:landscape:col-span-3">
         <div class="flex flex-wrap gap-2">
           <button
             :for={{value, label} <- Services.categories()}
@@ -645,7 +666,18 @@ defmodule ZahlungsWeb.ServiceLive.Index do
         </p>
       </section>
 
-      <section class="cart-panel lg:col-span-2">
+      <section
+        id="service-panel"
+        class={[
+          "cart-panel lg:col-span-2 md:landscape:col-span-2",
+          (@panel_open && "cart-panel-open") || "hidden lg:block md:landscape:block"
+        ]}
+      >
+        <div :if={@selected} class="mb-2 flex justify-end lg:hidden md:landscape:hidden">
+          <button type="button" phx-click="toggle_panel" class="touch-target text-sm text-gray-600 underline">
+            Tutup
+          </button>
+        </div>
         <p :if={is_nil(@selected)} class="text-sm text-gray-500">
           {if brand_category?(@category), do: "Isi nomor tujuan, lalu pilih produk.", else: "Pilih produk di kiri."}
         </p>
@@ -744,7 +776,26 @@ defmodule ZahlungsWeb.ServiceLive.Index do
           </button>
         </form>
       </section>
+
+      <%!-- Portrait only: the product at a glance, pinned to the bottom of the screen. --%>
+      <div id="service-bar" class="cart-bar lg:hidden md:landscape:hidden">
+        <div class="min-w-0 flex-1">
+          <p :if={is_nil(@selected)} class="text-sm text-gray-500">Pilih produk</p>
+          <p :if={@selected} class="truncate text-sm text-gray-700">{@selected.name}</p>
+          <p :if={@selected} class="truncate text-lg font-semibold">{bar_price(@preview, @selected)}</p>
+        </div>
+        <button
+          id="service-bar-open"
+          type="button"
+          phx-click="toggle_panel"
+          class="btn btn-primary touch-target"
+          disabled={is_nil(@selected)}
+        >
+          {bar_action(assigns)}
+        </button>
+      </div>
     </div>
+
 
     <section :if={@shift} class="mt-6">
       <h3 class="font-semibold text-gray-700">Sedang diproses ({length(@processing)})</h3>
@@ -813,6 +864,9 @@ defmodule ZahlungsWeb.ServiceLive.Index do
         </span>
       </div>
     </section>
+
+    <%!-- Room for the bar, so the end of the page isn't hidden behind it. --%>
+    <div :if={@sellable} class="h-24 lg:hidden md:landscape:hidden"></div>
     """
   end
 end
