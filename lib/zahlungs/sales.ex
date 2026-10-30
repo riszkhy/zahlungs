@@ -365,12 +365,16 @@ defmodule Zahlungs.Sales do
   # Cash handed back for a sale whose shift is no longer open (closed, or a sale
   # from before shifts existed) leaves the drawer of whoever processes the
   # return, so it is booked there as a cash-out.
-  defp record_refund(%Sale{payment_method: "cash"} = sale, shift, %User{} = refunded_by) do
-    with true <- (is_nil(shift) or shift_closed?(shift)) and Decimal.gt?(sale.total, 0),
+  # A credit sale took only its down payment in cash: that is what goes back.
+  defp record_refund(%Sale{payment_method: method} = sale, shift, %User{} = refunded_by)
+       when method in ["cash", "credit"] do
+    cash = if method == "credit", do: sale.amount_paid, else: sale.total
+
+    with true <- (is_nil(shift) or shift_closed?(shift)) and Decimal.gt?(cash, 0),
          {:ok, drawer} <- Shifts.lock_current_shift(refunded_by) do
       Shifts.add_cash_movement(drawer, %{
         "category" => "refund",
-        "amount" => sale.total,
+        "amount" => cash,
         "note" => "Refund #{sale.code}"
       })
     else

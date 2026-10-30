@@ -15,7 +15,7 @@ defmodule Zahlungs.Customers do
 
   alias Zahlungs.Accounts.User
   alias Zahlungs.Customers.{Customer, Payment}
-  alias Zahlungs.Repo
+  alias Zahlungs.{LocalTime, Repo, Shifts, Stores}
   alias Zahlungs.Sales.Sale
   alias Zahlungs.Shifts.CashMovement
 
@@ -156,6 +156,328 @@ defmodule Zahlungs.Customers do
     cash = dec(row.cash)
     %{cash: cash, noncash: Decimal.sub(dec(row.all), cash)}
   end
+
+  @doc """
+  Receives a repayment (`"amount"`, `"payment_method"`, `"note"`) on the
+  user's open shift, in that shift's store. The customer is locked and the
+  amount may not exceed what they owe.
+  """
+  def receive_payment(%User{} = user, customer_id, attrs) do
+    Repo.put_org_id(user.organization_id)
+
+    Repo.transaction(fn ->
+      with {:ok, shift} <- Shifts.lock_current_shift(user),
+           {:ok, customer} <- lock_customer(customer_id) do
+        %Payment{
+          customer_id: customer.id,
+          store_id: shift.store_id,
+          shift_id: shift.id,
+          user_id: user.id
+        }
+        |> Payment.changeset(attrs)
+        |> within_balance(customer)
+        |> Repo.insert()
+        |> ok_or_rollback()
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+  end
+
+  defp within_balance(%Ecto.Changeset{valid?: true} = changeset, customer) do
+    if Decimal.gt?(Ecto.Changeset.get_field(changeset, :amount), balance(customer)),
+      do: Repo.rollback(:over_balance),
+      else: changeset
+  end
+
+  defp within_balance(changeset, _customer), do: changeset
+
+  @doc """
+  A repayment received in one of the scope's stores (any store of the
+  organization for "all stores"), with its customer, cashier and store.
+  """
+  def get_payment!(%Zahlungs.Scope{} = scope, id) do
+    store_ids =
+      case Zahlungs.Scope.store_id(scope) do
+        nil -> Stores.store_ids()
+        store_id -> [store_id]
+      end
+
+    Payment
+    |> where([p], p.id == ^id and p.store_id in ^store_ids)
+    |> preload([:customer, :user, :store])
+    |> Repo.one!()
+  end
+
+  @doc """
+  Cancels a repayment entered by mistake, with a reason. Admins only, and only
+  while the shift that received it is open: a closed shift's figures are final.
+  """
+  def cancel_payment(%User{role: "admin"} = user, payment_id, reason) do
+    Repo.put_org_id(user.organization_id)
+
+    Repo.transaction(fn ->
+      with {:ok, id} <- cast_id(payment_id),
+           %Payment{} = payment <- lock_payment(id),
+           nil <- payment.cancelled_at,
+           %{status: "open"} <- Shifts.lock_shift(payment.shift_id) do
+        payment
+        |> Payment.cancel_changeset(user.id, reason)
+        |> Repo.update()
+        |> ok_or_rollback()
+      else
+        {:error, reason} -> Repo.rollback(reason)
+        nil -> Repo.rollback(:not_found)
+        %NaiveDateTime{} -> Repo.rollback(:already_cancelled)
+        _closed_shift -> Repo.rollback(:shift_closed)
+      end
+    end)
+  end
+
+  def cancel_payment(_user, _payment_id, _reason), do: {:error, :unauthorized}
+
+  # Only repayments received in a store of the current organization.
+  defp lock_payment(id) do
+    Repo.one(
+      from p in Payment,
+        where: p.id == ^id and p.store_id in ^Stores.store_ids(),
+        lock: "FOR UPDATE"
+    )
+  end
+
+  @doc """
+  Hands a customer's overpayment (a negative balance, after a return or void of
+  a note they had paid into) back in cash: a `customer_refund` cash-out on the
+  admin's open shift. Admins only.
+  """
+  def refund_overpayment(%User{role: "admin"} = user, customer_id, amount) do
+    Repo.put_org_id(user.organization_id)
+
+    Repo.transaction(fn ->
+      with {:ok, shift} <- Shifts.lock_current_shift(user),
+           {:ok, customer} <- lock_customer(customer_id),
+           :ok <- within_overpayment(customer, amount) do
+        shift
+        |> Shifts.add_cash_movement(%{
+          "category" => "customer_refund",
+          "amount" => amount,
+          "customer_id" => customer.id,
+          "note" => "Kelebihan bayar #{customer.name}"
+        })
+        |> ok_or_rollback()
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+  end
+
+  def refund_overpayment(_user, _customer_id, _amount), do: {:error, :unauthorized}
+
+  defp within_overpayment(customer, amount) do
+    overpaid = Decimal.negate(balance(customer))
+
+    case Decimal.parse(String.trim(to_string(amount))) do
+      {amount, ""} ->
+        if Decimal.gt?(amount, 0) and not Decimal.gt?(amount, overpaid),
+          do: :ok,
+          else: {:error, :over_overpayment}
+
+      _ ->
+        {:error, :over_overpayment}
+    end
+  end
+
+  defp lock_customer(customer_id) do
+    with {:ok, id} <- cast_id(customer_id),
+         %Customer{} = customer <-
+           Repo.one(from c in Customer, where: c.id == ^id, lock: "FOR UPDATE") do
+      {:ok, customer}
+    else
+      _ -> {:error, :not_found}
+    end
+  end
+
+  defp cast_id(id) when is_integer(id), do: {:ok, id}
+
+  defp cast_id(id) when is_binary(id) do
+    case Integer.parse(id) do
+      {id, ""} -> {:ok, id}
+      _ -> {:error, :not_found}
+    end
+  end
+
+  defp cast_id(_id), do: {:error, :not_found}
+
+  defp ok_or_rollback({:ok, value}), do: value
+  defp ok_or_rollback({:error, reason}), do: Repo.rollback(reason)
+
+  @doc """
+  The customer's credit notes still owed, oldest first:
+  `[%{sale, remaining, overdue?}]`.
+  """
+  def open_notes(%Customer{} = customer) do
+    customer
+    |> ledger()
+    |> Enum.filter(&(&1.kind == :sale and &1.status == :open))
+    |> Enum.map(&Map.take(&1, [:sale, :remaining, :overdue?]))
+  end
+
+  @doc """
+  The customer's ledger (kartu piutang), oldest first: credit notes (`:sale`),
+  repayments (`:payment`) and overpayments handed back (`:refund`), each with
+  the running `balance` after it.
+
+  Repayments settle the oldest notes first. This is worked out here, never
+  stored: each note still completed covers a stretch of the cumulative debt,
+  and the money received so far (repayments not cancelled, less what was
+  handed back) covers those stretches in order. A note returned or voided
+  (`status: :cancelled`) or a cancelled repayment (`cancelled?: true`) is
+  listed but moves no balance.
+  """
+  def ledger(%Customer{id: id}) do
+    sales =
+      Repo.all(
+        from s in Sale,
+          where: s.customer_id == ^id and s.payment_method == "credit",
+          order_by: [asc: s.inserted_at, asc: s.id],
+          preload: [:store, :user]
+      )
+
+    payments =
+      Repo.all(
+        from p in Payment,
+          where: p.customer_id == ^id,
+          order_by: [asc: p.inserted_at, asc: p.id],
+          preload: [:store, :user, :cancelled_by]
+      )
+
+    refunds =
+      Repo.all(
+        from m in CashMovement,
+          where: m.customer_id == ^id and m.category == "customer_refund",
+          order_by: [asc: m.inserted_at, asc: m.id]
+      )
+
+    # Each note still completed covers a stretch of the cumulative debt: (from, to].
+    {notes, _} =
+      sales
+      |> Enum.filter(&(&1.status == "completed"))
+      |> Enum.map_reduce(Decimal.new(0), fn sale, from ->
+        to = Decimal.add(from, debt(sale))
+        {%{sale: sale, from: from, to: to}, to}
+      end)
+
+    received =
+      Decimal.sub(
+        sum(Enum.filter(payments, &is_nil(&1.cancelled_at))),
+        sum(refunds)
+      )
+
+    events =
+      Enum.map(sales, &{&1.inserted_at, 0, &1.id, {:sale, &1}}) ++
+        Enum.map(payments, &{&1.inserted_at, 1, &1.id, {:payment, &1}}) ++
+        Enum.map(refunds, &{&1.inserted_at, 2, &1.id, {:refund, &1}})
+
+    events
+    |> Enum.sort_by(fn {at, rank, id, _event} ->
+      {NaiveDateTime.to_gregorian_seconds(at), rank, id}
+    end)
+    |> Enum.map_reduce(%{balance: Decimal.new(0), received: Decimal.new(0)}, fn {_, _, _, event},
+                                                                                acc ->
+      entry(event, acc, notes, received)
+    end)
+    |> elem(0)
+  end
+
+  defp entry({:sale, %Sale{status: "completed"} = sale}, acc, notes, received) do
+    left = notes |> Enum.find(&(&1.sale.id == sale.id)) |> remaining(received)
+    balance = Decimal.add(acc.balance, debt(sale))
+
+    {%{
+       kind: :sale,
+       at: sale.inserted_at,
+       amount: debt(sale),
+       balance: balance,
+       sale: sale,
+       remaining: left,
+       status: if(Decimal.gt?(left, 0), do: :open, else: :paid),
+       overdue?: Decimal.gt?(left, 0) and overdue?(sale)
+     }, %{acc | balance: balance}}
+  end
+
+  defp entry({:sale, sale}, acc, _notes, _received) do
+    {%{
+       kind: :sale,
+       at: sale.inserted_at,
+       amount: debt(sale),
+       balance: acc.balance,
+       sale: sale,
+       remaining: Decimal.new(0),
+       status: :cancelled,
+       overdue?: false
+     }, acc}
+  end
+
+  defp entry({:payment, %Payment{cancelled_at: nil} = payment}, acc, notes, _received) do
+    received = Decimal.add(acc.received, payment.amount)
+    balance = Decimal.sub(acc.balance, payment.amount)
+
+    settles =
+      for note <- notes,
+          Decimal.gt?(note.to, acc.received) and Decimal.lt?(note.from, received),
+          do: %{code: note.sale.code, sale_id: note.sale.id, remaining: remaining(note, received)}
+
+    {%{
+       kind: :payment,
+       at: payment.inserted_at,
+       amount: payment.amount,
+       balance: balance,
+       payment: payment,
+       cancelled?: false,
+       settles: settles
+     }, %{acc | balance: balance, received: received}}
+  end
+
+  defp entry({:payment, payment}, acc, _notes, _received) do
+    {%{
+       kind: :payment,
+       at: payment.inserted_at,
+       amount: payment.amount,
+       balance: acc.balance,
+       payment: payment,
+       cancelled?: true,
+       settles: []
+     }, acc}
+  end
+
+  defp entry({:refund, movement}, acc, _notes, _received) do
+    balance = Decimal.add(acc.balance, movement.amount)
+
+    {%{
+       kind: :refund,
+       at: movement.inserted_at,
+       amount: movement.amount,
+       balance: balance,
+       movement: movement
+     }, %{acc | balance: balance, received: Decimal.sub(acc.received, movement.amount)}}
+  end
+
+  # What is left of a note once `received` (cumulative) has covered the debt
+  # before it and as much of its own as it reaches.
+  defp remaining(%{from: from, to: to}, received) do
+    if Decimal.gt?(to, received),
+      do: Decimal.sub(to, Decimal.max(from, received)),
+      else: Decimal.new(0)
+  end
+
+  defp debt(%Sale{} = sale), do: Decimal.sub(sale.total, sale.amount_paid)
+
+  defp overdue?(%Sale{due_date: nil}), do: false
+
+  defp overdue?(%Sale{due_date: due_date, store: store}),
+    do: Date.before?(due_date, LocalTime.today(store))
+
+  defp sum(rows), do: Enum.reduce(rows, Decimal.new(0), &Decimal.add(&2, &1.amount))
 
   defp dec(%Decimal{} = d), do: d
   defp dec(n) when is_integer(n), do: Decimal.new(n)

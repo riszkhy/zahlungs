@@ -240,4 +240,180 @@ defmodule Zahlungs.CustomersTest do
       assert Decimal.equal?(report.revenue, d("60000"))
     end
   end
+
+  describe "repayments" do
+    setup do
+      user = user_on_shift_fixture()
+      %{user: user, shift: Shifts.current_shift(user), customer: customer_fixture()}
+    end
+
+    defp pay(user, customer, amount, method \\ "cash") do
+      Customers.receive_payment(user, customer.id, %{
+        "amount" => amount,
+        "payment_method" => method
+      })
+    end
+
+    defp admin_on_shift do
+      admin = admin()
+      shift_fixture(admin)
+      admin
+    end
+
+    test "partial then full repayment", ctx do
+      credit!(ctx.user, ctx.customer, "50000")
+
+      assert {:ok, payment} = pay(ctx.user, ctx.customer, "20000")
+      assert {payment.store_id, payment.shift_id} == {ctx.shift.store_id, ctx.shift.id}
+      assert Decimal.equal?(Customers.balance(ctx.customer), d("30000"))
+
+      assert {:ok, _} = pay(ctx.user, ctx.customer, "30000", "qris")
+      assert Decimal.equal?(Customers.balance(ctx.customer), d("0"))
+      assert pay(ctx.user, ctx.customer, "1") == {:error, :over_balance}
+    end
+
+    test "a repayment needs an open shift and a known customer", ctx do
+      credit!(ctx.user, ctx.customer, "50000")
+
+      assert pay(user_fixture(), ctx.customer, "1000") == {:error, :no_open_shift}
+
+      assert Customers.receive_payment(ctx.user, -1, %{"amount" => "1"}) ==
+               {:error, :not_found}
+
+      assert {:error, %Ecto.Changeset{}} = pay(ctx.user, ctx.customer, "1000", "bitcoin")
+    end
+
+    test "cash counts in the receiving shift's drawer, non-cash doesn't", ctx do
+      credit!(ctx.user, ctx.customer, "50000")
+      other = user_on_shift_fixture(%{store_id: store_fixture().id})
+      their_shift = Shifts.current_shift(other)
+
+      {:ok, payment} = pay(other, ctx.customer, "20000")
+      {:ok, _} = pay(other, ctx.customer, "5000", "transfer")
+
+      assert payment.store_id == their_shift.store_id
+      assert Decimal.equal?(Shifts.expected_cash(their_shift), d("20000"))
+
+      summary = Shifts.shift_summary(their_shift)
+      assert Decimal.equal?(summary.payments_cash, d("20000"))
+      assert Decimal.equal?(summary.payments_noncash, d("5000"))
+      assert Decimal.equal?(summary.expected_cash, d("20000"))
+      assert Decimal.equal?(Shifts.expected_cash(ctx.shift), d("0"))
+    end
+
+    test "repayments settle the oldest note first", ctx do
+      a = credit!(ctx.user, ctx.customer, "30000")
+      b = credit!(ctx.user, ctx.customer, "20000")
+      {:ok, _} = pay(ctx.user, ctx.customer, "40000")
+
+      assert [%{sale: %{id: b_id}, remaining: remaining}] = Customers.open_notes(ctx.customer)
+      assert b_id == b.id
+      assert Decimal.equal?(remaining, d("10000"))
+
+      assert [sale_a, sale_b, payment] = Customers.ledger(ctx.customer)
+      assert {sale_a.kind, sale_b.kind, payment.kind} == {:sale, :sale, :payment}
+      assert {sale_a.status, sale_b.status} == {:paid, :open}
+
+      assert Enum.map(payment.settles, &{&1.code, Decimal.to_integer(&1.remaining)}) ==
+               [{a.code, 0}, {b.code, 10000}]
+
+      assert Enum.map([sale_a, sale_b, payment], &Decimal.to_integer(&1.balance)) ==
+               [30000, 50000, 10000]
+    end
+
+    test "overdue uses the store's local date", ctx do
+      sale = credit!(ctx.user, ctx.customer, "10000")
+      today = LocalTime.today(default_store())
+
+      Zahlungs.Repo.update_all(
+        from(s in Zahlungs.Sales.Sale, where: s.id == ^sale.id),
+        set: [due_date: today]
+      )
+
+      assert [%{overdue?: false}] = Customers.open_notes(ctx.customer)
+
+      Zahlungs.Repo.update_all(
+        from(s in Zahlungs.Sales.Sale, where: s.id == ^sale.id),
+        set: [due_date: Date.add(today, -1)]
+      )
+
+      assert [%{overdue?: true}] = Customers.open_notes(ctx.customer)
+      assert [%{overdue?: true}] = Customers.ledger(ctx.customer)
+    end
+
+    test "only an admin cancels a repayment, while its shift is open", ctx do
+      credit!(ctx.user, ctx.customer, "50000")
+      {:ok, payment} = pay(ctx.user, ctx.customer, "20000")
+      admin = admin()
+
+      assert Customers.cancel_payment(ctx.user, payment.id, "salah input") ==
+               {:error, :unauthorized}
+
+      assert {:error, %Ecto.Changeset{}} = Customers.cancel_payment(admin, payment.id, " ")
+
+      assert {:ok, cancelled} = Customers.cancel_payment(admin, payment.id, "salah input")
+      assert cancelled.cancelled_by_id == admin.id
+      assert Decimal.equal?(Customers.balance(ctx.customer), d("50000"))
+      assert Decimal.equal?(Shifts.expected_cash(ctx.shift), d("0"))
+
+      assert Customers.cancel_payment(admin, payment.id, "lagi") ==
+               {:error, :already_cancelled}
+
+      assert [_sale, %{kind: :payment, cancelled?: true, balance: balance}] =
+               Customers.ledger(ctx.customer)
+
+      assert Decimal.equal?(balance, d("50000"))
+
+      {:ok, later} = pay(ctx.user, ctx.customer, "1000")
+      {:ok, _} = Shifts.close_shift(ctx.shift, "1000")
+
+      assert Customers.cancel_payment(admin, later.id, "telat") == {:error, :shift_closed}
+    end
+
+    test "returning a note paid in part leaves an overpayment", ctx do
+      sale = credit!(ctx.user, ctx.customer, "50000")
+      {:ok, _} = pay(ctx.user, ctx.customer, "20000")
+
+      {:ok, _} = Sales.return_sale(sale, admin())
+      assert Decimal.equal?(Customers.balance(ctx.customer), d("-20000"))
+      assert [%{status: :cancelled} | _] = Customers.ledger(ctx.customer)
+
+      credit!(ctx.user, ctx.customer, "30000")
+      assert Decimal.equal?(Customers.balance(ctx.customer), d("10000"))
+    end
+
+    test "an admin hands an overpayment back in cash", ctx do
+      sale = credit!(ctx.user, ctx.customer, "50000")
+      {:ok, _} = pay(ctx.user, ctx.customer, "20000")
+      {:ok, _} = Sales.return_sale(sale, admin())
+      admin = admin_on_shift()
+
+      assert Customers.refund_overpayment(ctx.user, ctx.customer.id, "20000") ==
+               {:error, :unauthorized}
+
+      assert Customers.refund_overpayment(admin(), ctx.customer.id, "20000") ==
+               {:error, :no_open_shift}
+
+      assert Customers.refund_overpayment(admin, ctx.customer.id, "25000") ==
+               {:error, :over_overpayment}
+
+      assert {:ok, movement} = Customers.refund_overpayment(admin, ctx.customer.id, "20000")
+      assert {movement.category, movement.customer_id} == {"customer_refund", ctx.customer.id}
+      assert Decimal.equal?(Customers.balance(ctx.customer), d("0"))
+
+      admin_shift = Shifts.current_shift(admin)
+      assert Decimal.equal?(Shifts.expected_cash(admin_shift), d("-20000"))
+      assert [_, _, %{kind: :refund}] = Customers.ledger(ctx.customer)
+    end
+
+    test "a credit sale returned after its shift closed refunds the down payment only", ctx do
+      sale = credit!(ctx.user, ctx.customer, "60000", "10000")
+      {:ok, _} = Shifts.close_shift(ctx.shift, "10000")
+      admin = admin_on_shift()
+
+      {:ok, _} = Sales.return_sale(sale, admin)
+
+      assert Decimal.equal?(Shifts.expected_cash(Shifts.current_shift(admin)), d("-10000"))
+    end
+  end
 end
