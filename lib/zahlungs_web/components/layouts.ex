@@ -143,12 +143,14 @@ defmodule ZahlungsWeb.Layouts do
       {"Daftar Cabang", ~p"/admin/stores/register"},
       {"Riwayat login", ~p"/admin/logins"},
       {"Suppliers", ~p"/admin/suppliers"},
+      {"Pelanggan", ~p"/admin/customers"},
       {"Produk layanan", ~p"/admin/services"},
       {"Deposit", ~p"/admin/deposits"},
       {"Reports", ~p"/reports/sales"},
       {"Stock", ~p"/reports/stock"},
       {"Consignment", ~p"/reports/consignment"},
-      {"Laporan layanan", ~p"/reports/services"}
+      {"Laporan layanan", ~p"/reports/services"},
+      {"Laporan piutang", ~p"/reports/receivables"}
     ]
   end
 end

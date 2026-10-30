@@ -71,6 +71,10 @@ defmodule Zahlungs.Customers do
 
   def set_active(_user, _customer, _active?), do: {:error, :unauthorized}
 
+  @doc "A changeset for the customer form: with the limit for an admin."
+  def change_customer(%User{} = user, %Customer{} = customer, attrs \\ %{}),
+    do: customer_changeset(customer, user, attrs)
+
   defp customer_changeset(customer, %User{role: "admin"}, attrs),
     do: Customer.admin_changeset(customer, attrs)
 
@@ -478,6 +482,135 @@ defmodule Zahlungs.Customers do
     do: Date.before?(due_date, LocalTime.today(store))
 
   defp sum(rows), do: Enum.reduce(rows, Decimal.new(0), &Decimal.add(&2, &1.amount))
+
+  @doc """
+  Receivables (laporan piutang): every customer of the organization who owes
+  something, most owed first, as `%{customer, balance, oldest_open, overdue,
+  last_payment_at}` (`oldest_open` is the oldest note still owed, `overdue`
+  what is left of the notes past their due date), and their `total`. Option
+  `overdue_only: true` keeps the customers with something overdue.
+  """
+  def receivables_report(opts \\ []) do
+    customers = Repo.all(from c in Customer, order_by: c.name)
+    ids = Enum.map(customers, & &1.id)
+
+    debts =
+      totals_by_customer(
+        from(s in Sale,
+          where:
+            s.customer_id in ^ids and s.payment_method == "credit" and s.status == "completed",
+          group_by: s.customer_id,
+          select: {s.customer_id, sum(s.total - s.amount_paid)}
+        )
+      )
+
+    paid =
+      totals_by_customer(
+        from(p in Payment,
+          where: p.customer_id in ^ids and is_nil(p.cancelled_at),
+          group_by: p.customer_id,
+          select: {p.customer_id, sum(p.amount)}
+        )
+      )
+
+    handed_back =
+      totals_by_customer(
+        from(m in CashMovement,
+          where: m.customer_id in ^ids and m.category == "customer_refund",
+          group_by: m.customer_id,
+          select: {m.customer_id, sum(m.amount)}
+        )
+      )
+
+    last_payment =
+      Map.new(
+        Repo.all(
+          from p in Payment,
+            where: p.customer_id in ^ids and is_nil(p.cancelled_at),
+            group_by: p.customer_id,
+            select: {p.customer_id, max(p.inserted_at)}
+        )
+      )
+
+    rows =
+      customers
+      |> Enum.map(fn c ->
+        balance =
+          Map.get(debts, c.id, Decimal.new(0))
+          |> Decimal.sub(Map.get(paid, c.id, Decimal.new(0)))
+          |> Decimal.add(Map.get(handed_back, c.id, Decimal.new(0)))
+
+        {c, balance}
+      end)
+      |> Enum.filter(fn {_c, balance} -> Decimal.gt?(balance, 0) end)
+      |> Enum.map(fn {c, balance} ->
+        notes = open_notes(c)
+
+        %{
+          customer: c,
+          balance: balance,
+          oldest_open: notes |> List.first() |> then(&(&1 && &1.sale)),
+          overdue: notes |> Enum.filter(& &1.overdue?) |> Enum.map(& &1.remaining) |> add_up(),
+          last_payment_at: Map.get(last_payment, c.id)
+        }
+      end)
+      |> Enum.reject(&(opts[:overdue_only] && not Decimal.gt?(&1.overdue, 0)))
+      |> Enum.sort_by(& &1.balance, {:desc, Decimal})
+
+    %{rows: rows, total: rows |> Enum.map(& &1.balance) |> add_up()}
+  end
+
+  defp totals_by_customer(query) do
+    query |> Repo.all() |> Map.new(fn {id, amount} -> {id, dec(amount)} end)
+  end
+
+  defp add_up(amounts), do: Enum.reduce(amounts, Decimal.new(0), &Decimal.add/2)
+
+  @doc """
+  Repayments received (not cancelled) in a range of local dates, in the
+  scope's store or, for "all stores", every store of the organization:
+  `%{total, by_method: [{method, amount}], by_store: [{store_name, amount}]}`.
+  """
+  def payments_report(%Zahlungs.Scope{} = scope, %Date{} = from, %Date{} = to) do
+    {start, finish} = LocalTime.day_range(from, to, scope.store)
+
+    store_ids =
+      case Zahlungs.Scope.store_id(scope) do
+        nil -> Stores.store_ids()
+        store_id -> [store_id]
+      end
+
+    payments =
+      from p in Payment,
+        where:
+          p.store_id in ^store_ids and is_nil(p.cancelled_at) and p.inserted_at >= ^start and
+            p.inserted_at <= ^finish
+
+    by_method =
+      Repo.all(
+        from p in payments,
+          group_by: p.payment_method,
+          order_by: p.payment_method,
+          select: {p.payment_method, sum(p.amount)}
+      )
+      |> Enum.map(fn {method, amount} -> {method, dec(amount)} end)
+
+    by_store =
+      Repo.all(
+        from p in payments,
+          join: s in assoc(p, :store),
+          group_by: [s.id, s.name],
+          order_by: s.name,
+          select: {s.name, sum(p.amount)}
+      )
+      |> Enum.map(fn {name, amount} -> {name, dec(amount)} end)
+
+    %{
+      total: by_method |> Enum.map(&elem(&1, 1)) |> add_up(),
+      by_method: by_method,
+      by_store: by_store
+    }
+  end
 
   defp dec(%Decimal{} = d), do: d
   defp dec(n) when is_integer(n), do: Decimal.new(n)

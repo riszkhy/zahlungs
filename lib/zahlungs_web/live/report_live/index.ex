@@ -90,6 +90,11 @@ defmodule ZahlungsWeb.ReportLive.Index do
       <.stat label="Tax" value={format_money(@report.tax)} />
     </div>
 
+    <p :if={@report && Decimal.gt?(@report.credit_total, 0)} class="mt-3 text-sm text-gray-600">
+      Termasuk penjualan <strong>Piutang</strong> {format_money(@report.credit_total)}
+      (belum semuanya diterima; lihat <.link navigate={~p"/reports/receivables"} class="text-green-700 hover:underline">laporan piutang</.link>).
+    </p>
+
     <h3 class="mt-10 font-semibold text-gray-700">Daily sales</h3>
     <.table id="by-day" rows={@by_day}>
       <:col :let={row} label="Date">{format_date(row.date)}</:col>

@@ -416,4 +416,63 @@ defmodule Zahlungs.CustomersTest do
       assert Decimal.equal?(Shifts.expected_cash(Shifts.current_shift(admin)), d("-10000"))
     end
   end
+
+  describe "reports" do
+    setup do
+      user = user_on_shift_fixture()
+      %{user: user, customer: customer_fixture()}
+    end
+
+    test "receivables: who owes what, and what is overdue", ctx do
+      paid_up = customer_fixture()
+      sale = credit!(ctx.user, ctx.customer, "30000")
+      credit!(ctx.user, ctx.customer, "20000")
+      credit!(ctx.user, paid_up, "5000")
+
+      {:ok, _} =
+        Customers.receive_payment(ctx.user, paid_up.id, %{
+          "amount" => "5000",
+          "payment_method" => "cash"
+        })
+
+      Zahlungs.Repo.update_all(
+        from(s in Zahlungs.Sales.Sale, where: s.id == ^sale.id),
+        set: [due_date: Date.add(LocalTime.today(default_store()), -3)]
+      )
+
+      report = Customers.receivables_report()
+      row = Enum.find(report.rows, &(&1.customer.id == ctx.customer.id))
+
+      assert Decimal.equal?(row.balance, d("50000"))
+      assert Decimal.equal?(row.overdue, d("30000"))
+      assert row.oldest_open.id == sale.id
+      refute Enum.any?(report.rows, &(&1.customer.id == paid_up.id))
+      assert Decimal.compare(report.total, d("50000")) in [:gt, :eq]
+
+      overdue = Customers.receivables_report(overdue_only: true)
+      assert Enum.any?(overdue.rows, &(&1.customer.id == ctx.customer.id))
+    end
+
+    test "repayments by method and store", ctx do
+      credit!(ctx.user, ctx.customer, "50000")
+
+      for {amount, method} <- [{"10000", "cash"}, {"5000", "qris"}, {"2000", "cash"}] do
+        {:ok, _} =
+          Customers.receive_payment(ctx.user, ctx.customer.id, %{
+            "amount" => amount,
+            "payment_method" => method
+          })
+      end
+
+      today = LocalTime.today(default_store())
+      report = Customers.payments_report(store_scope(), today, today)
+
+      assert Decimal.equal?(report.total, d("17000"))
+      assert {"cash", cash} = List.keyfind(report.by_method, "cash", 0)
+      assert Decimal.equal?(cash, d("12000"))
+      assert [{name, amount}] = report.by_store
+      assert name == default_store().name
+      assert Decimal.equal?(amount, d("17000"))
+    end
+  end
 end
