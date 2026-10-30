@@ -14,7 +14,10 @@ defmodule Zahlungs.Shifts.CashMovement do
     "refund" => "out",
     # Cash taken from the drawer to top up a PPOB deposit account; recorded by
     # Zahlungs.Deposits.record_topup/3, not entered by hand.
-    "deposit_topup" => "out"
+    "deposit_topup" => "out",
+    # A customer's overpayment handed back in cash; recorded by
+    # Zahlungs.Customers.refund_overpayment/3, not entered by hand.
+    "customer_refund" => "out"
   }
 
   schema "cash_movements" do
@@ -26,6 +29,7 @@ defmodule Zahlungs.Shifts.CashMovement do
     belongs_to :shift, Zahlungs.Shifts.Shift
     belongs_to :user, Zahlungs.Accounts.User
     belongs_to :supplier, Zahlungs.Catalog.Supplier
+    belongs_to :customer, Zahlungs.Customers.Customer
 
     timestamps()
   end
@@ -39,7 +43,7 @@ defmodule Zahlungs.Shifts.CashMovement do
   @doc false
   def changeset(movement, attrs) do
     movement
-    |> cast(attrs, [:shift_id, :user_id, :supplier_id, :category, :amount, :note])
+    |> cast(attrs, [:shift_id, :user_id, :supplier_id, :customer_id, :category, :amount, :note])
     |> validate_required([:shift_id, :category, :amount])
     |> validate_inclusion(:category, categories())
     |> validate_number(:amount, greater_than: 0)

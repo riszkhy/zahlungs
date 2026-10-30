@@ -2,7 +2,8 @@ defmodule Zahlungs.Sales.Sale do
   use Ecto.Schema
   import Ecto.Changeset
 
-  @payment_methods ~w(cash qris card transfer)
+  # "credit" (piutang): amount_paid is the cash down payment, the rest is owed.
+  @payment_methods ~w(cash qris card transfer credit)
 
   schema "sales" do
     field :code, :string
@@ -20,12 +21,16 @@ defmodule Zahlungs.Sales.Sale do
     # Returned or voided after its shift was closed: still counts toward that
     # shift's (already reconciled) figures.
     field :adjusted_after_shift_close, :boolean, default: false
+    # Credit sales only: when the rest is due (store-local date).
+    field :due_date, :date
 
     belongs_to :user, Zahlungs.Accounts.User
     belongs_to :shift, Zahlungs.Shifts.Shift
     # Always the store of the shift the sale was recorded on.
     belongs_to :store, Zahlungs.Stores.Store
     belongs_to :voided_by, Zahlungs.Accounts.User
+    # Credit sales only: who owes the rest.
+    belongs_to :customer, Zahlungs.Customers.Customer
     has_many :items, Zahlungs.Sales.SaleItem
 
     timestamps()
@@ -49,7 +54,9 @@ defmodule Zahlungs.Sales.Sale do
       :amount_paid,
       :change_due,
       :status,
-      :payment_method
+      :payment_method,
+      :customer_id,
+      :due_date
     ])
     |> validate_required([
       :store_id,

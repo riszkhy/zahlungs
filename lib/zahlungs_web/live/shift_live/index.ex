@@ -58,6 +58,7 @@ defmodule ZahlungsWeb.ShiftLive.Index do
   defp payment_label("qris"), do: "QRIS"
   defp payment_label("card"), do: "Kartu"
   defp payment_label("transfer"), do: "Transfer"
+  defp payment_label("credit"), do: "Piutang"
   defp payment_label(other), do: other
 
   defp movement_label("expense"), do: "Pengeluaran"
@@ -66,6 +67,7 @@ defmodule ZahlungsWeb.ShiftLive.Index do
   defp movement_label("consignment_payment"), do: "Bayar konsinyasi"
   defp movement_label("deposit_topup"), do: "Isi deposit"
   defp movement_label("refund"), do: "Refund retur"
+  defp movement_label("customer_refund"), do: "Kembalikan kelebihan"
   defp movement_label(other), do: other
 
   @impl true

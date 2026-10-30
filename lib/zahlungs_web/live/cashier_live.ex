@@ -672,8 +672,10 @@ defmodule ZahlungsWeb.CashierLive do
     ]
   end
 
-  # Refunds are booked by Sales.return_sale/2, so they are not in the options above.
+  # Refunds are booked by Sales.return_sale/2 and Customers.refund_overpayment/3,
+  # so they are not in the options above.
   defp movement_label("refund"), do: "Refund retur"
+  defp movement_label("customer_refund"), do: "Kembalikan kelebihan"
 
   defp movement_label(category) do
     movement_category_options()
