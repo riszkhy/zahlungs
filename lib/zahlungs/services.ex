@@ -55,6 +55,7 @@ defmodule Zahlungs.Services do
     Product
     |> where([p], is_nil(p.deleted_at))
     |> filter(:category, opts[:category])
+    |> filter(:operator, opts[:operator])
     |> filter(:active, opts[:active])
     |> order_by([p], p.name)
     |> Repo.all()
@@ -63,6 +64,12 @@ defmodule Zahlungs.Services do
   defp filter(query, _field, nil), do: query
   defp filter(query, _field, ""), do: query
   defp filter(query, :category, category), do: where(query, [p], p.category == ^category)
+
+  # "other": pulsa and paket data without a brand (token PLN and bills have none).
+  defp filter(query, :operator, "other"),
+    do: where(query, [p], is_nil(p.operator) and p.category in ["pulsa", "paket_data"])
+
+  defp filter(query, :operator, operator), do: where(query, [p], p.operator == ^operator)
   defp filter(query, :active, active), do: where(query, [p], p.active == ^active)
 
   @doc "Gets a product that isn't deleted (raises otherwise)."

@@ -17,7 +17,7 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
   def mount(_params, _session, socket) do
     {:ok,
      socket
-     |> assign(page_title: "Produk layanan", category: "")
+     |> assign(page_title: "Produk layanan", category: "", operator: "")
      |> assign(catalog_account: Services.catalog_account(), catalog: [], price_rows: nil)
      |> load_products()}
   end
@@ -39,8 +39,11 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
   end
 
   @impl true
-  def handle_event("filter", %{"category" => category}, socket) do
-    {:noreply, socket |> assign(:category, category) |> load_products()}
+  # Token PLN and bills have no operator: choosing one of them drops the
+  # operator filter.
+  def handle_event("filter", %{"category" => category} = params, socket) do
+    operator = if operator_filter?(category), do: params["operator"] || "", else: ""
+    {:noreply, socket |> assign(category: category, operator: operator) |> load_products()}
   end
 
   def handle_event("validate", %{"product" => params}, socket) do
@@ -160,7 +163,14 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
   defp valid_numbers?(_product), do: false
 
   defp load_products(socket) do
-    assign(socket, :products, Services.list_products(category: socket.assigns.category))
+    assign(
+      socket,
+      :products,
+      Services.list_products(
+        category: socket.assigns.category,
+        operator: socket.assigns.operator
+      )
+    )
   end
 
   defp bill_form?(form), do: Ecto.Changeset.get_field(form.source, :category) == "tagihan"
@@ -168,6 +178,14 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
 
   defp brand_form?(form),
     do: Ecto.Changeset.get_field(form.source, :category) in ~w(pulsa paket_data)
+
+  defp operator_filter?(category), do: category in ["", "pulsa", "paket_data"]
+
+  defp category_label(%Product{category: category, operator: operator})
+       when is_binary(operator),
+       do: "#{category_label(category)} · #{Brand.label(operator)}"
+
+  defp category_label(%Product{category: category}), do: category_label(category)
 
   defp category_label(category) do
     Enum.find_value(Services.categories(), category, fn {value, label} ->
@@ -231,18 +249,25 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
       </div>
     </section>
 
-    <form phx-change="filter" class="mt-6">
+    <form phx-change="filter" class="mt-6 flex flex-wrap gap-2">
       <select name="category" class="form-control max-w-xs" aria-label="Kategori">
         <option value="" selected={@category == ""}>Semua kategori</option>
         <option :for={{value, label} <- Services.categories()} value={value} selected={@category == value}>
           {label}
         </option>
       </select>
+      <select :if={operator_filter?(@category)} name="operator" class="form-control max-w-xs" aria-label="Operator">
+        <option value="" selected={@operator == ""}>Semua operator</option>
+        <option :for={{label, key} <- Brand.options()} value={key} selected={@operator == key}>
+          {label}
+        </option>
+        <option value="other" selected={@operator == "other"}>Lainnya (tanpa operator)</option>
+      </select>
     </form>
 
     <.table id="service-products" rows={@products}>
       <:col :let={product} label="Nama">{product.name}</:col>
-      <:col :let={product} label="Kategori">{category_label(product.category)}</:col>
+      <:col :let={product} label="Kategori">{category_label(product)}</:col>
       <:col :let={product} label="Modal">{format_money(product.cost)}</:col>
       <:col :let={product} label="Margin">{margin_label(product)}</:col>
       <:col :let={product} label="Harga">{price_label(product)}</:col>

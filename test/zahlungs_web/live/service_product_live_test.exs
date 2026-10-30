@@ -65,6 +65,35 @@ defmodule ZahlungsWeb.ServiceProductLiveTest do
       refute product.id in ids(socket)
     end
 
+    test "filters by operator, and shows each product's", %{product: product, admin: admin} do
+      tsel = service_product_fixture(%{operator: "telkomsel"})
+      socket = mount_live(ServiceProductLive.Index, admin)
+
+      rendered = html(socket)
+      assert rendered =~ ~s(name="operator")
+      assert rendered =~ "Semua operator"
+      assert rendered =~ "Pulsa · Telkomsel"
+
+      socket = event(socket, "filter", %{"category" => "", "operator" => "telkomsel"})
+      assert tsel.id in ids(socket)
+      refute product.id in ids(socket)
+
+      socket = event(socket, "filter", %{"category" => "pulsa", "operator" => "other"})
+      assert product.id in ids(socket)
+      refute tsel.id in ids(socket)
+    end
+
+    test "token PLN and tagihan have no operator to filter by", %{admin: admin} do
+      socket =
+        ServiceProductLive.Index
+        |> mount_live(admin)
+        |> event("filter", %{"category" => "pulsa", "operator" => "telkomsel"})
+        |> event("filter", %{"category" => "tagihan", "operator" => "telkomsel"})
+
+      assert socket.assigns.operator == ""
+      refute html(socket) =~ ~s(name="operator")
+    end
+
     test "deleting hides a product", %{product: product, admin: admin} do
       socket =
         ServiceProductLive.Index |> mount_live(admin) |> event("delete", %{"id" => product.id})

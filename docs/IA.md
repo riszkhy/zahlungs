@@ -264,6 +264,9 @@ Kelola user (admin):
 - Shift tidak bisa ditutup selama masih ada layanan *diproses*.
 - **/admin/services**, **/admin/deposits**, **/reports/services**: admin saja.
   Form toko memilih akun deposit yang dipakai toko itu.
+- Daftar produk layanan bisa disaring per kategori dan per operator (untuk
+  pulsa/paket data; "Lainnya" = pulsa/paket data tanpa operator). Kolom
+  Kategori menampilkan operatornya, mis. "Pulsa · Telkomsel".
 - Produk layanan punya "Pembulatan harga" (tidak / ke atas 100 / 500 /
   1.000): harga ke pelanggan, termasuk total tagihan, dibulatkan ke atas;
   modal tidak, selisihnya masuk margin.

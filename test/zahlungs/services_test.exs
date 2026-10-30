@@ -483,6 +483,29 @@ defmodule Zahlungs.ServicesTest do
   end
 
   describe "products" do
+    test "list_products/1 filters by operator; other is pulsa and paket data without one" do
+      tsel = service_product_fixture(%{operator: "telkomsel"})
+      tri = service_product_fixture(%{operator: "tri"})
+      none = service_product_fixture()
+      data = service_product_fixture(%{category: "paket_data"})
+      token = service_product_fixture(%{category: "token_pln"})
+
+      ids = fn opts -> opts |> Services.list_products() |> Enum.map(& &1.id) end
+
+      assert tsel.id in ids.(operator: "telkomsel")
+      refute tri.id in ids.(operator: "telkomsel")
+      refute none.id in ids.(operator: "telkomsel")
+
+      other = ids.(operator: "other")
+      assert none.id in other and data.id in other
+      refute tsel.id in other
+      refute token.id in other
+
+      assert ids.(category: "paket_data", operator: "other") |> Enum.member?(data.id)
+      refute ids.(category: "pulsa", operator: "other") |> Enum.member?(data.id)
+      assert tsel.id in ids.(operator: "")
+    end
+
     test "validates the category, the margin and the cost" do
       assert {:error, changeset} =
                Services.create_product(%{name: "X", category: "game", cost: "1"})
