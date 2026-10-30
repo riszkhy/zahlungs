@@ -174,8 +174,11 @@ defmodule Zahlungs.Sales do
     |> insert_items_and_decrement_stock(items)
     |> Repo.transaction()
     |> case do
-      {:ok, %{sale: sale}} -> {:ok, Repo.preload(sale, [:user, :store, items: :product])}
-      {:error, _step, reason, _changes} -> {:error, reason}
+      {:ok, %{sale: sale}} ->
+        {:ok, Repo.preload(sale, [:user, :store, :customer, items: :product])}
+
+      {:error, _step, reason, _changes} ->
+        {:error, reason}
     end
   end
 
@@ -460,7 +463,7 @@ defmodule Zahlungs.Sales do
     Sale
     |> for_store(scope)
     |> Repo.get!(id)
-    |> Repo.preload([:user, :store, items: :product])
+    |> Repo.preload([:user, :store, :customer, items: :product])
   end
 
   @doc "Returns `%{count: integer, total: Decimal}` for sales recorded today (shop-local)."

@@ -315,10 +315,10 @@ defmodule Zahlungs.CustomersTest do
       assert {sale_a.status, sale_b.status} == {:paid, :open}
 
       assert Enum.map(payment.settles, &{&1.code, Decimal.to_integer(&1.remaining)}) ==
-               [{a.code, 0}, {b.code, 10000}]
+               [{a.code, 0}, {b.code, 10_000}]
 
       assert Enum.map([sale_a, sale_b, payment], &Decimal.to_integer(&1.balance)) ==
-               [30000, 50000, 10000]
+               [30_000, 50_000, 10_000]
     end
 
     test "overdue uses the store's local date", ctx do

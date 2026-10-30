@@ -596,6 +596,7 @@ defmodule ZahlungsWeb.CoreComponents do
   identical.
   """
   attr :sale, :any, required: true
+  attr :customer_balance, :any, default: nil, doc: "what a credit sale's customer owes in all"
 
   def sale_receipt(assigns) do
     ~H"""
@@ -628,8 +629,24 @@ defmodule ZahlungsWeb.CoreComponents do
       <div class="flex justify-between"><dt>Discount</dt><dd>{format_money(@sale.discount)}</dd></div>
       <div class="flex justify-between"><dt>Tax</dt><dd>{format_money(@sale.tax)}</dd></div>
       <div class="flex justify-between font-semibold"><dt>Total</dt><dd>{format_money(@sale.total)}</dd></div>
-      <div class="flex justify-between"><dt>Paid</dt><dd>{format_money(@sale.amount_paid)}</dd></div>
-      <div class="flex justify-between"><dt>Change</dt><dd>{format_money(@sale.change_due)}</dd></div>
+      <%= if @sale.payment_method == "credit" do %>
+        <div :if={match?(%{name: _}, @sale.customer)} class="flex justify-between">
+          <dt>Pelanggan</dt><dd>{@sale.customer.name}</dd>
+        </div>
+        <div class="flex justify-between"><dt>Uang muka</dt><dd>{format_money(@sale.amount_paid)}</dd></div>
+        <div class="flex justify-between font-semibold">
+          <dt>Sisa utang nota ini</dt><dd>{format_money(Decimal.sub(@sale.total, @sale.amount_paid))}</dd>
+        </div>
+        <div :if={@sale.due_date} class="flex justify-between">
+          <dt>Jatuh tempo</dt><dd>{Calendar.strftime(@sale.due_date, "%d/%m/%Y")}</dd>
+        </div>
+        <div :if={@customer_balance} class="flex justify-between">
+          <dt>Total utang</dt><dd>{format_money(@customer_balance)}</dd>
+        </div>
+      <% else %>
+        <div class="flex justify-between"><dt>Paid</dt><dd>{format_money(@sale.amount_paid)}</dd></div>
+        <div class="flex justify-between"><dt>Change</dt><dd>{format_money(@sale.change_due)}</dd></div>
+      <% end %>
     </dl>
     """
   end

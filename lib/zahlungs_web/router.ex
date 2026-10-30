@@ -85,6 +85,7 @@ defmodule ZahlungsWeb.Router do
 
     get "/sales/:id/receipt", ReceiptController, :show
     get "/services/:id/receipt", ServiceReceiptController, :show
+    get "/customer_payments/:id/receipt", CustomerPaymentReceiptController, :show
 
     get "/users/settings", UserSettingsController, :edit
     put "/users/settings", UserSettingsController, :update

@@ -13,6 +13,9 @@ defmodule ZahlungsWeb.ReceiptController do
     conn
     |> put_root_layout(html: false)
     |> put_layout(html: false)
-    |> render(:show, sale: sale)
+    |> render(:show,
+      sale: sale,
+      customer_balance: sale.customer_id && Zahlungs.Customers.balance(sale.customer_id)
+    )
   end
 end

@@ -5,13 +5,23 @@ defmodule ZahlungsWeb.CashierLive do
   """
   use ZahlungsWeb, :live_view
 
-  alias Zahlungs.{Catalog, HeldCarts, LocalTime, Sales, Shifts}
+  alias Zahlungs.{Catalog, Customers, HeldCarts, LocalTime, Sales, Shifts}
 
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
      socket
-     |> assign(page_title: "Cashier", last_sale: nil, scanning: false)
+     |> assign(page_title: "Cashier", last_sale: nil, last_sale_balance: nil, scanning: false)
+     |> assign(credit_query: "", credit_results: [])
+     |> assign(
+       receivable_open: false,
+       receivable_query: "",
+       receivable_results: [],
+       receivable_customer: nil,
+       receivable_balance: nil,
+       receivable_notes: [],
+       last_payment: nil
+     )
      |> assign(category_id: nil, cart_open: false, held_open: false, held: [])
      |> assign(:category_options, Zahlungs.Catalog.category_options())
      |> assign(opening_cash: "", closing: false, counted_cash: "", close_note: "", summary: nil)
@@ -353,8 +363,97 @@ defmodule ZahlungsWeb.CashierLive do
   end
 
   def handle_event("set_payment_method", %{"method" => method}, socket)
-      when method in ~w(cash qris card transfer) do
+      when method in ~w(cash qris card transfer credit) do
     {:noreply, socket |> assign(:payment_method, method) |> assign_totals()}
+  end
+
+  # Piutang: the customer who owes the rest of this sale.
+  def handle_event("credit_search", %{"q" => q}, socket) do
+    {:noreply,
+     assign(socket, credit_query: q, credit_results: find_customers(q, active_only: true))}
+  end
+
+  def handle_event("credit_pick", %{"id" => id}, socket) do
+    {:noreply, socket |> pick_credit_customer(Customers.get_customer!(id)) |> assign_totals()}
+  end
+
+  def handle_event("credit_new", params, socket) do
+    attrs = %{"name" => params["name"] || "", "phone" => params["phone"]}
+
+    case Customers.create_customer(socket.assigns.current_user, attrs) do
+      {:ok, customer} ->
+        {:noreply,
+         socket
+         |> pick_credit_customer(customer)
+         |> assign_totals()
+         |> put_flash(:info, "Pelanggan ditambahkan. Limit piutang diatur admin.")}
+
+      {:error, _changeset} ->
+        {:noreply, put_flash(socket, :error, "Nama kosong atau sudah dipakai pelanggan lain.")}
+    end
+  end
+
+  def handle_event("credit_clear", _params, socket) do
+    {:noreply, socket |> assign(credit_customer: nil, credit_available: nil) |> assign_totals()}
+  end
+
+  def handle_event("credit_fields", params, socket) do
+    {:noreply,
+     socket
+     |> assign(
+       down_payment: strip_money(params["down_payment"] || ""),
+       due_date: params["due_date"] || socket.assigns.due_date
+     )
+     |> assign_totals()}
+  end
+
+  # Piutang: repayments, taken on this shift whatever store the debt is from.
+  def handle_event("toggle_receivable", _params, socket) do
+    {:noreply,
+     assign(socket,
+       receivable_open: not socket.assigns.receivable_open,
+       receivable_query: "",
+       receivable_results: [],
+       receivable_customer: nil,
+       last_payment: nil
+     )}
+  end
+
+  def handle_event("receivable_search", %{"q" => q}, socket) do
+    {:noreply, assign(socket, receivable_query: q, receivable_results: find_customers(q, []))}
+  end
+
+  def handle_event("receivable_pick", %{"id" => id}, socket) do
+    {:noreply,
+     socket
+     |> assign(receivable_results: [], last_payment: nil)
+     |> load_receivable(Customers.get_customer!(id))}
+  end
+
+  def handle_event("receive_payment", params, socket) do
+    customer = socket.assigns.receivable_customer
+
+    attrs =
+      Map.take(params, ["amount", "payment_method", "note"])
+      |> Map.update("amount", "", &strip_money/1)
+
+    case Customers.receive_payment(socket.assigns.current_user, customer.id, attrs) do
+      {:ok, payment} ->
+        {:noreply,
+         socket
+         |> assign(:last_payment, payment)
+         |> load_receivable(customer)
+         |> put_flash(:info, "Pelunasan #{format_money(payment.amount)} diterima.")}
+
+      {:error, :no_open_shift} ->
+        {:noreply, socket |> refresh_shift() |> put_flash(:error, error_message(:no_open_shift))}
+
+      {:error, %Ecto.Changeset{}} ->
+        {:noreply, put_flash(socket, :error, "Isi jumlah dan cara bayar yang benar.")}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, error_message(reason))}
+    end
   end
 
   def handle_event("payment", params, socket) do
@@ -378,11 +477,22 @@ defmodule ZahlungsWeb.CashierLive do
       payment_method: socket.assigns.payment_method
     }
 
+    payment =
+      if socket.assigns.payment_method == "credit",
+        do:
+          Map.merge(payment, %{
+            amount_paid: socket.assigns.down_payment,
+            customer_id: socket.assigns.credit_customer && socket.assigns.credit_customer.id,
+            due_date: socket.assigns.due_date
+          }),
+        else: payment
+
     case Sales.create_sale(socket.assigns.current_user, cart, payment) do
       {:ok, sale} ->
         {:noreply,
          socket
          |> assign(:last_sale, sale)
+         |> assign(:last_sale_balance, sale.customer_id && Customers.balance(sale.customer_id))
          |> reset_cart()
          |> push_event("reset_amount_paid", %{})
          |> put_flash(:info, "Sale #{sale.code} completed.")}
@@ -571,10 +681,48 @@ defmodule ZahlungsWeb.CashierLive do
       tax: "",
       amount_paid: "",
       payment_method: "cash",
-      search: ""
+      search: "",
+      credit_customer: nil,
+      credit_available: nil,
+      down_payment: "",
+      due_date: default_due_date(socket)
     )
     |> assign_totals()
     |> load_products()
+  end
+
+  # A credit note is due in 30 days unless the cashier changes it, counted in
+  # the open shift's store.
+  defp default_due_date(socket) do
+    socket.assigns.sale_scope.store
+    |> LocalTime.today()
+    |> Date.add(30)
+    |> Date.to_iso8601()
+  end
+
+  defp find_customers(q, opts) do
+    if String.trim(q) == "",
+      do: [],
+      else: q |> then(&Customers.list_customers([q: &1] ++ opts)) |> Enum.take(8)
+  end
+
+  defp pick_credit_customer(socket, customer) do
+    assign(socket,
+      credit_customer: customer,
+      credit_available: Customers.available_credit(customer),
+      credit_query: "",
+      credit_results: []
+    )
+  end
+
+  defp load_receivable(socket, customer) do
+    balance = Customers.balance(customer)
+
+    assign(socket,
+      receivable_customer: customer,
+      receivable_balance: balance,
+      receivable_notes: Customers.open_notes(customer)
+    )
   end
 
   @banknotes [5_000, 10_000, 20_000, 50_000, 100_000]
@@ -599,16 +747,45 @@ defmodule ZahlungsWeb.CashierLive do
     paid_ok = not cash? or not Decimal.lt?(paid, total)
 
     amount_error = amount_error(subtotal, discount, tax)
+    credit? = socket.assigns.payment_method == "credit"
+    credit_error = if credit?, do: credit_error(socket.assigns, total)
 
     assign(socket,
       subtotal: subtotal,
       total: total,
       change_due: change,
       amount_error: amount_error,
+      credit_error: credit_error,
       can_checkout:
         socket.assigns[:shift] != nil and socket.assigns.cart != [] and is_nil(amount_error) and
-          paid_ok
+          paid_ok and credit_ok?(credit?, socket.assigns.credit_customer, credit_error)
     )
+  end
+
+  defp credit_ok?(false, _customer, _error), do: true
+  defp credit_ok?(true, customer, error), do: customer != nil and is_nil(error)
+
+  # Same rules Sales.create_sale/3 and Customers.lock_for_credit/2 enforce for
+  # a credit sale; shown inline so the cashier knows why it can't be completed.
+  defp credit_error(%{credit_customer: nil}, _total), do: nil
+
+  defp credit_error(assigns, total) do
+    down_payment = to_dec(assigns.down_payment)
+    debt = Decimal.sub(total, down_payment)
+
+    cond do
+      not assigns.credit_customer.active ->
+        "Pelanggan nonaktif."
+
+      Decimal.negative?(down_payment) or not Decimal.lt?(down_payment, total) ->
+        error_message(:down_payment_too_high)
+
+      Decimal.gt?(debt, assigns.credit_available) ->
+        "Melebihi limit piutang #{format_money(Decimal.max(assigns.credit_available, 0))}."
+
+      true ->
+        nil
+    end
   end
 
   # Same rules Sales.create_sale/3 enforces; shown inline so the cashier knows
@@ -651,6 +828,16 @@ defmodule ZahlungsWeb.CashierLive do
   defp error_message(:invalid_tax), do: "Pajak tidak boleh negatif."
   defp error_message(:no_open_shift), do: "Shift belum dibuka atau sudah ditutup."
   defp error_message({:insufficient_stock, name}), do: "Insufficient stock for #{name}."
+  defp error_message(:over_credit_limit), do: "Melebihi limit piutang pelanggan."
+  defp error_message(:customer_inactive), do: "Pelanggan nonaktif."
+  defp error_message(:customer_required), do: "Pilih pelanggan dulu."
+
+  defp error_message(:down_payment_too_high),
+    do: "Uang muka harus kurang dari total; pakai bayar tunai."
+
+  defp error_message(:invalid_due_date), do: "Jatuh tempo tidak boleh sebelum hari ini."
+  defp error_message(:over_balance), do: "Melebihi sisa utang."
+  defp error_message(:not_found), do: "Pelanggan tidak ditemukan."
   defp error_message(_), do: "Could not complete the sale."
 
   # The MoneyInput hook submits a thousands-formatted string (e.g. "100.000");
@@ -690,8 +877,21 @@ defmodule ZahlungsWeb.CashierLive do
   defp movement_sign(_), do: "−"
 
   defp payment_method_options do
-    [{"cash", "Tunai"}, {"qris", "QRIS"}, {"card", "Kartu"}, {"transfer", "Transfer"}]
+    [
+      {"cash", "Tunai"},
+      {"qris", "QRIS"},
+      {"card", "Kartu"},
+      {"transfer", "Transfer"},
+      {"credit", "Piutang"}
+    ]
   end
+
+  # Sales take cash or credit only (QRIS/Kartu/Transfer are switched off at the
+  # cashier); repayments may come in any of the four.
+  defp sale_method?(method), do: method in ~w(cash credit)
+
+  defp repayment_method_options,
+    do: Enum.reject(payment_method_options(), &(elem(&1, 0) == "credit"))
 
   defp payment_method_label(method) do
     payment_method_options()
@@ -781,6 +981,78 @@ defmodule ZahlungsWeb.CashierLive do
     <div :if={@shift} class="mt-4 grid grid-cols-1 gap-6 lg:grid-cols-5 md:landscape:grid-cols-5">
       <%!-- Product search + tiles --%>
       <div class="pb-24 lg:col-span-3 lg:pb-0 md:landscape:col-span-3 md:landscape:pb-0">
+        <%!-- Piutang: a customer repays (part of) what they owe, into this shift. --%>
+        <div class="mb-3">
+          <button type="button" phx-click="toggle_receivable" class={["chip", @receivable_open && "chip-active"]}>
+            Piutang
+          </button>
+          <div :if={@receivable_open} id="receivable-panel" class="mt-2 rounded-lg border border-gray-200 p-3 text-sm">
+            <form phx-change="receivable_search" phx-submit="receivable_search">
+              <input type="search" name="q" value={@receivable_query} placeholder="Cari pelanggan (nama / no HP)" phx-debounce="250" autocomplete="off" class="form-control" />
+            </form>
+            <div :if={@receivable_results != []} class="mt-1 divide-y divide-gray-100 rounded border border-gray-200">
+              <button
+                :for={c <- @receivable_results}
+                type="button"
+                phx-click={JS.push("receivable_pick", value: %{id: c.id})}
+                class="block w-full px-2 py-1.5 text-left hover:bg-gray-50"
+              >
+                {c.name} <span class="text-xs text-gray-500">{c.phone}</span>
+              </button>
+            </div>
+
+            <div :if={@receivable_customer} class="mt-3">
+              <div class="flex items-baseline justify-between">
+                <p class="font-semibold">{@receivable_customer.name}</p>
+                <p>
+                  {if Decimal.negative?(@receivable_balance), do: "Lebih bayar", else: "Sisa utang"}
+                  <span class="font-semibold">{format_money(Decimal.abs(@receivable_balance))}</span>
+                </p>
+              </div>
+              <ul :if={@receivable_notes != []} class="mt-2 space-y-1 text-xs">
+                <li :for={note <- @receivable_notes} class="flex justify-between">
+                  <span>
+                    {note.sale.code} · jatuh tempo {note.sale.due_date && Calendar.strftime(note.sale.due_date, "%d/%m/%Y")}
+                  </span>
+                  <span class={note.overdue? && "font-semibold text-red-700"}>
+                    {format_money(note.remaining)}{if note.overdue?, do: " · lewat"}
+                  </span>
+                </li>
+              </ul>
+              <form
+                :if={Decimal.gt?(@receivable_balance, 0)}
+                id="receive-payment-form"
+                phx-submit="receive_payment"
+                class="mt-3 grid grid-cols-2 gap-2"
+              >
+                <label class="text-xs">
+                  Jumlah
+                  <input
+                    type="text"
+                    name="amount"
+                    inputmode="numeric"
+                    value={Decimal.to_string(Decimal.round(@receivable_balance, 0, :down), :normal)}
+                    class="form-control"
+                  />
+                </label>
+                <label class="text-xs">
+                  Cara bayar
+                  <select name="payment_method" class="form-control">
+                    <option :for={{value, label} <- repayment_method_options()} value={value}>{label}</option>
+                  </select>
+                </label>
+                <input type="text" name="note" maxlength="255" placeholder="Catatan (opsional)" class="form-control col-span-2" />
+                <.button class="col-span-2">Terima pelunasan</.button>
+              </form>
+              <p :if={@last_payment} class="mt-2 text-xs">
+                <.link href={~p"/customer_payments/#{@last_payment.id}/receipt"} target="_blank" class="text-green-700 hover:underline">
+                  Cetak struk pelunasan
+                </.link>
+              </p>
+            </div>
+          </div>
+        </div>
+
         <%!-- Carts put aside in this store (Tunda), to resume from any tablet. --%>
         <div :if={@held_count > 0} class="mb-3">
           <button type="button" phx-click="toggle_held" class={["chip", @held_open && "chip-active"]}>
@@ -930,17 +1202,17 @@ defmodule ZahlungsWeb.CashierLive do
 
         <div class="mt-3">
           <span class="text-sm">Payment method</span>
-          <div class="mt-1 grid grid-cols-4 gap-2">
+          <div class="mt-1 grid grid-cols-5 gap-1">
             <button
               :for={{value, label} <- payment_method_options()}
               type="button"
-              disabled={value != "cash"}
-              phx-click={value == "cash" && JS.push("set_payment_method", value: %{method: value})}
+              disabled={not sale_method?(value)}
+              phx-click={sale_method?(value) && JS.push("set_payment_method", value: %{method: value})}
               class={[
                 "text-sm py-1.5 rounded border",
                 (@payment_method == value && "bg-green-700 text-white border-green-700") ||
                   "bg-white text-gray-700 border-gray-300 hover:border-green-500",
-                value != "cash" && "opacity-40 cursor-not-allowed hover:border-gray-300"
+                not sale_method?(value) && "opacity-40 cursor-not-allowed hover:border-gray-300"
               ]}
             >
               {label}
@@ -979,14 +1251,67 @@ defmodule ZahlungsWeb.CashierLive do
             {format_money(amount)}
           </button>
         </div>
-        <p :if={@payment_method != "cash"} class="text-sm text-gray-500 mt-2">
+        <p :if={@payment_method not in ["cash", "credit"]} class="text-sm text-gray-500 mt-2">
           Dibayar pas sejumlah total ({payment_method_label(@payment_method)}).
         </p>
+
+        <%!-- Piutang: who owes the rest, how much is paid now, and when the rest is due. --%>
+        <div :if={@payment_method == "credit"} id="credit-panel" class="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">
+          <%= if @credit_customer do %>
+            <div class="flex items-start justify-between gap-2">
+              <div>
+                <p class="font-semibold">{@credit_customer.name}</p>
+                <p class="text-xs text-gray-600">
+                  Utang {format_money(Decimal.sub(@credit_customer.credit_limit, @credit_available))} · Limit {format_money(@credit_customer.credit_limit)} · Sisa limit {format_money(Decimal.max(@credit_available, 0))}
+                </p>
+              </div>
+              <button type="button" phx-click="credit_clear" class="chip-sm">Ganti</button>
+            </div>
+            <form phx-change="credit_fields" class="mt-2 grid grid-cols-2 gap-2">
+              <label class="text-xs">
+                Uang muka (tunai)
+                <input type="text" name="down_payment" value={@down_payment} inputmode="numeric" placeholder="0" class="form-control" />
+              </label>
+              <label class="text-xs">
+                Jatuh tempo
+                <input type="date" name="due_date" value={@due_date} class="form-control" />
+              </label>
+            </form>
+            <p :if={@credit_customer && Decimal.equal?(@credit_customer.credit_limit, 0)} class="mt-1 text-xs text-gray-600">
+              Limit piutang diatur admin.
+            </p>
+          <% else %>
+            <form phx-change="credit_search" phx-submit="credit_search">
+              <input type="search" name="q" value={@credit_query} placeholder="Cari pelanggan (nama / no HP)" phx-debounce="250" autocomplete="off" class="form-control" />
+            </form>
+            <div :if={@credit_results != []} class="mt-1 divide-y divide-amber-100 rounded border border-amber-200 bg-white">
+              <button
+                :for={c <- @credit_results}
+                type="button"
+                phx-click={JS.push("credit_pick", value: %{id: c.id})}
+                class="block w-full px-2 py-1.5 text-left hover:bg-amber-50"
+              >
+                {c.name} <span class="text-xs text-gray-500">{c.phone}</span>
+              </button>
+            </div>
+            <form phx-submit="credit_new" class="mt-2 flex flex-wrap gap-2">
+              <input type="text" name="name" maxlength="80" placeholder="Nama pelanggan baru" class="form-control flex-1" />
+              <input type="text" name="phone" maxlength="20" placeholder="No HP" inputmode="tel" class="form-control w-28" />
+              <button type="submit" class="chip-sm">+ Pelanggan baru</button>
+            </form>
+          <% end %>
+          <p :if={@credit_error && @cart != []} class="mt-2 text-sm text-red-600">{@credit_error}</p>
+        </div>
 
         <dl class="mt-4 space-y-1 text-sm border-t border-gray-200 pt-3">
           <.receipt_row label="Subtotal" value={format_money(@subtotal)} />
           <.receipt_row label="Total" value={format_money(@total)} bold />
           <.receipt_row :if={@payment_method == "cash"} label="Change" value={format_money(@change_due)} />
+          <.receipt_row
+            :if={@payment_method == "credit"}
+            label="Jadi utang"
+            value={format_money(Decimal.max(Decimal.sub(@total, to_dec(@down_payment)), 0))}
+          />
         </dl>
 
         <div class="mt-4">
@@ -1025,7 +1350,7 @@ defmodule ZahlungsWeb.CashierLive do
       <h3 class="text-lg font-semibold text-center">Transaction complete</h3>
       <p class="text-center text-sm text-gray-500">Receipt {@last_sale.code}</p>
 
-      <.sale_receipt sale={@last_sale} />
+      <.sale_receipt sale={@last_sale} customer_balance={@last_sale_balance} />
 
       <div class="mt-6 flex items-center justify-between gap-3">
         <.link href={~p"/sales/#{@last_sale.id}/receipt"} target="_blank" class="btn btn-sm btn-link">
@@ -1062,6 +1387,17 @@ defmodule ZahlungsWeb.CashierLive do
         </div>
         <div class="flex justify-between text-gray-500">
           <dt>Non-cash sales (QRIS/kartu/transfer)</dt><dd>{format_money(@summary.noncash_total)}</dd>
+        </div>
+        <div :if={Decimal.gt?(@summary.credit_total, 0)} class="flex justify-between">
+          <dt>Penjualan piutang (uang muka tunai {format_money(@summary.credit_down_payment)})</dt>
+          <dd>{format_money(@summary.credit_total)}</dd>
+        </div>
+        <div
+          :if={Decimal.gt?(Decimal.add(@summary.payments_cash, @summary.payments_noncash), 0)}
+          class="flex justify-between"
+        >
+          <dt>Pelunasan piutang (non-tunai {format_money(@summary.payments_noncash)})</dt>
+          <dd>tunai {format_money(@summary.payments_cash)}</dd>
         </div>
         <div :if={not Decimal.equal?(@summary.cash_in, Decimal.new(0))} class="flex justify-between text-green-700">
           <dt>Cash in (setoran/tambah modal)</dt><dd>+{format_money(@summary.cash_in)}</dd>

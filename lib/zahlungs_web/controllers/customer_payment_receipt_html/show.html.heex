@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pelunasan {@payment.customer.name}</title>
+    <style>
+      body { font-family: ui-monospace, "Courier New", monospace; max-width: 320px; margin: 16px auto; color: #111; padding: 0 12px; }
+      h1 { font-size: 16px; text-align: center; margin: 0 0 4px; }
+      .muted { color: #666; font-size: 11px; text-align: center; margin: 0 0 12px; line-height: 1.5; }
+      .line { border-top: 1px dashed #999; margin: 8px 0; }
+      .row { display: flex; justify-content: space-between; font-size: 12px; padding: 1px 0; }
+      .b { font-weight: bold; }
+      .cancelled { color: #b00020; font-weight: bold; text-align: center; margin-top: 8px; }
+      .foot { text-align: center; font-size: 11px; color: #666; margin-top: 12px; }
+      .noprint { text-align: center; margin-top: 16px; }
+      @media print { .noprint { display: none; } body { margin: 0; } }
+    </style>
+  </head>
+  <body>
+    <h1>{@payment.store.name}</h1>
+    <p class="muted">
+      PELUNASAN PIUTANG<br />
+      {Calendar.strftime(Zahlungs.LocalTime.to_local(@payment.inserted_at, @payment.store), "%d %b %Y %H:%M")}<br />
+      Kasir: {@payment.user && (@payment.user.name || @payment.user.email)}
+    </p>
+
+    <div class="line"></div>
+
+    <div class="row"><span>Pelanggan</span><span>{@payment.customer.name}</span></div>
+    <div :if={@entry && not @entry.cancelled?} class="row">
+      <span>Utang sebelum</span><span>{format_money(Decimal.add(@entry.balance, @payment.amount))}</span>
+    </div>
+    <div class="row b"><span>Dibayar</span><span>{format_money(@payment.amount)}</span></div>
+    <div class="row"><span>Cara bayar</span><span>{method_label(@payment.payment_method)}</span></div>
+    <div :if={@entry && not @entry.cancelled?} class="row b">
+      <span>Sisa utang</span><span>{format_money(@entry.balance)}</span>
+    </div>
+
+    <div :if={@entry && @entry.settles != []}>
+      <div class="line"></div>
+      <div :for={s <- @entry.settles} class="row">
+        <span>{s.code}</span>
+        <span>{if Decimal.equal?(s.remaining, 0), do: "LUNAS", else: "sisa " <> format_money(s.remaining)}</span>
+      </div>
+    </div>
+
+    <p :if={@payment.cancelled_at} class="cancelled">*** DIBATALKAN ***</p>
+
+    <p class="foot">Terima kasih</p>
+
+    <div class="noprint">
+      <button type="button" onclick="window.print()">Print</button>
+    </div>
+
+    <script>
+      window.addEventListener("load", function () { window.print(); });
+    </script>
+  </body>
+</html>

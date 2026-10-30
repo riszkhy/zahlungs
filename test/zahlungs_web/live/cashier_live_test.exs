@@ -706,4 +706,104 @@ defmodule ZahlungsWeb.CashierLiveTest do
       assert Shifts.current_shift(user)
     end
   end
+
+  describe "selling on credit" do
+    import Zahlungs.CustomersFixtures
+
+    alias Zahlungs.Customers
+
+    setup do
+      user = user_on_shift_fixture()
+      product = product_fixture(price: Decimal.new("40000"), stock: 10)
+      customer = customer_fixture(%{credit_limit: "50000"})
+
+      socket =
+        CashierLive
+        |> mount_live(user)
+        |> event("add", %{"id" => product.id})
+        |> event("set_payment_method", %{"method" => "credit"})
+
+      %{user: user, product: product, customer: customer, socket: socket}
+    end
+
+    test "pick a customer and complete the sale on credit", ctx do
+      socket =
+        ctx.socket
+        |> event("credit_search", %{"q" => ctx.customer.name})
+        |> event("credit_pick", %{"id" => ctx.customer.id})
+        |> event("credit_fields", %{
+          "down_payment" => "5000",
+          "due_date" => ctx.socket.assigns.due_date
+        })
+
+      assert socket.assigns.can_checkout
+      assert html(socket) =~ ctx.customer.name
+
+      socket = event(socket, "checkout")
+
+      assert %{payment_method: "credit", customer_id: customer_id} = socket.assigns.last_sale
+      assert customer_id == ctx.customer.id
+      assert Decimal.equal?(Customers.balance(ctx.customer), Decimal.new("35000"))
+      assert html(socket) =~ "Sisa utang nota ini"
+    end
+
+    test "over the limit, the sale is refused", ctx do
+      socket =
+        ctx.socket
+        |> event("inc", %{"id" => ctx.product.id})
+        |> event("credit_pick", %{"id" => ctx.customer.id})
+
+      refute socket.assigns.can_checkout
+      assert html(socket) =~ "Melebihi limit piutang"
+
+      socket = event(socket, "checkout")
+      assert flash(socket, :error) == "Melebihi limit piutang pelanggan."
+      assert socket.assigns.last_sale == nil
+    end
+
+    test "a new customer from the cashier gets no credit", ctx do
+      name = "Pak Baru #{System.unique_integer([:positive])}"
+      socket = event(ctx.socket, "credit_new", %{"name" => name, "phone" => "0813"})
+
+      assert flash(socket, :info) == "Pelanggan ditambahkan. Limit piutang diatur admin."
+      assert socket.assigns.credit_customer.name == name
+      assert Decimal.equal?(socket.assigns.credit_customer.credit_limit, Decimal.new(0))
+      refute socket.assigns.can_checkout
+    end
+
+    test "a repayment at the cashier", ctx do
+      {:ok, _} =
+        Sales.create_sale(ctx.user, [%{product_id: ctx.product.id, quantity: 1}], %{
+          payment_method: "credit",
+          customer_id: ctx.customer.id,
+          due_date: Date.add(Zahlungs.LocalTime.today(default_store()), 30)
+        })
+
+      socket =
+        CashierLive
+        |> mount_live(ctx.user)
+        |> event("toggle_receivable")
+        |> event("receivable_search", %{"q" => ctx.customer.name})
+        |> event("receivable_pick", %{"id" => ctx.customer.id})
+
+      assert html(socket) =~ "Rp 40.000,00"
+
+      socket =
+        event(socket, "receive_payment", %{
+          "amount" => "10000",
+          "payment_method" => "cash",
+          "note" => ""
+        })
+
+      assert flash(socket, :info) == "Pelunasan Rp 10.000,00 diterima."
+      assert Decimal.equal?(Customers.balance(ctx.customer), Decimal.new("30000"))
+      assert socket.assigns.last_payment
+      assert html(socket) =~ "/customer_payments/#{socket.assigns.last_payment.id}/receipt"
+
+      socket =
+        event(socket, "receive_payment", %{"amount" => "99999", "payment_method" => "cash"})
+
+      assert flash(socket, :error) == "Melebihi sisa utang."
+    end
+  end
 end

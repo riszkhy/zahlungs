@@ -34,7 +34,8 @@ Aturan akses berlapis (router):
 │   │     ├─ Gate: buka shift (modal awal) sebelum transaksi
 │   │     ├─ Banner shift: Catat kas · Close shift
 │   │     ├─ Cari produk / scan barcode (keyboard & kamera HP)
-│   │     ├─ Keranjang → metode bayar (Tunai; lainnya disabled) → Complete Sale
+│   │     ├─ Keranjang → metode bayar (Tunai / Piutang; lainnya disabled) → Complete Sale
+│   │     ├─ Piutang: cari pelanggan → sisa utang & nota → terima pelunasan
 │   │     └─ Modal struk: Print receipt · Koreksi/batalkan · New Transaction
 │   ├── /services               Layanan PPOB: catat pulsa/paket/token/tagihan (PLN, BPJS, PDAM…),
 │   │     │                     lalu tandai berhasil (token/SN) atau gagal
@@ -43,6 +44,7 @@ Aturan akses berlapis (router):
 │   ├── /sales                  Riwayat transaksi (filter tanggal, paginasi)
 │   │     └── /sales/:id        Detail + struk · Batalkan (koreksi) · Return (admin)
 │   │           └── /sales/:id/receipt   Struk versi cetak
+│   ├── /customer_payments/:id/receipt   Struk pelunasan piutang versi cetak
 │   ├── /shifts                 Riwayat shift (cashier: milik sendiri; admin: semua)
 │   │     └── /shifts/:id       Detail: rekonsiliasi, transaksi, gerakan kas
 │   └── /users/settings         Profil: ubah nama, email, password
@@ -56,6 +58,8 @@ Aturan akses berlapis (router):
     ├── /admin/stores/register  Daftar cabang: wizard 2 langkah (data toko, kasir pertama opsional)
     ├── /admin/logins           Riwayat login + lokasi (filter toko & user)
     ├── /admin/suppliers        Manajemen supplier/consignor (+ /new, /:id/edit)
+    ├── /admin/customers        Pelanggan piutang: utang, limit (+ /new, /:id/edit)
+    │     └── /admin/customers/:id   Kartu piutang: batalkan pelunasan, kembalikan kelebihan
     ├── /admin/services         Produk layanan PPOB: modal, margin Rp/% (+ /new, /:id/edit)
     ├── /admin/deposits         Akun deposit: perkiraan saldo, isi ulang, pencocokan
     │                           (+ /new, /:id, /:id/edit)
@@ -65,6 +69,8 @@ Aturan akses berlapis (router):
     ├── /reports/consignment    Settlement konsinyasi (payable/dibayar di rentang, sisa utang s.d. tanggal akhir
     │                           + sisa stok titipan per produk)
     ├── /reports/services       Laporan layanan (berhasil/gagal, nilai, modal, margin per kategori)
+    ├── /reports/receivables    Laporan piutang (utang per pelanggan, lewat jatuh tempo,
+    │                           pelunasan per cara bayar dan per toko)
     └── /dashboard              Phoenix LiveDashboard (dev/test saja)
 ```
 
@@ -108,8 +114,12 @@ Urutan link disesuaikan peran:
 4. **Pencarian produk** — teks / scan barcode (keyboard wedge & kamera HP);
    beep sukses/gagal
 5. **Keranjang** — qty ± , hapus baris, subtotal per baris
-6. **Pembayaran** — discount/tax, metode (Tunai aktif; QRIS/Kartu/Transfer
-   disabled), amount paid (format ribuan), kembalian
+6. **Pembayaran** — discount/tax, metode (Tunai dan Piutang aktif;
+   QRIS/Kartu/Transfer disabled), amount paid (format ribuan), kembalian.
+   **Piutang**: cari atau tambah pelanggan (pelanggan baru limit 0, limit
+   diatur admin), tampil utang, limit dan sisa limit; isi uang muka tunai
+   (boleh 0, harus kurang dari total) dan jatuh tempo (bawaan +30 hari).
+   Selesai hanya bila utang nota ini muat di sisa limit.
 7. **Modal struk** — ringkasan, print, koreksi/batalkan, transaksi baru
 8. **Modal tutup shift** — opening + cash sales + cash in − cash out =
    expected; hitung fisik → variance (preview berwarna); peringatan bila ada
@@ -120,6 +130,23 @@ Urutan link disesuaikan peran:
    toko itu, sekali saja; harga dan stok dibaca ulang (barang habis/terhapus
    dibuang, jumlah dipotong ke stok). Lanjutkan saat keranjang berisi:
    keranjang di layar ikut ditunda. Tidak mengubah stok, kas, maupun laporan.
+10. **Piutang (pelunasan)** — tombol di atas pencarian: cari pelanggan → sisa
+    utang dan nota belum lunas (jatuh tempo, lewat jatuh tempo merah) →
+    jumlah (bawaan: sisa utang, boleh sebagian), cara bayar (Tunai/QRIS/Kartu/
+    Transfer), catatan → **Terima pelunasan** → tautan struk pelunasan.
+    Pelunasan melunasi nota terlama dulu; tunai masuk laci shift ini, toko
+    mana pun asal utangnya.
+
+### Piutang (kasbon)
+- Nota piutang dihitung sebagai omzet di hari dijual; laci shift hanya
+  menerima uang mukanya. Tutup shift dan detail shift menampilkan "Penjualan
+  piutang" dan "Pelunasan piutang" (tunai / non-tunai).
+- Retur nota piutang (admin) mengembalikan uang muka saja; void mengikuti
+  aturan biasa. Pelunasan yang sudah masuk tetap: saldo bisa jadi **lebih
+  bayar**, yang mengurangi nota berikutnya atau dikembalikan admin
+  (*Kembalikan kelebihan*, kas keluar dari laci admin).
+- Pelunasan salah input dibatalkan admin (dengan alasan) selama shift
+  penerimanya masih terbuka.
 
 ### /sales — Riwayat
 - Tabel: code, tanggal, kasir, item, total, status (completed/returned/void)

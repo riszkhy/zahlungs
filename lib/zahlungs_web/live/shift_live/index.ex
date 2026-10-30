@@ -156,6 +156,17 @@ defmodule ZahlungsWeb.ShiftLive.Index do
         <div class="flex justify-between text-gray-500">
           <dt>Non-cash sales (QRIS/kartu/transfer)</dt><dd>{format_money(@summary.noncash_total)}</dd>
         </div>
+        <div :if={Decimal.gt?(@summary.credit_total, 0)} class="flex justify-between">
+          <dt>Penjualan piutang (uang muka tunai {format_money(@summary.credit_down_payment)})</dt>
+          <dd>{format_money(@summary.credit_total)}</dd>
+        </div>
+        <div
+          :if={Decimal.gt?(Decimal.add(@summary.payments_cash, @summary.payments_noncash), 0)}
+          class="flex justify-between"
+        >
+          <dt>Pelunasan piutang (non-tunai {format_money(@summary.payments_noncash)})</dt>
+          <dd>tunai {format_money(@summary.payments_cash)}</dd>
+        </div>
         <div :if={not Decimal.equal?(@summary.cash_in, Decimal.new(0))} class="flex justify-between text-green-700">
           <dt>Cash in</dt><dd>+{format_money(@summary.cash_in)}</dd>
         </div>

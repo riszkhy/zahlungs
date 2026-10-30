@@ -48,8 +48,23 @@
     <div class="row"><span>Discount</span><span>{format_money(@sale.discount)}</span></div>
     <div class="row"><span>Tax</span><span>{format_money(@sale.tax)}</span></div>
     <div class="row b"><span>Total</span><span>{format_money(@sale.total)}</span></div>
-    <div class="row"><span>Paid</span><span>{format_money(@sale.amount_paid)}</span></div>
-    <div class="row"><span>Change</span><span>{format_money(@sale.change_due)}</span></div>
+    <%= if @sale.payment_method == "credit" do %>
+      <div class="line"></div>
+      <div :if={@sale.customer} class="row"><span>Pelanggan</span><span>{@sale.customer.name}</span></div>
+      <div class="row"><span>Uang muka</span><span>{format_money(@sale.amount_paid)}</span></div>
+      <div class="row b">
+        <span>Sisa utang nota ini</span><span>{format_money(Decimal.sub(@sale.total, @sale.amount_paid))}</span>
+      </div>
+      <div :if={@sale.due_date} class="row">
+        <span>Jatuh tempo</span><span>{Calendar.strftime(@sale.due_date, "%d/%m/%Y")}</span>
+      </div>
+      <div :if={@customer_balance} class="row">
+        <span>Total utang</span><span>{format_money(@customer_balance)}</span>
+      </div>
+    <% else %>
+      <div class="row"><span>Paid</span><span>{format_money(@sale.amount_paid)}</span></div>
+      <div class="row"><span>Change</span><span>{format_money(@sale.change_due)}</span></div>
+    <% end %>
 
     <p :if={@sale.status == "returned"} class="returned">*** RETURNED / REFUNDED ***</p>
 
