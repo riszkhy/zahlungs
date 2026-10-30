@@ -190,6 +190,16 @@ defmodule ZahlungsWeb.CustomerLive.Show do
                 Batalkan
               </button>
             </form>
+          <% :cancel -> %>
+            <div class="flex justify-between gap-3">
+              <div>
+                <span class="font-medium">
+                  Nota {entry.sale.code} {if entry.sale.status == "void", do: "dibatalkan (void)", else: "diretur"}
+                </span>
+                · {local_time(entry.at, entry.sale.store)}
+              </div>
+              <div class="text-right">−{format_money(entry.amount)}</div>
+            </div>
           <% :refund -> %>
             <div class="flex justify-between gap-3">
               <div>

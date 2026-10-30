@@ -403,7 +403,7 @@ defmodule Zahlungs.CustomersTest do
 
       admin_shift = Shifts.current_shift(admin)
       assert Decimal.equal?(Shifts.expected_cash(admin_shift), d("-20000"))
-      assert [_, _, %{kind: :refund}] = Customers.ledger(ctx.customer)
+      assert [_, _, %{kind: :cancel}, %{kind: :refund}] = Customers.ledger(ctx.customer)
     end
 
     test "a credit sale returned after its shift closed refunds the down payment only", ctx do
@@ -473,6 +473,88 @@ defmodule Zahlungs.CustomersTest do
       assert [{name, amount}] = report.by_store
       assert name == default_store().name
       assert Decimal.equal?(amount, d("17000"))
+    end
+  end
+
+  describe "under concurrency and after the fact" do
+    setup do
+      user = user_on_shift_fixture()
+      %{user: user, customer: customer_fixture()}
+    end
+
+    # Under REPEATABLE READ a plain SELECT reads a snapshot taken at the
+    # transaction's first plain SELECT. Locking the customer before anything
+    # else is read makes the balance include what another tablet committed
+    # while this one waited for the lock.
+    defp queries_of(fun) do
+      test_pid = self()
+      handler = "queries-#{inspect(test_pid)}"
+
+      :telemetry.attach(
+        handler,
+        [:zahlungs, :repo, :query],
+        fn _event, _measure, meta, _ ->
+          if self() == test_pid, do: send(test_pid, {:query, meta.query})
+        end,
+        nil
+      )
+
+      try do
+        fun.()
+      after
+        :telemetry.detach(handler)
+      end
+
+      collect_queries()
+    end
+
+    defp locks_customer_first?(queries) do
+      lock = Enum.find_index(queries, &(&1 =~ "FROM `customers`" and &1 =~ "FOR UPDATE"))
+      shift = Enum.find_index(queries, &(&1 =~ "FROM `cashier_shifts`"))
+      lock != nil and shift != nil and lock < shift
+    end
+
+    test "the customer is locked before anything else is read", ctx do
+      assert ctx.user
+             |> credit!(ctx.customer, "1000")
+             |> then(fn _ -> queries_of(fn -> credit!(ctx.user, ctx.customer, "1000") end) end)
+             |> locks_customer_first?()
+
+      assert queries_of(fn ->
+               Customers.receive_payment(ctx.user, ctx.customer.id, %{"amount" => "500"})
+             end)
+             |> locks_customer_first?()
+
+      sale = credit!(ctx.user, ctx.customer, "3000")
+      {:ok, _} = Customers.receive_payment(ctx.user, ctx.customer.id, %{"amount" => "3500"})
+      {:ok, _} = Sales.return_sale(sale, admin())
+      admin = admin()
+      shift_fixture(admin)
+
+      assert queries_of(fn -> Customers.refund_overpayment(admin, ctx.customer.id, "1") end)
+             |> locks_customer_first?()
+    end
+
+    defp collect_queries(acc \\ []) do
+      receive do
+        {:query, query} -> collect_queries([query | acc])
+      after
+        0 -> Enum.reverse(acc)
+      end
+    end
+
+    test "a return keeps the balances the ledger showed before it", ctx do
+      sale = credit!(ctx.user, ctx.customer, "50000")
+      {:ok, _} = Customers.receive_payment(ctx.user, ctx.customer.id, %{"amount" => "20000"})
+      {:ok, _} = Sales.return_sale(sale, admin())
+
+      assert [note, payment, returned] = Customers.ledger(ctx.customer)
+      assert {note.kind, note.status} == {:sale, :cancelled}
+      assert Decimal.equal?(note.balance, d("50000"))
+      assert Decimal.equal?(payment.balance, d("30000"))
+      assert returned.kind == :cancel
+      assert Decimal.equal?(returned.amount, d("50000"))
+      assert Decimal.equal?(returned.balance, d("-20000"))
     end
   end
 end

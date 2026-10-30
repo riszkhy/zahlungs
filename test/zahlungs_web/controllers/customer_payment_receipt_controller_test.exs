@@ -63,4 +63,41 @@ defmodule ZahlungsWeb.CustomerPaymentReceiptControllerTest do
     assert response =~ "Sisa utang nota ini"
     assert response =~ "Jatuh tempo"
   end
+
+  test "a reprinted credit sale shows what was owed then, not now", ctx do
+    product = product_fixture(price: Decimal.new("10000"), stock: 10)
+
+    {:ok, _later} =
+      Sales.create_sale(ctx.user, [%{product_id: product.id, quantity: 1}], %{
+        payment_method: "credit",
+        customer_id: ctx.customer.id,
+        due_date: Date.add(LocalTime.today(default_store()), 30)
+      })
+
+    response =
+      ctx.conn
+      |> log_in_user(ctx.user)
+      |> get("/sales/#{ctx.sale.id}/receipt")
+      |> html_response(200)
+
+    # Owed right after this note: 50.000, not today's 40.000 (after the
+    # repayment and the later 10.000 note).
+    assert response =~ ~r/Total utang<\/span><span>Rp 50\.000,00/
+  end
+
+  test "a reprinted repayment after its note was returned shows the balances of then", ctx do
+    {:ok, admin} =
+      Zahlungs.Accounts.set_user_role(Zahlungs.AccountsFixtures.user_fixture(), "admin")
+
+    {:ok, _} = Sales.return_sale(ctx.sale, admin)
+
+    response =
+      ctx.conn
+      |> log_in_user(ctx.user)
+      |> get("/customer_payments/#{ctx.payment.id}/receipt")
+      |> html_response(200)
+
+    assert response =~ ~r/Utang sebelum<\/span><span>Rp 50\.000,00/
+    assert response =~ ~r/Sisa utang<\/span><span>Rp 30\.000,00/
+  end
 end

@@ -158,9 +158,10 @@ defmodule Zahlungs.Sales do
     sale_attrs = Map.merge(totals, %{user_id: user.id, status: "completed"})
 
     Multi.new()
+    |> Multi.run(:customer, fn _repo, _changes -> lock_credit_customer(totals) end)
     |> Multi.run(:shift, fn _repo, _changes -> Shifts.lock_current_shift(user) end)
     |> Multi.run(:store, fn _repo, %{shift: shift} -> {:ok, Stores.get_store!(shift.store_id)} end)
-    |> Multi.run(:customer, fn _repo, %{store: store} -> check_credit(totals, store) end)
+    |> Multi.run(:due_date, fn _repo, %{store: store} -> check_due_date(totals, store) end)
     |> Multi.insert(:sale, fn %{shift: shift, store: store} ->
       Sale.changeset(
         %Sale{},
@@ -182,20 +183,26 @@ defmodule Zahlungs.Sales do
     end
   end
 
-  # A credit sale's due date can't be before the store's today, and its debt
-  # must keep the customer within their limit (checked under a lock on the
-  # customer, so two tablets can't both go over it).
-  defp check_credit(%{payment_method: "credit"} = totals, store) do
-    if Date.before?(totals.due_date, LocalTime.today(store)),
-      do: {:error, :invalid_due_date},
-      else:
-        Zahlungs.Customers.lock_for_credit(
-          totals.customer_id,
-          Decimal.sub(totals.total, totals.amount_paid)
-        )
+  # A credit sale's debt must keep the customer within their limit, checked
+  # under a lock on the customer so two tablets can't both go over it. This is
+  # the transaction's first step: see Customers.lock_for_credit/2.
+  defp lock_credit_customer(%{payment_method: "credit"} = totals) do
+    Zahlungs.Customers.lock_for_credit(
+      totals.customer_id,
+      Decimal.sub(totals.total, totals.amount_paid)
+    )
   end
 
-  defp check_credit(_totals, _store), do: {:ok, nil}
+  defp lock_credit_customer(_totals), do: {:ok, nil}
+
+  # Its due date can't be before the today of the shift's store.
+  defp check_due_date(%{payment_method: "credit", due_date: due_date}, store) do
+    if Date.before?(due_date, LocalTime.today(store)),
+      do: {:error, :invalid_due_date},
+      else: {:ok, due_date}
+  end
+
+  defp check_due_date(_totals, _store), do: {:ok, nil}
 
   # Human-readable, collision-resistant invoice code: store code + INV +
   # timestamp (store-local) + random hex.

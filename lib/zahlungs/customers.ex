@@ -123,6 +123,12 @@ defmodule Zahlungs.Customers do
   For a credit sale, inside its transaction: locks the customer (`FOR UPDATE`)
   and checks, against the database rather than any struct a screen holds, that
   they are active and that `debt` keeps them within their limit.
+
+  It must be the transaction's first read. MySQL's REPEATABLE READ answers a
+  plain SELECT from a snapshot taken at the first one, so a balance read after
+  an earlier plain SELECT could miss a sale another tablet committed while
+  this one waited for the lock. The same goes for `receive_payment/3` and
+  `refund_overpayment/3`, which lock the customer before the shift.
   """
   def lock_for_credit(customer_id, debt) do
     case Repo.one(from c in Customer, where: c.id == ^customer_id, lock: "FOR UPDATE") do
@@ -170,8 +176,8 @@ defmodule Zahlungs.Customers do
     Repo.put_org_id(user.organization_id)
 
     Repo.transaction(fn ->
-      with {:ok, shift} <- Shifts.lock_current_shift(user),
-           {:ok, customer} <- lock_customer(customer_id) do
+      with {:ok, customer} <- lock_customer(customer_id),
+           {:ok, shift} <- Shifts.lock_current_shift(user) do
         %Payment{
           customer_id: customer.id,
           store_id: shift.store_id,
@@ -258,8 +264,8 @@ defmodule Zahlungs.Customers do
     Repo.put_org_id(user.organization_id)
 
     Repo.transaction(fn ->
-      with {:ok, shift} <- Shifts.lock_current_shift(user),
-           {:ok, customer} <- lock_customer(customer_id),
+      with {:ok, customer} <- lock_customer(customer_id),
+           {:ok, shift} <- Shifts.lock_current_shift(user),
            :ok <- within_overpayment(customer, amount) do
         shift
         |> Shifts.add_cash_movement(%{
@@ -334,9 +340,10 @@ defmodule Zahlungs.Customers do
   Repayments settle the oldest notes first. This is worked out here, never
   stored: each note still completed covers a stretch of the cumulative debt,
   and the money received so far (repayments not cancelled, less what was
-  handed back) covers those stretches in order. A note returned or voided
-  (`status: :cancelled`) or a cancelled repayment (`cancelled?: true`) is
-  listed but moves no balance.
+  handed back) covers those stretches in order. A cancelled repayment
+  (`cancelled?: true`) is listed but moves no balance. A note returned or
+  voided (`status: :cancelled`) counts until then, and a `:cancel` entry takes
+  its debt off at that time, so earlier balances stay as they were shown.
   """
   def ledger(%Customer{id: id}) do
     sales =
@@ -380,7 +387,12 @@ defmodule Zahlungs.Customers do
     events =
       Enum.map(sales, &{&1.inserted_at, 0, &1.id, {:sale, &1}}) ++
         Enum.map(payments, &{&1.inserted_at, 1, &1.id, {:payment, &1}}) ++
-        Enum.map(refunds, &{&1.inserted_at, 2, &1.id, {:refund, &1}})
+        Enum.map(refunds, &{&1.inserted_at, 2, &1.id, {:refund, &1}}) ++
+        for(
+          %Sale{status: status} = sale when status != "completed" <- sales,
+          do:
+            {sale.returned_at || sale.voided_at || sale.inserted_at, 3, sale.id, {:cancel, sale}}
+        )
 
     events
     |> Enum.sort_by(fn {at, rank, id, _event} ->
@@ -409,17 +421,34 @@ defmodule Zahlungs.Customers do
      }, %{acc | balance: balance}}
   end
 
+  # A note returned or voided later still counted until then: the ledger keeps
+  # the balances people saw (and receipts printed), and a :cancel entry takes
+  # its debt off when it happened.
   defp entry({:sale, sale}, acc, _notes, _received) do
+    balance = Decimal.add(acc.balance, debt(sale))
+
     {%{
        kind: :sale,
        at: sale.inserted_at,
        amount: debt(sale),
-       balance: acc.balance,
+       balance: balance,
        sale: sale,
        remaining: Decimal.new(0),
        status: :cancelled,
        overdue?: false
-     }, acc}
+     }, %{acc | balance: balance}}
+  end
+
+  defp entry({:cancel, sale}, acc, _notes, _received) do
+    balance = Decimal.sub(acc.balance, debt(sale))
+
+    {%{
+       kind: :cancel,
+       at: sale.returned_at || sale.voided_at || sale.inserted_at,
+       amount: debt(sale),
+       balance: balance,
+       sale: sale
+     }, %{acc | balance: balance}}
   end
 
   defp entry({:payment, %Payment{cancelled_at: nil} = payment}, acc, notes, _received) do
