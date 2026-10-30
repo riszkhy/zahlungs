@@ -225,6 +225,7 @@ defmodule Zahlungs.Shifts do
 
     to_decimal(shift.opening_cash)
     |> Decimal.add(cash_sales_total(shift.id))
+    |> Decimal.add(Zahlungs.Customers.payments_totals(shift.id).cash)
     |> Decimal.add(Zahlungs.Services.shift_totals(shift).cash_total)
     |> Decimal.add(cash_in)
     |> Decimal.sub(cash_out)
@@ -248,13 +249,35 @@ defmodule Zahlungs.Shifts do
                   fragment("CASE WHEN ? = 'cash' THEN ? ELSE 0 END", s.payment_method, s.total)
                 ),
                 0
+              ),
+            credit_total:
+              coalesce(
+                sum(
+                  fragment("CASE WHEN ? = 'credit' THEN ? ELSE 0 END", s.payment_method, s.total)
+                ),
+                0
+              ),
+            credit_down_payment:
+              coalesce(
+                sum(
+                  fragment(
+                    "CASE WHEN ? = 'credit' THEN ? ELSE 0 END",
+                    s.payment_method,
+                    s.amount_paid
+                  )
+                ),
+                0
               )
           }
       )
 
     sales_total = to_decimal(row.sales_total)
     cash_total = to_decimal(row.cash_total)
-    noncash_total = Decimal.sub(sales_total, cash_total)
+    credit_total = to_decimal(row.credit_total)
+    credit_down_payment = to_decimal(row.credit_down_payment)
+    # Credit sales are neither cash nor non-cash: only their down payment is in the drawer.
+    noncash_total = sales_total |> Decimal.sub(cash_total) |> Decimal.sub(credit_total)
+    payments = Zahlungs.Customers.payments_totals(shift.id)
     opening = to_decimal(shift.opening_cash)
     %{cash_in: cash_in, cash_out: cash_out} = movement_totals(shift.id)
     services = Zahlungs.Services.shift_totals(shift)
@@ -265,6 +288,10 @@ defmodule Zahlungs.Shifts do
       sales_total: sales_total,
       cash_total: cash_total,
       noncash_total: noncash_total,
+      credit_total: credit_total,
+      credit_down_payment: credit_down_payment,
+      payments_cash: payments.cash,
+      payments_noncash: payments.noncash,
       cash_in: cash_in,
       cash_out: cash_out,
       service_count: services.count,
@@ -273,6 +300,8 @@ defmodule Zahlungs.Shifts do
       expected_cash:
         opening
         |> Decimal.add(cash_total)
+        |> Decimal.add(credit_down_payment)
+        |> Decimal.add(payments.cash)
         |> Decimal.add(services.cash_total)
         |> Decimal.add(cash_in)
         |> Decimal.sub(cash_out)
@@ -288,12 +317,24 @@ defmodule Zahlungs.Shifts do
           (s.status == "completed" or s.adjusted_after_shift_close == true)
   end
 
-  # Total of the cash sales that count toward the shift.
+  # Cash from the sales that count toward the shift: cash sales in full, credit
+  # sales only their down payment.
   defp cash_sales_total(shift_id) do
     Repo.one(
       from s in counted_sales(shift_id),
-        where: s.payment_method == "cash",
-        select: coalesce(sum(s.total), 0)
+        where: s.payment_method in ["cash", "credit"],
+        select:
+          coalesce(
+            sum(
+              fragment(
+                "CASE WHEN ? = 'cash' THEN ? ELSE ? END",
+                s.payment_method,
+                s.total,
+                s.amount_paid
+              )
+            ),
+            0
+          )
     )
     |> to_decimal()
   end

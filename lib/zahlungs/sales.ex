@@ -85,6 +85,59 @@ defmodule Zahlungs.Sales do
     payment_method = payment[:payment_method] || payment["payment_method"] || "cash"
     totals = Map.put(totals, :payment_method, payment_method)
 
+    if payment_method == "credit" do
+      settle_credit(payment, totals)
+    else
+      settle_paid(payment, payment_method, totals, total)
+    end
+  end
+
+  # Credit (piutang): the down payment is cash, less than the total (paying it
+  # all is a cash sale); the rest is owed by the customer until the due date.
+  # The limit and the due date against the store's today are checked inside
+  # the sale's transaction (check_credit/2).
+  defp settle_credit(payment, %{total: total} = totals) do
+    down_payment = to_decimal(payment[:amount_paid] || payment["amount_paid"])
+
+    with {:ok, customer_id} <- credit_customer(payment[:customer_id] || payment["customer_id"]),
+         true <- not Decimal.negative?(down_payment) and Decimal.lt?(down_payment, total),
+         {:ok, due_date} <- due_date(payment[:due_date] || payment["due_date"]) do
+      {:ok,
+       Map.merge(totals, %{
+         amount_paid: down_payment,
+         change_due: Decimal.new(0),
+         customer_id: customer_id,
+         due_date: due_date
+       })}
+    else
+      false -> {:error, :down_payment_too_high}
+      error -> error
+    end
+  end
+
+  defp credit_customer(id) when is_integer(id), do: {:ok, id}
+
+  defp credit_customer(id) when is_binary(id) do
+    case Integer.parse(id) do
+      {id, ""} -> {:ok, id}
+      _ -> {:error, :customer_required}
+    end
+  end
+
+  defp credit_customer(_id), do: {:error, :customer_required}
+
+  defp due_date(%Date{} = date), do: {:ok, date}
+
+  defp due_date(text) when is_binary(text) do
+    case Date.from_iso8601(String.trim(text)) do
+      {:ok, date} -> {:ok, date}
+      {:error, _} -> {:error, :invalid_due_date}
+    end
+  end
+
+  defp due_date(_), do: {:error, :invalid_due_date}
+
+  defp settle_paid(payment, payment_method, totals, total) do
     if payment_method == "cash" do
       amount_paid = to_decimal(payment[:amount_paid] || payment["amount_paid"])
 
@@ -107,6 +160,7 @@ defmodule Zahlungs.Sales do
     Multi.new()
     |> Multi.run(:shift, fn _repo, _changes -> Shifts.lock_current_shift(user) end)
     |> Multi.run(:store, fn _repo, %{shift: shift} -> {:ok, Stores.get_store!(shift.store_id)} end)
+    |> Multi.run(:customer, fn _repo, %{store: store} -> check_credit(totals, store) end)
     |> Multi.insert(:sale, fn %{shift: shift, store: store} ->
       Sale.changeset(
         %Sale{},
@@ -124,6 +178,21 @@ defmodule Zahlungs.Sales do
       {:error, _step, reason, _changes} -> {:error, reason}
     end
   end
+
+  # A credit sale's due date can't be before the store's today, and its debt
+  # must keep the customer within their limit (checked under a lock on the
+  # customer, so two tablets can't both go over it).
+  defp check_credit(%{payment_method: "credit"} = totals, store) do
+    if Date.before?(totals.due_date, LocalTime.today(store)),
+      do: {:error, :invalid_due_date},
+      else:
+        Zahlungs.Customers.lock_for_credit(
+          totals.customer_id,
+          Decimal.sub(totals.total, totals.amount_paid)
+        )
+  end
+
+  defp check_credit(_totals, _store), do: {:ok, nil}
 
   # Human-readable, collision-resistant invoice code: store code + INV +
   # timestamp (store-local) + random hex.
@@ -430,7 +499,14 @@ defmodule Zahlungs.Sales do
             transactions: count(s.id),
             revenue: coalesce(sum(s.total), 0),
             discount: coalesce(sum(s.discount), 0),
-            tax: coalesce(sum(s.tax), 0)
+            tax: coalesce(sum(s.tax), 0),
+            credit_total:
+              coalesce(
+                sum(
+                  fragment("CASE WHEN ? = 'credit' THEN ? ELSE 0 END", s.payment_method, s.total)
+                ),
+                0
+              )
           }
       )
 
@@ -454,6 +530,8 @@ defmodule Zahlungs.Sales do
       revenue: to_decimal(totals.revenue),
       discount: to_decimal(totals.discount),
       tax: to_decimal(totals.tax),
+      # Sold on credit (piutang): in the revenue, not yet all received.
+      credit_total: to_decimal(totals.credit_total),
       gross_sales: gross_sales,
       cogs: cogs,
       gross_profit: Decimal.sub(gross_sales, cogs)
