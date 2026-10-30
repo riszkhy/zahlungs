@@ -65,6 +65,190 @@ defmodule ZahlungsWeb.CashierLiveTest do
     end
   end
 
+  describe "holding a cart" do
+    alias Zahlungs.HeldCarts
+
+    setup do
+      user = user_on_shift_fixture()
+      product = product_fixture(price: Decimal.new("1000"), stock: 10)
+      socket = CashierLive |> mount_live(user) |> event("add", %{"id" => product.id})
+      %{user: user, product: product, socket: socket}
+    end
+
+    defp held_id(user), do: user |> HeldCarts.list() |> hd() |> Map.fetch!(:id)
+
+    test "Tunda empties the cart and counts it", %{socket: socket} do
+      socket = event(socket, "hold", %{"note" => "Bu Ani"})
+
+      assert socket.assigns.cart == []
+      assert flash(socket, :info) == "Keranjang ditunda."
+      assert socket.assigns.held_count == 1
+      assert html(socket) =~ "Ditunda (1)"
+    end
+
+    test "Tunda needs a cart", %{user: user} do
+      socket = CashierLive |> mount_live(user) |> event("hold", %{"note" => ""})
+      assert socket.assigns.held_count == 0
+    end
+
+    test "the list shows the note or the automatic label", %{socket: socket, product: product} do
+      socket =
+        socket
+        |> event("hold", %{"note" => "Bu Ani"})
+        |> event("add", %{"id" => product.id})
+        |> event("hold", %{"note" => ""})
+        |> event("toggle_held")
+
+      rendered = html(socket)
+      assert rendered =~ "Bu Ani"
+      assert rendered =~ ~r/1 item · Rp 1\.000/
+      assert rendered =~ "Lanjutkan"
+    end
+
+    test "Lanjutkan fills the cart at today's price", ctx do
+      socket = event(ctx.socket, "hold", %{"note" => ""})
+      {:ok, _} = Catalog.update_product(store_scope(), ctx.product, %{price: "1500"})
+
+      socket = event(socket, "resume_held", %{"id" => held_id(ctx.user)})
+
+      assert [%{product_id: id, quantity: 1, unit_price: price}] = socket.assigns.cart
+      assert id == ctx.product.id
+      assert Decimal.equal?(price, Decimal.new("1500"))
+      assert socket.assigns.held_count == 0
+    end
+
+    test "Lanjutkan with a full cart holds the screen's cart first", ctx do
+      other = product_fixture(price: Decimal.new("2000"), stock: 5)
+      socket = event(ctx.socket, "hold", %{"note" => "A"})
+      id = held_id(ctx.user)
+
+      socket =
+        socket
+        |> event("add", %{"id" => other.id})
+        |> event("resume_held", %{"id" => id})
+
+      assert Enum.map(socket.assigns.cart, & &1.product_id) == [ctx.product.id]
+      assert socket.assigns.held_count == 1
+
+      assert {:ok, %{items: [%{product: %{id: other_id}}]}} =
+               HeldCarts.resume(ctx.user, held_id(ctx.user))
+
+      assert other_id == other.id
+    end
+
+    test "Lanjutkan with an empty cart holds nothing", ctx do
+      socket = event(ctx.socket, "hold", %{"note" => ""})
+      socket = event(socket, "resume_held", %{"id" => held_id(ctx.user)})
+      assert socket.assigns.held_count == 0
+    end
+
+    test "a cart taken elsewhere says it is gone", ctx do
+      socket = event(ctx.socket, "hold", %{"note" => ""})
+      id = held_id(ctx.user)
+      :ok = HeldCarts.delete(ctx.user, id)
+
+      socket = event(socket, "resume_held", %{"id" => id})
+      assert flash(socket, :error) == "Sudah dilanjutkan atau dihapus di kasir lain."
+      assert socket.assigns.cart == []
+    end
+
+    test "adjusted items are told", ctx do
+      socket =
+        Enum.reduce(1..4, ctx.socket, fn _, s -> event(s, "inc", %{"id" => ctx.product.id}) end)
+
+      socket = event(socket, "hold", %{"note" => ""})
+      {:ok, _} = Catalog.update_product(store_scope(), ctx.product, %{stock: 3})
+
+      socket = event(socket, "resume_held", %{"id" => held_id(ctx.user)})
+      assert flash(socket, :info) == "1 barang disesuaikan dengan stok."
+      assert [%{quantity: 3}] = socket.assigns.cart
+    end
+
+    test "a discount that no longer fits keeps Complete Sale disabled", ctx do
+      socket =
+        ctx.socket
+        |> event("inc", %{"id" => ctx.product.id})
+        |> event("payment", %{"discount" => "1500", "tax" => "", "amount_paid" => ""})
+        |> event("hold", %{"note" => ""})
+
+      {:ok, _} = Catalog.update_product(store_scope(), ctx.product, %{stock: 1})
+      socket = event(socket, "resume_held", %{"id" => held_id(ctx.user)})
+
+      assert socket.assigns.discount == "1500"
+      refute socket.assigns.can_checkout
+      assert socket.assigns.amount_error
+    end
+
+    test "Hapus removes a held cart", ctx do
+      socket = event(ctx.socket, "hold", %{"note" => ""})
+      socket = event(socket, "delete_held", %{"id" => held_id(ctx.user)})
+      assert socket.assigns.held_count == 0
+    end
+
+    test "the close-shift dialog warns about held carts", %{socket: socket} do
+      rendered = socket |> event("hold", %{"note" => ""}) |> event("toggle_close") |> html()
+      assert rendered =~ "Ada 1 keranjang tertunda di toko ini. Keranjang tetap tersimpan."
+    end
+
+    test "a swap whose cart is gone keeps the screen's cart and holds nothing", ctx do
+      socket = event(ctx.socket, "hold", %{"note" => ""})
+      id = held_id(ctx.user)
+      :ok = HeldCarts.delete(ctx.user, id)
+
+      socket =
+        socket
+        |> event("add", %{"id" => ctx.product.id})
+        |> event("resume_held", %{"id" => id})
+
+      assert flash(socket, :error) == "Sudah dilanjutkan atau dihapus di kasir lain."
+      assert [%{product_id: product_id}] = socket.assigns.cart
+      assert product_id == ctx.product.id
+      assert socket.assigns.held_count == 0
+    end
+
+    test "a cart that comes back empty brings no discount along", ctx do
+      socket =
+        ctx.socket
+        |> event("payment", %{"discount" => "500", "tax" => "100", "amount_paid" => ""})
+        |> event("hold", %{"note" => ""})
+
+      {:ok, _} = Catalog.delete_product(ctx.product)
+      socket = event(socket, "resume_held", %{"id" => held_id(ctx.user)})
+
+      assert socket.assigns.cart == []
+      assert {socket.assigns.discount, socket.assigns.tax} == {"", ""}
+      assert flash(socket, :info) == "Keranjang kembali kosong: barangnya sudah tidak dijual."
+    end
+
+    test "a cart held on another tablet shows up", ctx do
+      other = CashierLive |> mount_live(ctx.user)
+      event(ctx.socket, "hold", %{"note" => ""})
+
+      store_id = Shifts.current_shift(ctx.user).store_id
+      other = info(other, {:held_carts_changed, store_id})
+      assert other.assigns.held_count == 1
+    end
+
+    test "opening a shift shows the store's held carts", %{socket: socket} do
+      event(socket, "hold", %{"note" => ""})
+
+      socket =
+        CashierLive
+        |> mount_live(user_fixture())
+        |> event("open_shift", %{"opening_cash" => "0"})
+
+      assert socket.assigns.held_count == 1
+    end
+
+    test "held_age/2 says how long ago" do
+      now = ~N[2026-10-30 12:00:00]
+      assert CashierLive.held_age(~N[2026-10-30 11:59:30], now) == "baru saja"
+      assert CashierLive.held_age(~N[2026-10-30 11:55:00], now) == "5 menit lalu"
+      assert CashierLive.held_age(~N[2026-10-30 09:00:00], now) == "3 jam lalu"
+      assert CashierLive.held_age(~N[2026-10-28 12:00:00], now) == "2 hari lalu"
+    end
+  end
+
   describe "building the cart" do
     setup do
       user = user_on_shift_fixture()

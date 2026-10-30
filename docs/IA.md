@@ -112,7 +112,14 @@ Urutan link disesuaikan peran:
    disabled), amount paid (format ribuan), kembalian
 7. **Modal struk** — ringkasan, print, koreksi/batalkan, transaksi baru
 8. **Modal tutup shift** — opening + cash sales + cash in − cash out =
-   expected; hitung fisik → variance (preview berwarna)
+   expected; hitung fisik → variance (preview berwarna); peringatan bila ada
+   keranjang tertunda (shift tetap bisa ditutup)
+9. **Tunda** — keranjang disimpan dengan catatan opsional lalu dikosongkan.
+   **Ditunda (N)** di atas pencarian: catatan atau "3 item · Rp 45.000 ·
+   14:05", umur, **Lanjutkan** / **Hapus**. Bisa dilanjutkan kasir mana pun di
+   toko itu, sekali saja; harga dan stok dibaca ulang (barang habis/terhapus
+   dibuang, jumlah dipotong ke stok). Lanjutkan saat keranjang berisi:
+   keranjang di layar ikut ditunda. Tidak mengubah stok, kas, maupun laporan.
 
 ### /sales — Riwayat
 - Tabel: code, tanggal, kasir, item, total, status (completed/returned/void)

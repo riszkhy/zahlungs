@@ -31,7 +31,7 @@ JS/CSS assets live in `assets/` and are built by the `esbuild`/`tailwind` mix wr
 
 - Dev/test use **MySQL/MariaDB** via `myxql`. Credentials come from env vars (`DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD`, `DB_NAME`/`DB_TEST_NAME`, with localhost defaults) and/or the gitignored `config/local.secret.exs`.
 - `mix test` runs pending migrations against whatever database the test config points at. If dev and test share one database, tests still clean up after themselves (SQL sandbox), but rows that already exist are visible to them: look fixtures up by a unique name/SKU rather than expecting them first in a list, and don't assert that a table is empty.
-- Migrations live in `priv/repo/migrations/`. Tables: `organizations`, `stores`, `users`, `users_tokens`, `user_logins`, `categories`, `suppliers`, `products`, `product_stocks`, `sales`, `sale_items`, `cashier_shifts`, `cash_movements`, `service_products`, `service_transactions`, `deposit_accounts`, `deposit_entries`, `brand_prefixes`. (`products.stock` is a leftover column, no longer read; stock lives in `product_stocks`.)
+- Migrations live in `priv/repo/migrations/`. Tables: `organizations`, `stores`, `users`, `users_tokens`, `user_logins`, `categories`, `suppliers`, `products`, `product_stocks`, `sales`, `sale_items`, `cashier_shifts`, `cash_movements`, `service_products`, `service_transactions`, `deposit_accounts`, `deposit_entries`, `brand_prefixes`, `held_carts`, `held_cart_items`. (`products.stock` is a leftover column, no longer read; stock lives in `product_stocks`.)
 - There is no CI workflow in the repo.
 
 ## Production / releases
@@ -50,6 +50,7 @@ Standard Phoenix context layering — keep the boundary between the two. LiveVie
   - `catalog.ex` — products (SKU, barcode, purchase price/margin, soft delete, consignment flag), categories, suppliers, stock report.
   - `sales.ex` — `create_sale/3`, `return_sale/2`, `void_sale/3`, sales history, and all reports including the consignment statement.
   - `shifts.ex` — open/close shift, cash movements, expected-cash reconciliation.
+  - `held_carts.ex` — held carts (Tunda, tables `held_carts` + `held_cart_items`, per store, no `organization_id`): `hold/3`, `list/1`, `count/1`, `resume/2,3`, `delete/2`, always in the store of the user's open shift; changes are broadcast (`subscribe/1` → `{:held_carts_changed, store_id}`) so other tablets update. Resume locks, reads and deletes in one transaction (a cart is resumed once); `resume/3` holds the screen's cart in that same transaction (a swap) and reads prices and stock again: gone, inactive or sold-out products are dropped, quantities cut to stock (`adjusted`). Holding touches neither stock, the drawer nor reports.
   - `services.ex` — PPOB services (Fase 0): service products and their price, service transactions, the service report. `deposits.ex` — deposit accounts, top-ups, corrections, estimated balance. See PPOB below.
   - `local_time.ex` — shop-local time (see Conventions).
   - `repo.ex`, `mailer.ex` (Swoosh), `application.ex` (supervision tree: Repo → Telemetry → PubSub → Endpoint).

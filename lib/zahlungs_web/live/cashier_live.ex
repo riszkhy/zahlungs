@@ -5,14 +5,14 @@ defmodule ZahlungsWeb.CashierLive do
   """
   use ZahlungsWeb, :live_view
 
-  alias Zahlungs.{Catalog, Sales, Shifts}
+  alias Zahlungs.{Catalog, HeldCarts, LocalTime, Sales, Shifts}
 
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
      socket
      |> assign(page_title: "Cashier", last_sale: nil, scanning: false)
-     |> assign(category_id: nil, cart_open: false)
+     |> assign(category_id: nil, cart_open: false, held_open: false, held: [])
      |> assign(:category_options, Zahlungs.Catalog.category_options())
      |> assign(opening_cash: "", closing: false, counted_cash: "", close_note: "", summary: nil)
      |> assign(:services_processing, 0)
@@ -27,8 +27,24 @@ defmodule ZahlungsWeb.CashierLive do
      )
      |> assign_shift(Shifts.current_shift(socket.assigns.current_user))
      |> load_movements()
+     |> load_held_count()
+     |> subscribe_held()
      |> reset_cart()}
   end
+
+  # Held carts come and go on the other tablets of the shift's store.
+  @impl true
+  def handle_info({:held_carts_changed, _store_id}, socket) do
+    socket = load_held_count(socket)
+    {:noreply, if(socket.assigns.held_open, do: load_held(socket), else: socket)}
+  end
+
+  defp subscribe_held(%{assigns: %{shift: %Shifts.Shift{store_id: store_id}}} = socket) do
+    if connected?(socket), do: HeldCarts.subscribe(store_id)
+    socket
+  end
+
+  defp subscribe_held(socket), do: socket
 
   # Sales are recorded in the store of the open shift, so that is the store
   # whose stock and clock this screen shows — for an admin it can differ from
@@ -51,6 +67,7 @@ defmodule ZahlungsWeb.CashierLive do
     |> assign_shift(Shifts.current_shift(socket.assigns.current_user))
     |> load_movements()
     |> load_products()
+    |> load_held_count()
   end
 
   @tile_limit 24
@@ -74,6 +91,17 @@ defmodule ZahlungsWeb.CashierLive do
     assign(socket, :results, results)
   end
 
+  # How many carts are held in the open shift's store (Tunda).
+  defp load_held_count(socket) do
+    assign(socket, :held_count, HeldCarts.count(socket.assigns.current_user))
+  end
+
+  defp load_held(socket) do
+    socket
+    |> assign(:held, HeldCarts.list(socket.assigns.current_user))
+    |> load_held_count()
+  end
+
   defp load_movements(socket) do
     movements =
       if socket.assigns.shift, do: Shifts.list_cash_movements(socket.assigns.shift), else: []
@@ -90,6 +118,8 @@ defmodule ZahlungsWeb.CashierLive do
          |> assign_shift(shift)
          |> load_movements()
          |> load_products()
+         |> load_held_count()
+         |> subscribe_held()
          |> put_flash(:info, "Shift opened.")}
 
       {:error, :already_open} ->
@@ -366,6 +396,73 @@ defmodule ZahlungsWeb.CashierLive do
     end
   end
 
+  # Tunda: put the cart aside in the shift's store, empty the screen.
+  def handle_event("hold", _params, %{assigns: %{cart: []}} = socket), do: {:noreply, socket}
+
+  def handle_event("hold", params, socket) do
+    case hold_cart(socket, params["note"]) do
+      {:ok, _held} ->
+        {:noreply,
+         socket
+         |> reset_cart()
+         |> push_event("reset_amount_paid", %{})
+         |> load_held()
+         |> put_flash(:info, "Keranjang ditunda.")}
+
+      {:error, %Ecto.Changeset{}} ->
+        {:noreply, put_flash(socket, :error, "Catatan paling banyak 60 karakter.")}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, error_message(reason))}
+    end
+  end
+
+  def handle_event("toggle_held", _params, socket) do
+    socket = assign(socket, :held_open, not socket.assigns.held_open)
+    {:noreply, if(socket.assigns.held_open, do: load_held(socket), else: socket)}
+  end
+
+  # Lanjutkan: a cart on the screen is held first, so nothing is lost.
+  def handle_event("resume_held", %{"id" => id}, socket) do
+    case HeldCarts.resume(socket.assigns.current_user, id, screen_cart(socket)) do
+      {:ok, resumed} ->
+        {:noreply,
+         socket
+         |> reset_cart()
+         |> fill_cart(resumed)
+         |> assign(:held_open, false)
+         |> assign_totals()
+         |> push_event("reset_amount_paid", %{})
+         |> load_held()
+         |> resumed_flash(resumed)}
+
+      {:error, :not_found} ->
+        {:noreply,
+         socket
+         |> load_held()
+         |> put_flash(:error, "Sudah dilanjutkan atau dihapus di kasir lain.")}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, error_message(reason))}
+    end
+  end
+
+  def handle_event("delete_held", %{"id" => id}, socket) do
+    case HeldCarts.delete(socket.assigns.current_user, id) do
+      :ok ->
+        {:noreply, load_held(socket)}
+
+      {:error, :not_found} ->
+        {:noreply,
+         socket
+         |> load_held()
+         |> put_flash(:error, "Sudah dilanjutkan atau dihapus di kasir lain.")}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, error_message(reason))}
+    end
+  end
+
   def handle_event("new_sale", _params, socket) do
     {:noreply,
      socket |> assign(:last_sale, nil) |> reset_cart() |> push_event("reset_amount_paid", %{})}
@@ -376,19 +473,78 @@ defmodule ZahlungsWeb.CashierLive do
   defp add_to_cart(socket, product) do
     case Enum.find(socket.assigns.cart, &(&1.product_id == product.id)) do
       nil ->
-        item = %{
-          product_id: product.id,
-          name: product.name,
-          sku: product.sku,
-          unit_price: product.price,
-          quantity: 1,
-          stock: product.stock
-        }
-
-        assign(socket, :cart, socket.assigns.cart ++ [item])
+        assign(socket, :cart, socket.assigns.cart ++ [cart_item(product, 1)])
 
       existing ->
         update_qty(socket, product.id, existing.quantity + 1)
+    end
+  end
+
+  defp cart_item(product, quantity) do
+    %{
+      product_id: product.id,
+      name: product.name,
+      sku: product.sku,
+      unit_price: product.price,
+      quantity: quantity,
+      stock: product.stock
+    }
+  end
+
+  defp hold_cart(socket, note) do
+    {items, attrs} = screen_cart(socket)
+    HeldCarts.hold(socket.assigns.current_user, items, Map.put(attrs, :note, blank_to_nil(note)))
+  end
+
+  # The cart on the screen as `HeldCarts` takes it.
+  defp screen_cart(socket) do
+    items = Enum.map(socket.assigns.cart, &%{product_id: &1.product_id, quantity: &1.quantity})
+    {items, %{discount: to_dec(socket.assigns.discount), tax: to_dec(socket.assigns.tax)}}
+  end
+
+  # A cart that comes back empty brings no discount or tax to the next customer.
+  defp fill_cart(socket, %{items: []}), do: socket
+
+  defp fill_cart(socket, resumed) do
+    assign(socket,
+      cart: Enum.map(resumed.items, &cart_item(&1.product, &1.quantity)),
+      discount: amount_field(resumed.discount),
+      tax: amount_field(resumed.tax)
+    )
+  end
+
+  defp resumed_flash(socket, %{items: []}),
+    do: put_flash(socket, :info, "Keranjang kembali kosong: barangnya sudah tidak dijual.")
+
+  defp resumed_flash(socket, %{adjusted: adjusted}) when adjusted > 0,
+    do: put_flash(socket, :info, "#{adjusted} barang disesuaikan dengan stok.")
+
+  defp resumed_flash(socket, _resumed), do: socket
+
+  # A held amount back in its field: empty for none, as the cashier left it.
+  defp amount_field(amount) do
+    if Decimal.equal?(amount, 0),
+      do: "",
+      else: amount |> Decimal.normalize() |> Decimal.to_string(:normal)
+  end
+
+  # A held cart's label in the list: its note, or what it holds.
+  defp held_label(%{note: note}, _store) when is_binary(note) and note != "", do: note
+
+  defp held_label(held, store) do
+    time = held.inserted_at |> LocalTime.to_local(store) |> Calendar.strftime("%H:%M")
+    "#{held.units} item · #{format_money(held.total)} · #{time}"
+  end
+
+  @doc "How long ago a cart was held, for the list: \"5 menit lalu\"."
+  def held_age(inserted_at, now \\ NaiveDateTime.utc_now()) do
+    seconds = NaiveDateTime.diff(now, inserted_at)
+
+    cond do
+      seconds < 60 -> "baru saja"
+      seconds < 3600 -> "#{div(seconds, 60)} menit lalu"
+      seconds < 86_400 -> "#{div(seconds, 3600)} jam lalu"
+      true -> "#{div(seconds, 86_400)} hari lalu"
     end
   end
 
@@ -623,6 +779,34 @@ defmodule ZahlungsWeb.CashierLive do
     <div :if={@shift} class="mt-4 grid grid-cols-1 gap-6 lg:grid-cols-5 md:landscape:grid-cols-5">
       <%!-- Product search + tiles --%>
       <div class="pb-24 lg:col-span-3 lg:pb-0 md:landscape:col-span-3 md:landscape:pb-0">
+        <%!-- Carts put aside in this store (Tunda), to resume from any tablet. --%>
+        <div :if={@held_count > 0} class="mb-3">
+          <button type="button" phx-click="toggle_held" class={["chip", @held_open && "chip-active"]}>
+            Ditunda ({@held_count})
+          </button>
+          <div :if={@held_open} id="held-carts" class="mt-2 divide-y divide-gray-100 rounded-lg border border-gray-200">
+            <div :for={held <- @held} id={"held-#{held.id}"} class="flex items-center justify-between gap-2 p-3 text-sm">
+              <div class="min-w-0">
+                <p class="truncate font-medium">{held_label(held, @sale_scope.store)}</p>
+                <p class="text-xs text-gray-500">{held_age(held.inserted_at)}</p>
+              </div>
+              <div class="flex shrink-0 gap-2">
+                <button type="button" phx-click={JS.push("resume_held", value: %{id: held.id})} class="chip chip-active">
+                  Lanjutkan
+                </button>
+                <button
+                  type="button"
+                  phx-click={JS.push("delete_held", value: %{id: held.id})}
+                  data-confirm="Hapus keranjang tertunda ini?"
+                  class="chip"
+                >
+                  Hapus
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <form phx-change="search" phx-submit="scan">
           <input
             type="text"
@@ -808,6 +992,19 @@ defmodule ZahlungsWeb.CashierLive do
             Complete Sale
           </.button>
         </div>
+
+        <%!-- Tunda: put the cart aside to serve the next customer. --%>
+        <form :if={@cart != []} id="hold-form" phx-submit="hold" class="mt-3 flex gap-2">
+          <input
+            type="text"
+            name="note"
+            maxlength="60"
+            placeholder="Catatan (opsional)"
+            autocomplete="off"
+            class="form-control min-w-0 flex-1"
+          />
+          <button type="submit" class="chip">Tunda</button>
+        </form>
       </div>
 
       <%!-- Portrait only: the cart at a glance, pinned to the bottom of the screen. --%>
@@ -847,6 +1044,10 @@ defmodule ZahlungsWeb.CashierLive do
       <p :if={@services_processing > 0} class="mt-3 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
         Masih ada {@services_processing} layanan berstatus diproses. Tandai hasilnya dulu di
         <.link navigate={~p"/services"} class="font-medium underline">Layanan</.link>.
+      </p>
+
+      <p :if={@held_count > 0} class="mt-3 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+        Ada {@held_count} keranjang tertunda di toko ini. Keranjang tetap tersimpan.
       </p>
 
       <dl class="mt-4 space-y-1 text-sm">
