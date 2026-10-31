@@ -103,6 +103,60 @@ defmodule ZahlungsWeb.ServiceProductLiveTest do
     end
   end
 
+  describe "pages" do
+    # 26 products named so they sort in creation order, alone in the test's
+    # organization: page 2 holds only the last one.
+    setup do
+      products =
+        for n <- 1..26 do
+          service_product_fixture(%{name: "Produk #{String.pad_leading("#{n}", 2, "0")}"})
+        end
+
+      %{products: products, admin: admin_fixture()}
+    end
+
+    test "25 products per page, with the count", %{products: products, admin: admin} do
+      socket = mount_live(ServiceProductLive.Index, admin)
+
+      assert ids(socket) == products |> Enum.take(25) |> Enum.map(& &1.id)
+      assert html(socket) =~ "Menampilkan 1–25 dari 26 produk"
+
+      # JS.push sends the page as a number; a string works too.
+      socket = event(socket, "page", %{"to" => 2})
+      assert ids(socket) == [List.last(products).id]
+      assert html(socket) =~ "Menampilkan 26–26 dari 26 produk"
+
+      assert socket |> event("page", %{"to" => "1"}) |> ids() |> length() == 25
+    end
+
+    test "a filter starts again at page 1", %{admin: admin} do
+      socket =
+        ServiceProductLive.Index
+        |> mount_live(admin)
+        |> event("page", %{"to" => 2})
+        |> event("filter", %{"category" => "pulsa", "operator" => ""})
+
+      assert socket.assigns.page == 1
+      assert length(ids(socket)) == 25
+    end
+
+    test "deleting the last product of the last page goes back a page", %{
+      products: products,
+      admin: admin
+    } do
+      last = List.last(products)
+
+      socket =
+        ServiceProductLive.Index
+        |> mount_live(admin)
+        |> event("page", %{"to" => 2})
+        |> event("delete", %{"id" => last.id})
+
+      assert socket.assigns.page == 1
+      assert length(ids(socket)) == 25
+    end
+  end
+
   describe "with an SBI account" do
     alias Zahlungs.Services.Provider.Sbi.StubClient
 

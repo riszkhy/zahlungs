@@ -49,17 +49,32 @@ defmodule Zahlungs.Services do
   @doc """
   Lists products that aren't deleted, by name.
 
-  Options: `:category`, `:active` (`true`/`false`).
+  Options: `:category`, `:operator`, `:active` (`true`/`false`), and
+  `:limit` / `:offset` for a page.
   """
   def list_products(opts \\ []) do
+    opts
+    |> products_query()
+    |> order_by([p], [p.name, p.id])
+    |> page(opts[:limit], opts[:offset])
+    |> Repo.all()
+  end
+
+  @doc "Counts the products `list_products/1` lists with the same filters."
+  def count_products(opts \\ []) do
+    opts |> products_query() |> Repo.aggregate(:count)
+  end
+
+  defp products_query(opts) do
     Product
     |> where([p], is_nil(p.deleted_at))
     |> filter(:category, opts[:category])
     |> filter(:operator, opts[:operator])
     |> filter(:active, opts[:active])
-    |> order_by([p], p.name)
-    |> Repo.all()
   end
+
+  defp page(query, nil, _offset), do: query
+  defp page(query, limit, offset), do: query |> limit(^limit) |> offset(^(offset || 0))
 
   defp filter(query, _field, nil), do: query
   defp filter(query, _field, ""), do: query

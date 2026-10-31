@@ -13,11 +13,14 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
   # The bill the preview of a tagihan product is shown for.
   @sample_bill Decimal.new(100_000)
 
+  @per_page 25
+
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
      socket
      |> assign(page_title: "Produk layanan", category: "", operator: "")
+     |> assign(page: 1, per_page: @per_page)
      |> assign(catalog_account: Services.catalog_account(), catalog: [], price_rows: nil)
      |> load_products()}
   end
@@ -43,7 +46,13 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
   # operator filter.
   def handle_event("filter", %{"category" => category} = params, socket) do
     operator = if operator_filter?(category), do: params["operator"] || "", else: ""
-    {:noreply, socket |> assign(category: category, operator: operator) |> load_products()}
+
+    {:noreply,
+     socket |> assign(category: category, operator: operator, page: 1) |> load_products()}
+  end
+
+  def handle_event("page", %{"to" => to}, socket) do
+    {:noreply, socket |> assign(:page, max(1, to_int(to))) |> load_products()}
   end
 
   def handle_event("validate", %{"product" => params}, socket) do
@@ -162,16 +171,23 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
   defp valid_numbers?(%Product{cost: %Decimal{}, margin_value: %Decimal{}}), do: true
   defp valid_numbers?(_product), do: false
 
+  # A page past the end (the last product of the last page was just deleted)
+  # falls back to the last one that exists.
   defp load_products(socket) do
-    assign(
-      socket,
-      :products,
-      Services.list_products(
-        category: socket.assigns.category,
-        operator: socket.assigns.operator
-      )
-    )
+    filters = [category: socket.assigns.category, operator: socket.assigns.operator]
+
+    total = Services.count_products(filters)
+    page = min(socket.assigns.page, max(1, ceil(total / @per_page)))
+
+    products =
+      Services.list_products(filters ++ [limit: @per_page, offset: (page - 1) * @per_page])
+
+    assign(socket, products: products, total: total, page: page)
   end
+
+  # The page buttons use JS.push, which sends the page as a JSON number.
+  defp to_int(n) when is_integer(n), do: n
+  defp to_int(n) when is_binary(n), do: String.to_integer(n)
 
   defp bill_form?(form), do: Ecto.Changeset.get_field(form.source, :category) == "tagihan"
   defp token_form?(form), do: Ecto.Changeset.get_field(form.source, :category) == "token_pln"
@@ -302,6 +318,7 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
         </.link>
       </:action>
     </.table>
+    <.pagination page={@page} per_page={@per_page} total={@total} noun="produk" />
 
     <.modal :if={@form} id="service-product-modal" show on_cancel={JS.patch(~p"/admin/services")}>
       <h3 class="text-lg font-semibold">{if @product.id, do: "Ubah produk layanan", else: "Produk layanan baru"}</h3>

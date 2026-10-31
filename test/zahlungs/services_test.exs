@@ -506,6 +506,21 @@ defmodule Zahlungs.ServicesTest do
       assert tsel.id in ids.(operator: "")
     end
 
+    test "list_products/1 pages by name; count_products/1 counts with the same filters" do
+      for name <- ~w(Delta Alfa Echo Bravo Charlie), do: service_product_fixture(%{name: name})
+      service_product_fixture(%{name: "Token", category: "token_pln"})
+
+      names = fn opts -> opts |> Services.list_products() |> Enum.map(& &1.name) end
+
+      assert names.(category: "pulsa", limit: 2) == ~w(Alfa Bravo)
+      assert names.(category: "pulsa", limit: 2, offset: 2) == ~w(Charlie Delta)
+      assert names.(category: "pulsa", limit: 2, offset: 4) == ~w(Echo)
+
+      assert Services.count_products(category: "pulsa") == 5
+      assert Services.count_products(category: "token_pln") == 1
+      assert Services.count_products() == 6
+    end
+
     test "validates the category, the margin and the cost" do
       assert {:error, changeset} =
                Services.create_product(%{name: "X", category: "game", cost: "1"})
