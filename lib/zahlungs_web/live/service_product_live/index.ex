@@ -263,6 +263,14 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
         </option>
         <option value="other" selected={@operator == "other"}>Lainnya (tanpa operator)</option>
       </select>
+      <%!-- A plain download (not a LiveView event): the file holds what the filters show. --%>
+      <a
+        href={~p"/admin/services/export.xlsx?#{[category: @category, operator: @operator]}"}
+        class="btn btn-sm self-center"
+        download
+      >
+        Export Excel
+      </a>
     </form>
 
     <.table id="service-products" rows={@products}>

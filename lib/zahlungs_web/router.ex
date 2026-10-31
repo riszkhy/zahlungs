@@ -110,6 +110,7 @@ defmodule ZahlungsWeb.Router do
     pipe_through [:browser, :require_authenticated_user, :require_admin_user]
 
     post "/stores/select", StoreSelectionController, :update
+    get "/admin/services/export.xlsx", ServiceProductExportController, :show
 
     live_session :require_admin_user,
       on_mount: [{ZahlungsWeb.UserAuth, :ensure_admin}] do

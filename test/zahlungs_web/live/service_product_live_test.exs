@@ -429,4 +429,16 @@ defmodule ZahlungsWeb.ServiceProductLiveTest do
       assert Services.get_product!(product.id).name == "Pulsa diganti"
     end
   end
+
+  describe "export" do
+    test "the Export Excel link follows the filters" do
+      socket = ServiceProductLive.Index |> mount_live(admin_fixture())
+      assert html(socket) =~ ~s(href="/admin/services/export.xlsx?category=&amp;operator=")
+
+      socket = event(socket, "filter", %{"category" => "pulsa", "operator" => "telkomsel"})
+
+      assert html(socket) =~
+               ~s(href="/admin/services/export.xlsx?category=pulsa&amp;operator=telkomsel")
+    end
+  end
 end

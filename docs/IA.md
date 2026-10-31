@@ -61,6 +61,7 @@ Aturan akses berlapis (router):
     ├── /admin/customers        Pelanggan piutang: utang, limit (+ /new, /:id/edit)
     │     └── /admin/customers/:id   Kartu piutang: batalkan pelunasan, kembalikan kelebihan
     ├── /admin/services         Produk layanan PPOB: modal, margin Rp/% (+ /new, /:id/edit)
+    │     └── /admin/services/export.xlsx   Export Excel, mengikuti filter kategori/operator
     ├── /admin/deposits         Akun deposit: perkiraan saldo, isi ulang, pencocokan
     │                           (+ /new, /:id, /:id/edit)
     ├── /reports/sales          Laporan penjualan (ringkasan, harian, per kasir,
