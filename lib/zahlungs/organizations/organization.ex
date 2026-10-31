@@ -20,6 +20,9 @@ defmodule Zahlungs.Organizations.Organization do
     # Billing is manual: what the operator agreed with the owner.
     field :paid_until, :date
     field :billing_note, :string
+    # The most a cashier may take off a sale by hand, in percent of its
+    # subtotal; nil = no limit. Set by the organization's admin.
+    field :max_cashier_discount_percent, :decimal
 
     belongs_to :reviewed_by, Zahlungs.Accounts.User
 
@@ -27,6 +30,16 @@ defmodule Zahlungs.Organizations.Organization do
   end
 
   def statuses, do: @statuses
+
+  @doc "Changeset for the limit on a cashier's manual discount (admin)."
+  def discount_limit_changeset(organization, attrs) do
+    organization
+    |> cast(attrs, [:max_cashier_discount_percent])
+    |> validate_number(:max_cashier_discount_percent,
+      greater_than_or_equal_to: 0,
+      less_than_or_equal_to: 100
+    )
+  end
 
   @doc "Changeset for the business details given at sign-up."
   def registration_changeset(organization, attrs) do
