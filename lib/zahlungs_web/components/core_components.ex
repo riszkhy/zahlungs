@@ -616,7 +616,12 @@ defmodule ZahlungsWeb.CoreComponents do
       </thead>
       <tbody>
         <tr :for={item <- @sale.items} class="border-t border-gray-100">
-          <td class="py-1">{(item.product && item.product.name) || "(deleted)"}</td>
+          <td class="py-1">
+            {(item.product && item.product.name) || "(deleted)"}
+            <span :if={item.promotion_name} class="block text-xs text-amber-700">
+              {item.promotion_name} −{format_money(item.discount)}
+            </span>
+          </td>
           <td class="py-1 text-center">{item.quantity}</td>
           <td class="py-1 text-right">{format_money(item.unit_price)}</td>
           <td class="py-1 text-right">{format_money(item.line_total)}</td>
@@ -625,6 +630,9 @@ defmodule ZahlungsWeb.CoreComponents do
     </table>
 
     <dl class="mt-4 space-y-1 text-sm border-t border-gray-200 pt-3">
+      <div :if={promo_saving(@sale)} class="flex justify-between text-amber-700">
+        <dt>Hemat promo</dt><dd>−{format_money(promo_saving(@sale))}</dd>
+      </div>
       <div class="flex justify-between"><dt>Subtotal</dt><dd>{format_money(@sale.subtotal)}</dd></div>
       <div class="flex justify-between"><dt>Discount</dt><dd>{format_money(@sale.discount)}</dd></div>
       <div class="flex justify-between"><dt>Tax</dt><dd>{format_money(@sale.tax)}</dd></div>
@@ -650,6 +658,14 @@ defmodule ZahlungsWeb.CoreComponents do
     </dl>
     """
   end
+
+  @doc "What a sale's promotions took off, or nil when nothing."
+  def promo_saving(%{items: items}) when is_list(items) do
+    saving = Enum.reduce(items, Decimal.new(0), &Decimal.add(&2, &1.discount || Decimal.new(0)))
+    if Decimal.gt?(saving, 0), do: saving
+  end
+
+  def promo_saving(_sale), do: nil
 
   @doc ~S"""
   Formats a money amount as Indonesian Rupiah, e.g. `Rp 12.500,00`

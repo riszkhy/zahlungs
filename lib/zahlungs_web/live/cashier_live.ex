@@ -5,7 +5,7 @@ defmodule ZahlungsWeb.CashierLive do
   """
   use ZahlungsWeb, :live_view
 
-  alias Zahlungs.{Catalog, Customers, HeldCarts, LocalTime, Sales, Shifts}
+  alias Zahlungs.{Catalog, Customers, HeldCarts, LocalTime, Promotions, Sales, Shifts}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -13,6 +13,7 @@ defmodule ZahlungsWeb.CashierLive do
      socket
      |> assign(page_title: "Cashier", last_sale: nil, last_sale_balance: nil, scanning: false)
      |> assign(credit_query: "", credit_results: [])
+     |> assign(:discount_limit, discount_limit(socket.assigns.current_user))
      |> assign(
        receivable_open: false,
        receivable_query: "",
@@ -67,8 +68,25 @@ defmodule ZahlungsWeb.CashierLive do
         do: %{scope | store: Zahlungs.Stores.get_store!(shift.store_id)},
         else: scope
 
-    assign(socket, shift: shift, sale_scope: sale_scope)
+    assign(socket,
+      shift: shift,
+      sale_scope: sale_scope,
+      promotions: promotions(shift, sale_scope)
+    )
   end
+
+  # The promotions running today in the shift's store, applied to the cart as
+  # it changes; the sale works them out again when it is recorded.
+  defp promotions(nil, _sale_scope), do: []
+
+  defp promotions(_shift, sale_scope) do
+    store = sale_scope.store
+    Promotions.active_for(store, LocalTime.today(store))
+  end
+
+  # An organization may limit a cashier's manual discount; admins aren't limited.
+  defp discount_limit(%{role: "admin"}), do: nil
+  defp discount_limit(user), do: Promotions.cashier_discount_limit(user.organization_id)
 
   # Re-reads the user's open shift: the one in assigns can be stale when it was
   # closed (or a new one opened) from another tab or device.
@@ -597,7 +615,9 @@ defmodule ZahlungsWeb.CashierLive do
       sku: product.sku,
       unit_price: product.price,
       quantity: quantity,
-      stock: product.stock
+      stock: product.stock,
+      category_id: product.category_id,
+      consignment: product.consignment
     }
   end
 
@@ -735,22 +755,20 @@ defmodule ZahlungsWeb.CashierLive do
   defp cart_units(cart), do: Enum.reduce(cart, 0, &(&1.quantity + &2))
 
   defp assign_totals(socket) do
-    subtotal = cart_subtotal(socket.assigns.cart)
+    priced = price_cart(socket.assigns.cart, socket.assigns[:promotions] || [])
+    subtotal = cart_subtotal(priced)
     discount = to_dec(socket.assigns.discount)
     tax = to_dec(socket.assigns.tax)
     total = subtotal |> Decimal.sub(discount) |> Decimal.add(tax)
-    cash? = socket.assigns.payment_method == "cash"
-    # Non-cash is settled for the exact total: no tendered amount, no change.
-    paid = if cash?, do: to_dec(socket.assigns.amount_paid), else: total
-    change = if cash?, do: Decimal.sub(paid, total), else: Decimal.new(0)
+    {change, paid_ok} = tendered(socket.assigns, total)
 
-    paid_ok = not cash? or not Decimal.lt?(paid, total)
-
-    amount_error = amount_error(subtotal, discount, tax)
+    amount_error = amount_error(subtotal, discount, tax, socket.assigns[:discount_limit])
     credit? = socket.assigns.payment_method == "credit"
     credit_error = if credit?, do: credit_error(socket.assigns, total)
 
     assign(socket,
+      priced_cart: priced,
+      promo_saving: Enum.reduce(priced, Decimal.new(0), &Decimal.add(&2, &1.discount)),
       subtotal: subtotal,
       total: total,
       change_due: change,
@@ -761,6 +779,15 @@ defmodule ZahlungsWeb.CashierLive do
           paid_ok and credit_ok?(credit?, socket.assigns.credit_customer, credit_error)
     )
   end
+
+  # Cash must cover the total and may leave change. Non-cash is settled for the
+  # exact total: no tendered amount, no change.
+  defp tendered(%{payment_method: "cash", amount_paid: amount_paid}, total) do
+    paid = to_dec(amount_paid)
+    {Decimal.sub(paid, total), not Decimal.lt?(paid, total)}
+  end
+
+  defp tendered(_assigns, _total), do: {Decimal.new(0), true}
 
   defp credit_ok?(false, _customer, _error), do: true
   defp credit_ok?(true, customer, error), do: customer != nil and is_nil(error)
@@ -790,20 +817,47 @@ defmodule ZahlungsWeb.CashierLive do
 
   # Same rules Sales.create_sale/3 enforces; shown inline so the cashier knows
   # why Complete Sale is disabled.
-  defp amount_error(subtotal, discount, tax) do
+  defp amount_error(subtotal, discount, tax, limit) do
     cond do
       Decimal.negative?(discount) -> "Diskon tidak boleh negatif."
       Decimal.gt?(discount, subtotal) -> "Diskon tidak boleh melebihi subtotal."
+      over_limit?(discount, subtotal, limit) -> limit_message(limit)
       Decimal.negative?(tax) -> "Pajak tidak boleh negatif."
       true -> nil
     end
   end
 
-  defp cart_subtotal(cart) do
-    Enum.reduce(cart, Decimal.new(0), fn item, acc ->
-      Decimal.add(acc, Decimal.mult(item.unit_price, item.quantity))
-    end)
+  defp over_limit?(_discount, _subtotal, nil), do: false
+
+  defp over_limit?(discount, subtotal, limit),
+    do: Decimal.gt?(discount, subtotal |> Decimal.mult(limit) |> Decimal.div(100))
+
+  defp limit_message(limit),
+    do:
+      "Diskon maksimal #{limit |> Decimal.normalize() |> Decimal.to_string(:normal)}% dari subtotal."
+
+  # Each cart line with its promotion (discount, name) and net line total.
+  defp price_cart(cart, promotions) do
+    cart
+    |> Enum.map(
+      &Map.put(&1, :product, %{
+        id: &1.product_id,
+        category_id: &1[:category_id],
+        consignment: &1[:consignment] || false
+      })
+    )
+    |> Promotions.apply(promotions)
+    |> Enum.map(
+      &Map.put(
+        &1,
+        :line_total,
+        Decimal.sub(Decimal.mult(&1.unit_price, &1.quantity), &1.discount)
+      )
+    )
   end
+
+  defp cart_subtotal(priced),
+    do: Enum.reduce(priced, Decimal.new(0), &Decimal.add(&2, &1.line_total))
 
   # JS.push value:%{id: ...} sends the id as a JSON number (integer), but form
   # params would send a string — handle both.
@@ -837,6 +891,7 @@ defmodule ZahlungsWeb.CashierLive do
 
   defp error_message(:invalid_due_date), do: "Jatuh tempo tidak boleh sebelum hari ini."
   defp error_message(:over_balance), do: "Melebihi sisa utang."
+  defp error_message(:discount_over_limit), do: "Diskon melebihi batas yang diatur admin."
   defp error_message(:not_found), do: "Pelanggan tidak ditemukan."
   defp error_message(_), do: "Could not complete the sale."
 
@@ -1167,10 +1222,13 @@ defmodule ZahlungsWeb.CashierLive do
         <p :if={@cart == []} class="mt-3 text-sm text-gray-400">Cart is empty. Add products to begin.</p>
 
         <table :if={@cart != []} class="w-full mt-3 text-sm">
-          <tr :for={item <- @cart} class="border-t border-gray-100">
+          <tr :for={item <- @priced_cart} class="border-t border-gray-100">
             <td class="py-2">
               <p class="font-medium">{item.name}</p>
               <p class="text-xs text-gray-400">{format_money(item.unit_price)} each</p>
+              <p :if={item.promotion_name} class="text-xs text-amber-700">
+                {item.promotion_name} −{format_money(item.discount)}
+              </p>
             </td>
             <td class="py-2">
               <div class="flex items-center gap-2">
@@ -1179,7 +1237,12 @@ defmodule ZahlungsWeb.CashierLive do
                 <.link phx-click={JS.push("inc", value: %{id: item.product_id})} class="qty-button">+</.link>
               </div>
             </td>
-            <td class="py-2 text-right">{format_money(Decimal.mult(item.unit_price, item.quantity))}</td>
+            <td class="py-2 text-right">
+              <span :if={item.promotion_name} class="block text-xs text-gray-400 line-through">
+                {format_money(Decimal.mult(item.unit_price, item.quantity))}
+              </span>
+              {format_money(item.line_total)}
+            </td>
             <td class="py-2 text-right">
               <.link phx-click={JS.push("remove", value: %{id: item.product_id})} class="text-red-600 text-xs">remove</.link>
             </td>
@@ -1304,6 +1367,11 @@ defmodule ZahlungsWeb.CashierLive do
         </div>
 
         <dl class="mt-4 space-y-1 text-sm border-t border-gray-200 pt-3">
+          <.receipt_row
+            :if={Decimal.gt?(@promo_saving, 0)}
+            label="Hemat promo"
+            value={"−" <> format_money(@promo_saving)}
+          />
           <.receipt_row label="Subtotal" value={format_money(@subtotal)} />
           <.receipt_row label="Total" value={format_money(@total)} bold />
           <.receipt_row :if={@payment_method == "cash"} label="Change" value={format_money(@change_due)} />

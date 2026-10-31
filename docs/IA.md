@@ -59,6 +59,8 @@ Aturan akses berlapis (router):
     ├── /admin/logins           Riwayat login + lokasi (filter toko & user)
     ├── /admin/suppliers        Manajemen supplier/consignor (+ /new, /:id/edit)
     ├── /admin/customers        Pelanggan piutang: utang, limit (+ /new, /:id/edit)
+    ├── /admin/promotions       Promo potongan produk/kategori: %, Rp per barang, tanggal, cabang
+    │                           (+ /new, /:id/edit); batas diskon manual kasir (%)
     │     └── /admin/customers/:id   Kartu piutang: batalkan pelunasan, kembalikan kelebihan
     ├── /admin/services         Produk layanan PPOB: modal, margin Rp/% (+ /new, /:id/edit)
     ├── /admin/deposits         Akun deposit: perkiraan saldo, isi ulang, pencocokan
@@ -113,7 +115,11 @@ Urutan link disesuaikan peran:
 3. **Gerakan kas shift ini** — daftar in/out (setoran, pengeluaran, bayar konsinyasi)
 4. **Pencarian produk** — teks / scan barcode (keyboard wedge & kamera HP);
    beep sukses/gagal
-5. **Keranjang** — qty ± , hapus baris, subtotal per baris
+5. **Keranjang** — qty ± , hapus baris, subtotal per baris. Barang yang kena
+   promo: harga normal dicoret, nama promo dan potongannya; ringkasan
+   menampilkan **Hemat promo**. Satu promo per barang (potongan terbesar);
+   barang titipan tidak kena promo. Diskon manual kasir dibatasi admin
+   (pesan "Diskon maksimal N% dari subtotal.").
 6. **Pembayaran** — discount/tax, metode (Tunai dan Piutang aktif;
    QRIS/Kartu/Transfer disabled), amount paid (format ribuan), kembalian.
    **Piutang**: cari atau tambah pelanggan (pelanggan baru limit 0, limit
@@ -136,6 +142,14 @@ Urutan link disesuaikan peran:
     Transfer), catatan → **Terima pelunasan** → tautan struk pelunasan.
     Pelunasan melunasi nota terlama dulu; tunai masuk laci shift ini, toko
     mana pun asal utangnya.
+
+### Promo
+- Admin membuat promo di **/admin/promotions**: nama, jenis (% atau Rp per
+  barang), nilai, tanggal mulai–selesai (tanggal lokal cabang, keduanya
+  termasuk), semua cabang atau cabang pilihan, produk (cari) dan/atau
+  kategori. Status: Berjalan / Terjadwal / Selesai / Nonaktif.
+- Struk menampilkan promo per barang dan total hemat. Laporan penjualan:
+  kartu **Potongan promo** dan tabel **Per promo**.
 
 ### Piutang (kasbon)
 - Nota piutang dihitung sebagai omzet di hari dijual; laci shift hanya

@@ -806,4 +806,49 @@ defmodule ZahlungsWeb.CashierLiveTest do
       assert flash(socket, :error) == "Melebihi sisa utang."
     end
   end
+
+  describe "promotions at the cashier" do
+    import Zahlungs.PromotionsFixtures
+
+    alias Zahlungs.Promotions
+
+    setup do
+      user = user_on_shift_fixture()
+      product = product_fixture(price: Decimal.new("10000"), stock: 10)
+      promotion = promotion_fixture(%{product_ids: [product.id]})
+      socket = CashierLive |> mount_live(user) |> event("add", %{"id" => product.id})
+      %{user: user, product: product, promotion: promotion, socket: socket}
+    end
+
+    test "the cart shows the promotion and what it saves", ctx do
+      assert [%{discount: discount}] = ctx.socket.assigns.priced_cart
+      assert Decimal.equal?(discount, Decimal.new("1000"))
+      assert Decimal.equal?(ctx.socket.assigns.total, Decimal.new("9000"))
+
+      html = html(ctx.socket)
+      assert html =~ ctx.promotion.name
+      assert html =~ "Hemat promo"
+
+      socket = ctx.socket |> event("payment", %{"amount_paid" => "9000"}) |> event("checkout")
+      assert [item] = socket.assigns.last_sale.items
+      assert Decimal.equal?(item.discount, Decimal.new("1000"))
+      assert html(socket) =~ ctx.promotion.name
+    end
+
+    test "a cashier's manual discount over the limit can't be completed", ctx do
+      {:ok, _} = Promotions.set_cashier_discount_limit(promo_admin(), "10")
+
+      socket =
+        CashierLive
+        |> mount_live(ctx.user)
+        |> event("add", %{"id" => ctx.product.id})
+        |> event("payment", %{"discount" => "901", "amount_paid" => "9000"})
+
+      refute socket.assigns.can_checkout
+      assert html(socket) =~ "Diskon maksimal 10% dari subtotal."
+
+      socket = event(socket, "payment", %{"discount" => "900", "amount_paid" => "9000"})
+      assert socket.assigns.can_checkout
+    end
+  end
 end
