@@ -77,6 +77,29 @@ defmodule ZahlungsWeb.CashierLive do
 
   # The promotions running today in the shift's store, applied to the cart as
   # it changes; the sale works them out again when it is recorded.
+  defp reload_promotions(socket),
+    do: assign(socket, :promotions, promotions(socket.assigns.shift, socket.assigns.sale_scope))
+
+  # The cart's unit prices as the catalog has them now.
+  defp refresh_cart_prices(socket) do
+    ids = Enum.map(socket.assigns.cart, & &1.product_id)
+
+    prices =
+      socket.assigns.sale_scope
+      |> Catalog.list_products(ids: ids)
+      |> Map.new(&{&1.id, &1.price})
+
+    socket
+    |> assign(
+      :cart,
+      Enum.map(
+        socket.assigns.cart,
+        &%{&1 | unit_price: Map.get(prices, &1.product_id, &1.unit_price)}
+      )
+    )
+    |> assign_totals()
+  end
+
   defp promotions(nil, _sale_scope), do: []
 
   defp promotions(_shift, sale_scope) do
@@ -492,7 +515,8 @@ defmodule ZahlungsWeb.CashierLive do
       amount_paid: socket.assigns.amount_paid,
       discount: socket.assigns.discount,
       tax: socket.assigns.tax,
-      payment_method: socket.assigns.payment_method
+      payment_method: socket.assigns.payment_method,
+      expected_total: socket.assigns.total
     }
 
     payment =
@@ -518,6 +542,16 @@ defmodule ZahlungsWeb.CashierLive do
       # The shift was closed elsewhere (e.g. another tab): show the real state.
       {:error, :no_open_shift} ->
         {:noreply, socket |> refresh_shift() |> put_flash(:error, error_message(:no_open_shift))}
+
+      # A promotion or a price changed since the screen was priced: show the
+      # new total before taking the money.
+      {:error, :prices_changed} ->
+        {:noreply,
+         socket
+         |> reload_promotions()
+         |> load_products()
+         |> refresh_cart_prices()
+         |> put_flash(:error, error_message(:prices_changed))}
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, error_message(reason))}
@@ -707,6 +741,7 @@ defmodule ZahlungsWeb.CashierLive do
       down_payment: "",
       due_date: default_due_date(socket)
     )
+    |> reload_promotions()
     |> assign_totals()
     |> load_products()
   end
@@ -892,6 +927,10 @@ defmodule ZahlungsWeb.CashierLive do
   defp error_message(:invalid_due_date), do: "Jatuh tempo tidak boleh sebelum hari ini."
   defp error_message(:over_balance), do: "Melebihi sisa utang."
   defp error_message(:discount_over_limit), do: "Diskon melebihi batas yang diatur admin."
+
+  defp error_message(:prices_changed),
+    do: "Harga atau promo berubah. Cek total baru, lalu bayar lagi."
+
   defp error_message(:not_found), do: "Pelanggan tidak ditemukan."
   defp error_message(_), do: "Could not complete the sale."
 

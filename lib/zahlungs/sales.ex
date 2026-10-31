@@ -235,9 +235,30 @@ defmodule Zahlungs.Sales do
   end
 
   defp totals_for(user, items, payment) do
-    with {:ok, totals} <- compute_totals(items, payment),
+    with :ok <- as_on_screen(items, payment),
+         {:ok, totals} <- compute_totals(items, payment),
          :ok <- within_cashier_limit(user, totals) do
       {:ok, totals}
+    end
+  end
+
+  # The total the cashier's screen showed, when it sends one: a promotion or
+  # a price that changed since must not change what the customer pays without
+  # the cashier seeing it. Checked first, so it isn't reported as, say, an
+  # amount paid short of a total the cashier never saw.
+  defp as_on_screen(items, payment) do
+    case payment[:expected_total] || payment["expected_total"] do
+      nil ->
+        :ok
+
+      expected ->
+        total =
+          items
+          |> Enum.reduce(Decimal.new(0), &Decimal.add(&2, &1.line_total))
+          |> Decimal.sub(to_decimal(payment[:discount] || payment["discount"]))
+          |> Decimal.add(to_decimal(payment[:tax] || payment["tax"]))
+
+        if Decimal.equal?(total, to_decimal(expected)), do: :ok, else: {:error, :prices_changed}
     end
   end
 

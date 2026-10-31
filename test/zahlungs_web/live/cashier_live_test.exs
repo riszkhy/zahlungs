@@ -835,6 +835,16 @@ defmodule ZahlungsWeb.CashierLiveTest do
       assert html(socket) =~ ctx.promotion.name
     end
 
+    test "a promotion that ended meanwhile: the sale is refused and the screen catches up", ctx do
+      {:ok, _} = Promotions.set_active(promo_admin(), ctx.promotion, false)
+
+      socket = ctx.socket |> event("payment", %{"amount_paid" => "9000"}) |> event("checkout")
+
+      assert flash(socket, :error) =~ "Harga atau promo berubah"
+      assert socket.assigns.last_sale == nil
+      assert Decimal.equal?(socket.assigns.total, Decimal.new("10000"))
+    end
+
     test "a cashier's manual discount over the limit can't be completed", ctx do
       {:ok, _} = Promotions.set_cashier_discount_limit(promo_admin(), "10")
 

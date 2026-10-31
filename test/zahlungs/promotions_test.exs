@@ -416,4 +416,89 @@ defmodule Zahlungs.PromotionsTest do
       assert Decimal.equal?(row.revenue, d("18000"))
     end
   end
+
+  describe "saving and selling, safely" do
+    import Zahlungs.ShiftsFixtures
+
+    alias Zahlungs.Sales
+
+    defp queries_of(fun) do
+      test_pid = self()
+      handler = "promo-queries-#{inspect(test_pid)}"
+
+      :telemetry.attach(
+        handler,
+        [:zahlungs, :repo, :query],
+        fn _event, _measure, meta, _ ->
+          if self() == test_pid, do: send(test_pid, {:query, meta.query})
+        end,
+        nil
+      )
+
+      try do
+        fun.()
+      after
+        :telemetry.detach(handler)
+      end
+
+      collect([])
+    end
+
+    defp collect(acc) do
+      receive do
+        {:query, query} -> collect([query | acc])
+      after
+        0 -> Enum.reverse(acc)
+      end
+    end
+
+    # A DELETE by promotion_id gap-locks the index under REPEATABLE READ, and
+    # two admins saving at once then deadlock on the inserts that follow.
+    test "saving a promotion deletes old links by their own ids only" do
+      product = product_fixture()
+
+      created =
+        queries_of(fn ->
+          {:ok, _} =
+            Promotions.create_promotion(promo_admin(), %{
+              name: "Baru #{System.unique_integer([:positive])}",
+              kind: "percent",
+              value: "5",
+              starts_on: today(),
+              ends_on: today(),
+              product_ids: [product.id]
+            })
+        end)
+
+      refute Enum.any?(created, &(&1 =~ "DELETE"))
+
+      promotion = promotion_fixture()
+
+      updated =
+        queries_of(fn ->
+          {:ok, _} =
+            Promotions.update_promotion(promo_admin(), promotion, %{product_ids: [product.id]})
+        end)
+
+      deletes = Enum.filter(updated, &(&1 =~ "DELETE"))
+      assert deletes != []
+      refute Enum.any?(deletes, &(&1 =~ "`promotion_id`"))
+      assert Promotions.get_promotion!(promotion.id).product_ids == [product.id]
+    end
+
+    test "a sale whose total differs from the screen's is refused" do
+      user = user_on_shift_fixture()
+      product = product_fixture(price: Decimal.new("10000"), stock: 5)
+      promotion_fixture(%{product_ids: [product.id]})
+      cart = [%{product_id: product.id, quantity: 1}]
+
+      assert Sales.create_sale(user, cart, %{amount_paid: "10000", expected_total: "10000"}) ==
+               {:error, :prices_changed}
+
+      assert stock_of(product) == 5
+
+      assert {:ok, _} =
+               Sales.create_sale(user, cart, %{amount_paid: "9000", expected_total: "9000"})
+    end
+  end
 end

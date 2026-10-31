@@ -103,7 +103,7 @@ defmodule Zahlungs.Promotions do
 
     Repo.transaction(fn ->
       case Repo.insert_or_update(changeset) do
-        {:ok, saved} -> replace_links(saved)
+        {:ok, saved} -> replace_links(saved, promotion)
         {:error, changeset} -> Repo.rollback(changeset)
       end
     end)
@@ -120,9 +120,13 @@ defmodule Zahlungs.Promotions do
       else: Ecto.Changeset.add_error(changeset, field, "tidak ditemukan")
   end
 
-  defp replace_links(%Promotion{id: id} = promotion) do
-    Repo.delete_all(from t in PromotionTarget, where: t.promotion_id == ^id)
-    Repo.delete_all(from s in PromotionStore, where: s.promotion_id == ^id)
+  # Old links are deleted by their own ids (loaded with the promotion), never
+  # by promotion_id: under REPEATABLE READ that would gap-lock the index, and
+  # two admins saving at once would deadlock on the inserts that follow. A new
+  # promotion has none to delete.
+  defp replace_links(%Promotion{id: id} = promotion, previous) do
+    delete_ids(PromotionTarget, loaded(previous.targets))
+    delete_ids(PromotionStore, loaded(previous.stores))
 
     targets =
       Enum.map(promotion.product_ids, &%{promotion_id: id, product_id: &1}) ++
@@ -139,6 +143,12 @@ defmodule Zahlungs.Promotions do
 
     promotion
   end
+
+  defp loaded(%Ecto.Association.NotLoaded{}), do: []
+  defp loaded(rows), do: Enum.map(rows, & &1.id)
+
+  defp delete_ids(_schema, []), do: :ok
+  defp delete_ids(schema, ids), do: Repo.delete_all(from r in schema, where: r.id in ^ids)
 
   @doc """
   The promotions running in `store` on the store-local `date` (both ends of a
