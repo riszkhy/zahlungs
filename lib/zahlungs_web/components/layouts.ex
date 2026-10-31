@@ -144,6 +144,7 @@ defmodule ZahlungsWeb.Layouts do
       {"Riwayat login", ~p"/admin/logins"},
       {"Suppliers", ~p"/admin/suppliers"},
       {"Pelanggan", ~p"/admin/customers"},
+      {"Promo", ~p"/admin/promotions"},
       {"Produk layanan", ~p"/admin/services"},
       {"Deposit", ~p"/admin/deposits"},
       {"Reports", ~p"/reports/sales"},

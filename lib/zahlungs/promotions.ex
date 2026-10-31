@@ -51,7 +51,7 @@ defmodule Zahlungs.Promotions do
   def get_promotion!(id) do
     Promotion
     |> Repo.get!(id)
-    |> Repo.preload([:targets, :stores])
+    |> Repo.preload([:stores, targets: [:product, :category]])
     |> fill_ids()
   end
 
