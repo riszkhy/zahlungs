@@ -107,6 +107,7 @@ defmodule Zahlungs.PromotionsTest do
     test "another organization's product can't be a target" do
       # The default organization first, so the product below is the other's.
       admin = admin()
+
       theirs =
         in_org(organization_fixture(), fn ->
           {:ok, product} =
@@ -119,6 +120,7 @@ defmodule Zahlungs.PromotionsTest do
 
           product
         end)
+
       name = "Asing #{System.unique_integer([:positive])}"
 
       assert {:error, cs} =
@@ -175,6 +177,134 @@ defmodule Zahlungs.PromotionsTest do
       assert {:error, %Ecto.Changeset{}} = Promotions.set_cashier_discount_limit(admin, "101")
       assert {:ok, _} = Promotions.set_cashier_discount_limit(admin, "")
       assert Promotions.cashier_discount_limit(org_id) == nil
+    end
+  end
+
+  describe "engine" do
+    alias Zahlungs.Promotions.{Promotion, PromotionTarget}
+
+    defp promo(id, kind, value, targets) do
+      %Promotion{
+        id: id,
+        name: "P#{id}",
+        kind: kind,
+        value: d(value),
+        targets:
+          Enum.map(targets, fn {field, target} -> struct(PromotionTarget, [{field, target}]) end)
+      }
+    end
+
+    defp line(price, qty, product \\ %{id: 1, category_id: 9, consignment: false}),
+      do: %{product: product, quantity: qty, unit_price: d(price)}
+
+    defp discount_of(lines, promos), do: lines |> Promotions.apply(promos) |> hd()
+
+    test "percent is floored to the rupiah" do
+      assert Decimal.equal?(
+               discount_of([line("12350", 1)], [promo(1, "percent", "10", product_id: 1)]).discount,
+               d("1235")
+             )
+
+      assert Decimal.equal?(
+               discount_of([line("12355", 1)], [promo(1, "percent", "10", product_id: 1)]).discount,
+               d("1235")
+             )
+    end
+
+    test "rupiah is per unit and never more than the line" do
+      assert Decimal.equal?(
+               discount_of([line("10000", 3)], [promo(1, "amount", "2000", product_id: 1)]).discount,
+               d("6000")
+             )
+
+      assert Decimal.equal?(
+               discount_of([line("3000", 1)], [promo(1, "amount", "5000", product_id: 1)]).discount,
+               d("3000")
+             )
+    end
+
+    test "the largest discount wins, a tie goes to the older promotion" do
+      promos = [
+        promo(1, "percent", "5", product_id: 1),
+        promo(2, "amount", "1000", category_id: 9)
+      ]
+
+      result = discount_of([line("10000", 1)], promos)
+
+      assert Decimal.equal?(result.discount, d("1000"))
+      assert {result.promotion_id, result.promotion_name} == {2, "P2"}
+
+      tie = [promo(7, "amount", "500", product_id: 1), promo(3, "amount", "500", category_id: 9)]
+      assert discount_of([line("10000", 1)], tie).promotion_id == 3
+    end
+
+    test "consignment products and lines without a promotion get nothing" do
+      consigned = line("10000", 1, %{id: 1, category_id: 9, consignment: true})
+      result = discount_of([consigned], [promo(1, "percent", "10", product_id: 1)])
+
+      assert {Decimal.to_integer(result.discount), result.promotion_id, result.promotion_name} ==
+               {0, nil, nil}
+
+      other = line("10000", 1, %{id: 2, category_id: 8, consignment: false})
+      assert discount_of([other], [promo(1, "percent", "10", product_id: 1)]).promotion_id == nil
+    end
+
+    test "active_for: the first and last day count, in the store's local date" do
+      store = default_store()
+      t = today()
+      product = product_fixture()
+      ids = [product.id]
+
+      today_only = promotion_fixture(%{product_ids: ids, starts_on: t, ends_on: t})
+
+      ended =
+        promotion_fixture(%{
+          product_ids: ids,
+          starts_on: Date.add(t, -5),
+          ends_on: Date.add(t, -1)
+        })
+
+      coming =
+        promotion_fixture(%{product_ids: ids, starts_on: Date.add(t, 1), ends_on: Date.add(t, 5)})
+
+      off = promotion_fixture(%{product_ids: ids, starts_on: t, ends_on: t, active: false})
+
+      elsewhere =
+        promotion_fixture(%{
+          product_ids: ids,
+          starts_on: t,
+          ends_on: t,
+          all_stores: false,
+          store_ids: [store_fixture().id]
+        })
+
+      here =
+        promotion_fixture(%{
+          product_ids: ids,
+          starts_on: t,
+          ends_on: t,
+          all_stores: false,
+          store_ids: [store.id]
+        })
+
+      found = store |> Promotions.active_for(t) |> Enum.map(& &1.id)
+
+      assert today_only.id in found
+      assert here.id in found
+      refute Enum.any?([ended.id, coming.id, off.id, elsewhere.id], &(&1 in found))
+
+      assert [%Promotion{targets: [%PromotionTarget{product_id: product_id}]} | _] =
+               Promotions.active_for(store, t)
+
+      assert product_id == product.id
+    end
+
+    test "active_for: another organization's promotions are not seen" do
+      promotion = promotion_fixture()
+
+      in_org(organization_fixture(), fn ->
+        refute promotion.id in Enum.map(Promotions.active_for(nil, today()), & &1.id)
+      end)
     end
   end
 end

@@ -13,6 +13,8 @@ defmodule Zahlungs.Promotions do
   """
 
   import Ecto.Query, warn: false
+  # apply/2 below is this module's: the promotion rule.
+  import Kernel, except: [apply: 2]
 
   alias Zahlungs.Accounts.User
   alias Zahlungs.Catalog.{Category, Product}
@@ -136,6 +138,96 @@ defmodule Zahlungs.Promotions do
     end
 
     promotion
+  end
+
+  @doc """
+  The promotions running in `store` on the store-local `date` (both ends of a
+  promotion's range included), with their targets, oldest first. Without a
+  store, only those for all stores.
+  """
+  def active_for(store, %Date{} = date) do
+    # Without a store no promotion_stores row can match (store id 0).
+    store_id = (store && store.id) || 0
+
+    in_store =
+      from s in PromotionStore, where: s.store_id == ^store_id, select: s.promotion_id
+
+    Repo.all(
+      from p in Promotion,
+        where:
+          p.active and p.starts_on <= ^date and p.ends_on >= ^date and
+            (p.all_stores or p.id in subquery(in_store)),
+        order_by: p.id,
+        preload: :targets
+    )
+  end
+
+  @doc """
+  Gives each line (`%{product: %{id, category_id, consignment}, quantity,
+  unit_price}`) its promotion: `discount`, `promotion_id`, `promotion_name`
+  (0, nil, nil without one). Of the promotions matching the product or its
+  category, the one taking off the most wins; a tie goes to the oldest.
+  Consignment products never get one. Pure: no database.
+  """
+  def apply(lines, promotions) do
+    Enum.map(lines, fn line ->
+      best =
+        promotions
+        |> Enum.filter(&matches?(&1, line.product))
+        |> Enum.map(&{discount_for(&1, line.unit_price, line.quantity), &1})
+        |> Enum.reduce(nil, &better/2)
+
+      case best do
+        {discount, promotion} ->
+          Map.merge(line, %{
+            discount: discount,
+            promotion_id: promotion.id,
+            promotion_name: promotion.name
+          })
+
+        nil ->
+          Map.merge(line, %{discount: Decimal.new(0), promotion_id: nil, promotion_name: nil})
+      end
+    end)
+  end
+
+  # The larger discount, or on a tie the older promotion (smaller id).
+  defp better(candidate, nil), do: candidate
+
+  defp better({discount, promotion} = candidate, {best_discount, best} = current) do
+    case Decimal.compare(discount, best_discount) do
+      :gt -> candidate
+      :eq when promotion.id < best.id -> candidate
+      _ -> current
+    end
+  end
+
+  defp matches?(_promotion, %{consignment: true}), do: false
+
+  defp matches?(%Promotion{targets: targets}, product) do
+    Enum.any?(targets, fn target ->
+      (target.product_id && target.product_id == product.id) ||
+        (target.category_id && target.category_id == product.category_id)
+    end)
+  end
+
+  @doc """
+  What `promotion` takes off a line: a percent of it floored to the rupiah,
+  or rupiah per unit; never more than the line.
+  """
+  def discount_for(%Promotion{} = promotion, unit_price, quantity) do
+    line = Decimal.mult(unit_price, quantity)
+
+    off =
+      case promotion.kind do
+        "percent" ->
+          line |> Decimal.mult(promotion.value) |> Decimal.div(100) |> Decimal.round(0, :floor)
+
+        "amount" ->
+          Decimal.mult(promotion.value, quantity)
+      end
+
+    Decimal.min(off, line)
   end
 
   @doc "The most a cashier may take off a sale by hand, in percent, or nil for no limit."
