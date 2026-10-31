@@ -230,6 +230,39 @@ defmodule Zahlungs.Promotions do
     Decimal.min(off, line)
   end
 
+  @doc """
+  What each promotion took off in a range of local dates, from completed
+  sales of the scope's store (every store of the organization for "all
+  stores"), largest first: `[%{promotion_id, name, items, discount,
+  revenue}]` (`revenue` is after the discount).
+  """
+  def report(%Zahlungs.Scope{} = scope, %Date{} = from, %Date{} = to) do
+    {start, finish} = LocalTime.day_range(from, to, scope.store)
+
+    store_ids =
+      case Zahlungs.Scope.store_id(scope) do
+        nil -> Zahlungs.Stores.store_ids()
+        store_id -> [store_id]
+      end
+
+    Repo.all(
+      from i in Zahlungs.Sales.SaleItem,
+        join: s in assoc(i, :sale),
+        where:
+          s.store_id in ^store_ids and s.status == "completed" and s.inserted_at >= ^start and
+            s.inserted_at <= ^finish and not is_nil(i.promotion_name),
+        group_by: [i.promotion_id, i.promotion_name],
+        order_by: [desc: sum(i.discount)],
+        select: %{
+          promotion_id: i.promotion_id,
+          name: i.promotion_name,
+          items: type(sum(i.quantity), :integer),
+          discount: sum(i.discount),
+          revenue: sum(i.line_total)
+        }
+    )
+  end
+
   @doc "The most a cashier may take off a sale by hand, in percent, or nil for no limit."
   def cashier_discount_limit(organization_id) do
     Repo.one(

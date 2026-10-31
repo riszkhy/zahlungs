@@ -48,12 +48,9 @@ defmodule Zahlungs.Sales do
     # The cashier decides whose catalog and stock this is.
     Repo.put_org_id(user.organization_id)
 
-    with [_ | _] = items <- build_items(cart),
-         {:ok, totals} <- compute_totals(items, payment) do
-      do_create_sale(user, items, totals)
-    else
+    case build_items(cart) do
       [] -> {:error, :empty_cart}
-      {:error, reason} -> {:error, reason}
+      items -> do_create_sale(user, items, payment)
     end
   end
 
@@ -154,18 +151,29 @@ defmodule Zahlungs.Sales do
     end
   end
 
-  defp do_create_sale(user, items, totals) do
-    sale_attrs = Map.merge(totals, %{user_id: user.id, status: "completed"})
-
+  # The money side depends on the shift's store (its promotions and its
+  # today), so it is worked out inside the transaction. A credit customer is
+  # locked first of all, before any plain read: see
+  # Customers.lock_for_credit/2.
+  defp do_create_sale(user, items, payment) do
     Multi.new()
-    |> Multi.run(:customer, fn _repo, _changes -> lock_credit_customer(totals) end)
+    |> Multi.run(:customer, fn _repo, _changes -> lock_credit_customer(payment) end)
     |> Multi.run(:shift, fn _repo, _changes -> Shifts.lock_current_shift(user) end)
     |> Multi.run(:store, fn _repo, %{shift: shift} -> {:ok, Stores.get_store!(shift.store_id)} end)
-    |> Multi.run(:due_date, fn _repo, %{store: store} -> check_due_date(totals, store) end)
-    |> Multi.insert(:sale, fn %{shift: shift, store: store} ->
+    |> Multi.run(:priced, fn _repo, %{store: store} -> {:ok, price_items(items, store)} end)
+    |> Multi.run(:totals, fn _repo, %{priced: priced} -> totals_for(user, priced, payment) end)
+    |> Multi.run(:due_date, fn _repo, %{store: store, totals: totals} ->
+      check_due_date(totals, store)
+    end)
+    |> Multi.run(:credit_limit, fn _repo, %{customer: customer, totals: totals} ->
+      check_credit_limit(customer, totals)
+    end)
+    |> Multi.insert(:sale, fn %{shift: shift, store: store, totals: totals} ->
       Sale.changeset(
         %Sale{},
-        Map.merge(sale_attrs, %{
+        Map.merge(totals, %{
+          user_id: user.id,
+          status: "completed",
           shift_id: shift.id,
           store_id: store.id,
           code: generate_code(store)
@@ -183,17 +191,70 @@ defmodule Zahlungs.Sales do
     end
   end
 
-  # A credit sale's debt must keep the customer within their limit, checked
-  # under a lock on the customer so two tablets can't both go over it. This is
-  # the transaction's first step: see Customers.lock_for_credit/2.
-  defp lock_credit_customer(%{payment_method: "credit"} = totals) do
-    Zahlungs.Customers.lock_for_credit(
-      totals.customer_id,
-      Decimal.sub(totals.total, totals.amount_paid)
-    )
+  # A credit sale's customer, locked as the transaction's first read so the
+  # limit check further on sees what another tablet just committed. An id
+  # that doesn't parse is left to settle_credit/2 (:customer_required).
+  defp lock_credit_customer(payment) do
+    method = payment[:payment_method] || payment["payment_method"]
+
+    with "credit" <- method,
+         {:ok, id} <- credit_customer(payment[:customer_id] || payment["customer_id"]) do
+      Zahlungs.Customers.lock_credit_customer(id)
+    else
+      _ -> {:ok, nil}
+    end
   end
 
-  defp lock_credit_customer(_totals), do: {:ok, nil}
+  # Its debt (total less the down payment) must keep it within its limit.
+  defp check_credit_limit(nil, _totals), do: {:ok, nil}
+
+  defp check_credit_limit(customer, totals) do
+    with :ok <-
+           Zahlungs.Customers.check_credit_limit(
+             customer,
+             Decimal.sub(totals.total, totals.amount_paid)
+           ),
+         do: {:ok, customer}
+  end
+
+  # Each line's promotion, as running today in the shift's store; the line
+  # keeps its discount and line_total becomes net of it.
+  defp price_items(items, store) do
+    promotions = Zahlungs.Promotions.active_for(store, LocalTime.today(store))
+
+    items
+    |> Enum.map(
+      &Map.put(&1, :product, %{
+        id: &1.product_id,
+        category_id: &1.category_id,
+        consignment: &1.consignment
+      })
+    )
+    |> Zahlungs.Promotions.apply(promotions)
+    |> Enum.map(&%{&1 | line_total: Decimal.sub(&1.line_total, &1.discount)})
+  end
+
+  defp totals_for(user, items, payment) do
+    with {:ok, totals} <- compute_totals(items, payment),
+         :ok <- within_cashier_limit(user, totals) do
+      {:ok, totals}
+    end
+  end
+
+  # An organization may limit what a cashier takes off by hand, in percent of
+  # the subtotal (after promotions). Admins aren't limited.
+  defp within_cashier_limit(%User{role: "admin"}, _totals), do: :ok
+
+  defp within_cashier_limit(%User{} = user, %{discount: discount, subtotal: subtotal}) do
+    case Zahlungs.Promotions.cashier_discount_limit(user.organization_id) do
+      nil ->
+        :ok
+
+      limit ->
+        most = subtotal |> Decimal.mult(limit) |> Decimal.div(100)
+        if Decimal.gt?(discount, most), do: {:error, :discount_over_limit}, else: :ok
+    end
+  end
 
   # Its due date can't be before the today of the shift's store.
   defp check_due_date(%{payment_method: "credit", due_date: due_date}, store) do
@@ -215,7 +276,9 @@ defmodule Zahlungs.Sales do
   defp insert_items_and_decrement_stock(multi, items) do
     Enum.reduce(items, multi, fn item, multi ->
       multi
-      |> Multi.insert({:item, item.product_id}, fn %{sale: sale} ->
+      |> Multi.insert({:item, item.product_id}, fn %{sale: sale, priced: priced} ->
+        item = Enum.find(priced, &(&1.product_id == item.product_id))
+
         SaleItem.changeset(%SaleItem{}, %{
           sale_id: sale.id,
           product_id: item.product_id,
@@ -224,7 +287,10 @@ defmodule Zahlungs.Sales do
           purchase_price: item.purchase_price,
           line_total: item.line_total,
           consignment: item.consignment,
-          supplier_id: item.supplier_id
+          supplier_id: item.supplier_id,
+          discount: item.discount,
+          promotion_id: item.promotion_id,
+          promotion_name: item.promotion_name
         })
       end)
       |> Multi.run({:stock, item.product_id}, fn repo, %{store: store} ->
@@ -274,7 +340,8 @@ defmodule Zahlungs.Sales do
               purchase_price: product.purchase_price,
               line_total: Decimal.mult(product.price, qty),
               consignment: product.consignment,
-              supplier_id: if(product.consignment, do: product.supplier_id)
+              supplier_id: if(product.consignment, do: product.supplier_id),
+              category_id: product.category_id
             }
           ]
 
@@ -531,7 +598,8 @@ defmodule Zahlungs.Sales do
           select: %{
             items_sold: coalesce(sum(i.quantity), 0),
             gross_sales: coalesce(sum(i.line_total), 0),
-            cogs: coalesce(sum(fragment("? * ?", i.purchase_price, i.quantity)), 0)
+            cogs: coalesce(sum(fragment("? * ?", i.purchase_price, i.quantity)), 0),
+            promo_discount: coalesce(sum(i.discount), 0)
           }
       )
 
@@ -546,6 +614,8 @@ defmodule Zahlungs.Sales do
       tax: to_decimal(totals.tax),
       # Sold on credit (piutang): in the revenue, not yet all received.
       credit_total: to_decimal(totals.credit_total),
+      # What promotions took off (gross_sales is already net of it).
+      promo_discount: to_decimal(items.promo_discount),
       gross_sales: gross_sales,
       cogs: cogs,
       gross_profit: Decimal.sub(gross_sales, cogs)

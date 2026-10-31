@@ -307,4 +307,113 @@ defmodule Zahlungs.PromotionsTest do
       end)
     end
   end
+
+  describe "sales" do
+    import Zahlungs.ShiftsFixtures
+
+    alias Zahlungs.{Customers, Sales}
+
+    setup do
+      user = user_on_shift_fixture()
+      product = product_fixture(price: Decimal.new("10000"), stock: 20)
+      promotion = promotion_fixture(%{product_ids: [product.id]})
+      %{user: user, product: product, promotion: promotion}
+    end
+
+    defp sell(user, product, qty, payment \\ %{}) do
+      Sales.create_sale(
+        user,
+        [%{product_id: product.id, quantity: qty}],
+        Map.merge(%{amount_paid: "1000000"}, payment)
+      )
+    end
+
+    test "a sale takes each line's promotion off and keeps it on the line", ctx do
+      assert {:ok, sale} = sell(ctx.user, ctx.product, 2)
+      assert [item] = sale.items
+
+      assert Decimal.equal?(item.discount, d("2000"))
+      assert Decimal.equal?(item.line_total, d("18000"))
+      assert Decimal.equal?(item.unit_price, d("10000"))
+      assert {item.promotion_id, item.promotion_name} == {ctx.promotion.id, ctx.promotion.name}
+      assert Decimal.equal?(sale.subtotal, d("18000"))
+      assert Decimal.equal?(sale.total, d("18000"))
+    end
+
+    test "the sale works the promotion out itself", ctx do
+      {:ok, _} = Promotions.set_active(promo_admin(), ctx.promotion, false)
+
+      assert {:ok, %{items: [item]}} = sell(ctx.user, ctx.product, 2)
+      assert Decimal.equal?(item.discount, d("0"))
+      assert item.promotion_id == nil
+    end
+
+    test "another store's promotion and consignment products get nothing", ctx do
+      {:ok, _} =
+        Promotions.update_promotion(promo_admin(), ctx.promotion, %{
+          all_stores: false,
+          store_ids: [store_fixture().id]
+        })
+
+      assert {:ok, %{items: [item]}} = sell(ctx.user, ctx.product, 1)
+      assert Decimal.equal?(item.discount, d("0"))
+
+      consigned =
+        product_fixture(
+          price: Decimal.new("10000"),
+          consignment: true,
+          supplier_id: supplier_fixture().id
+        )
+
+      promotion_fixture(%{product_ids: [consigned.id]})
+      assert {:ok, %{items: [item]}} = sell(ctx.user, consigned, 1)
+      assert Decimal.equal?(item.discount, d("0"))
+    end
+
+    test "a cashier's manual discount is limited, an admin's isn't", ctx do
+      {:ok, _} = Promotions.set_cashier_discount_limit(promo_admin(), "10")
+      stock = stock_of(ctx.product)
+
+      # Subtotal after the promotion: 18.000, so 10% is 1.800.
+      assert sell(ctx.user, ctx.product, 2, %{discount: "1801"}) == {:error, :discount_over_limit}
+      assert stock_of(ctx.product) == stock
+      assert {:ok, _} = sell(ctx.user, ctx.product, 2, %{discount: "1800"})
+
+      {:ok, admin} = Accounts.set_user_role(user_fixture(), "admin")
+      Zahlungs.ShiftsFixtures.shift_fixture(admin)
+      assert {:ok, _} = sell(admin, ctx.product, 2, %{discount: "5000"})
+    end
+
+    test "a credit sale owes the total after the promotion", ctx do
+      customer = Zahlungs.CustomersFixtures.customer_fixture()
+
+      {:ok, _} =
+        sell(ctx.user, ctx.product, 2, %{
+          payment_method: "credit",
+          customer_id: customer.id,
+          amount_paid: "",
+          due_date: Date.add(today(), 30)
+        })
+
+      assert Decimal.equal?(Customers.balance(customer), d("18000"))
+    end
+
+    test "reports show what promotions took off", ctx do
+      {:ok, _} = sell(ctx.user, ctx.product, 2)
+      plain = product_fixture(price: Decimal.new("5000"), stock: 5)
+      {:ok, %{items: [plain_item]}} = sell(ctx.user, plain, 1)
+
+      assert Decimal.equal?(plain_item.discount, d("0"))
+      assert Decimal.equal?(plain_item.line_total, d("5000"))
+
+      report = Sales.sales_report(store_scope(), today(), today())
+      assert Decimal.equal?(report.promo_discount, d("2000"))
+      assert Decimal.equal?(report.gross_sales, d("23000"))
+
+      assert [row] = Promotions.report(store_scope(), today(), today())
+      assert {row.promotion_id, row.name, row.items} == {ctx.promotion.id, ctx.promotion.name, 2}
+      assert Decimal.equal?(row.discount, d("2000"))
+      assert Decimal.equal?(row.revenue, d("18000"))
+    end
+  end
 end
