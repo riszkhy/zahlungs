@@ -548,6 +548,9 @@ defmodule ZahlungsWeb.ServiceLive.Index do
     <.header>
       Layanan
       <:subtitle>Pulsa, paket data, token PLN dan tagihan{if @store, do: " · #{@store.name}"}</:subtitle>
+      <:actions>
+        <.link navigate={~p"/services/history"} class="chip">Lihat semua riwayat</.link>
+      </:actions>
     </.header>
 
     <div :if={is_nil(@shift)} class="mt-6 rounded-lg border border-gray-200 bg-gray-50 p-5">

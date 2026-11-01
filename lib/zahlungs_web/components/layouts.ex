@@ -94,7 +94,10 @@ defmodule ZahlungsWeb.Layouts do
       <.menu_group
         :if={@current_user.role != "superadmin"}
         title="Kasir"
-        links={[{"Home", ~p"/home"} | cashier_links()] ++ commission_link(@current_user)}
+        links={
+          [{"Home", ~p"/home"} | cashier_links()] ++
+            [{"Riwayat layanan", ~p"/services/history"}] ++ commission_link(@current_user)
+        }
       />
       <.menu_group :if={@current_user.role == "admin"} title="Admin" links={admin_links()} />
 

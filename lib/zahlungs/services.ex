@@ -1302,6 +1302,66 @@ defmodule Zahlungs.Services do
     )
   end
 
+  @doc """
+  The services of the scope's store(s), whoever recorded them and whatever
+  their status, newest first, with who recorded them and where.
+
+  Options: `:date_from` / `:date_to` (local days of the scope's store),
+  `:status`, `:category`, `:search` (part of the number or of the code),
+  `:limit` / `:offset`.
+  """
+  def list_transactions(%Scope{} = scope, opts \\ []) do
+    scope
+    |> transactions_query(opts)
+    |> order_by([t], desc: t.inserted_at, desc: t.id)
+    |> page(opts[:limit], opts[:offset])
+    |> preload([:store, :user])
+    |> Repo.all()
+  end
+
+  @doc "Counts the services `list_transactions/2` lists with the same filters."
+  def count_transactions(%Scope{} = scope, opts \\ []) do
+    scope |> transactions_query(opts) |> Repo.aggregate(:count)
+  end
+
+  defp transactions_query(scope, opts) do
+    Transaction
+    |> for_store(scope)
+    |> on_days(opts[:date_from], opts[:date_to], scope)
+    |> transaction_is(:status, opts[:status])
+    |> transaction_is(:category, opts[:category])
+    |> search_transactions(opts[:search])
+  end
+
+  defp on_days(query, %Date{} = date_from, %Date{} = date_to, scope) do
+    {start, finish} = LocalTime.day_range(date_from, date_to, scope.store)
+    where(query, [t], t.inserted_at >= ^start and t.inserted_at <= ^finish)
+  end
+
+  defp on_days(query, _date_from, _date_to, _scope), do: query
+
+  defp transaction_is(query, _field, value) when value in [nil, ""], do: query
+  defp transaction_is(query, field, value), do: where(query, [t], field(t, ^field) == ^value)
+
+  # A number is matched as it is stored, without what people type between the
+  # digits (see Transaction.record_changeset/2); a code as it is typed.
+  defp search_transactions(query, nil), do: query
+
+  defp search_transactions(query, text) do
+    case String.trim(text) do
+      "" ->
+        query
+
+      term ->
+        number = like_pattern(String.replace(term, ~r/[\s\-\.\+]/, ""))
+        code = like_pattern(term)
+        where(query, [t], like(t.customer_ref, ^number) or like(t.code, ^code))
+    end
+  end
+
+  # What is typed is text, not a pattern.
+  defp like_pattern(text), do: "%" <> String.replace(text, ~r/[\\%_]/, "\\\\\\0") <> "%"
+
   @doc "The services recorded on a shift, newest first."
   def list_shift_transactions(%Shift{id: shift_id}) do
     Repo.all(

@@ -39,6 +39,8 @@ Aturan akses berlapis (router):
 │   │     └─ Modal struk: Print receipt · Koreksi/batalkan · New Transaction
 │   ├── /services               Layanan PPOB: catat pulsa/paket/token/tagihan (PLN, BPJS, PDAM…),
 │   │     │                     lalu tandai berhasil (token/SN) atau gagal
+│   │     ├── /services/history       Riwayat layanan: semua transaksi cabang (filter tanggal, status,
+│   │     │                           kategori, cari nomor/kode, paginasi)
 │   │     └── /services/:id/receipt   Struk layanan versi cetak
 │   ├── /commissions            Komisi saya (kasir): komisi layanan sukses yang dicatat sendiri
 │   ├── /catalog                Katalog produk (browse, cari, filter, paginasi)
@@ -88,6 +90,7 @@ Urutan link disesuaikan peran:
 | Home        |   –   |    ✓    |   ✓   | `/home`                |
 | Cashier     |   –   |    ✓    |   ✓   | `/cashier`             |
 | Layanan     |   –   |    ✓    |   ✓   | `/services`            |
+| Riwayat layanan | – |    ✓    |   ✓   | `/services/history`    |
 | Catalog     |   –   |    ✓    |   ✓   | `/catalog`             |
 | Sales       |   –   |    ✓    |   ✓   | `/sales`               |
 | Shifts      |   –   |    ✓    |   ✓   | `/shifts`              |
