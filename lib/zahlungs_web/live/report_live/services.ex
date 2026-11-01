@@ -55,7 +55,7 @@ defmodule ZahlungsWeb.ReportLive.Services do
 
     <p :if={is_nil(@report)} class="mt-6 text-sm text-gray-500">Pilih rentang tanggal yang valid.</p>
 
-    <div :if={@report} class="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-5">
+    <div :if={@report} class="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-7">
       <div class="rounded-lg border border-gray-200 p-4">
         <p class="text-sm text-gray-500">Berhasil</p>
         <p class="mt-1 text-2xl font-semibold">{@report.success_count}</p>
@@ -75,6 +75,14 @@ defmodule ZahlungsWeb.ReportLive.Services do
       <div class="rounded-lg border border-gray-200 p-4">
         <p class="text-sm text-gray-500">Margin</p>
         <p class="mt-1 text-xl font-semibold text-green-700">{format_money(@report.margin)}</p>
+      </div>
+      <div class="rounded-lg border border-gray-200 p-4">
+        <p class="text-sm text-gray-500">Komisi kasir</p>
+        <p class="mt-1 text-xl font-semibold">{format_money(@report.commission)}</p>
+      </div>
+      <div class="rounded-lg border border-gray-200 p-4">
+        <p class="text-sm text-gray-500">Margin bersih</p>
+        <p class="mt-1 text-xl font-semibold text-green-700">{format_money(@report.net_margin)}</p>
       </div>
     </div>
 

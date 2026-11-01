@@ -152,6 +152,7 @@ defmodule ZahlungsWeb.Router do
       live "/reports/stock", ReportLive.Stock, :index
       live "/reports/consignment", ReportLive.Consignment, :index
       live "/reports/services", ReportLive.Services, :index
+      live "/reports/commissions", ReportLive.Commissions, :index
       live "/reports/receivables", ReportLive.Receivables, :index
     end
   end

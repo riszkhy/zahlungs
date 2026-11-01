@@ -150,6 +150,7 @@ defmodule ZahlungsWeb.Layouts do
       {"Stock", ~p"/reports/stock"},
       {"Consignment", ~p"/reports/consignment"},
       {"Laporan layanan", ~p"/reports/services"},
+      {"Komisi kasir", ~p"/reports/commissions"},
       {"Laporan piutang", ~p"/reports/receivables"}
     ]
   end
