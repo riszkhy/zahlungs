@@ -140,6 +140,7 @@ defmodule ZahlungsWeb.Router do
       live "/admin/customers/:id", CustomerLive.Show, :show
 
       live "/admin/services", ServiceProductLive.Index, :index
+      live "/admin/services/commission", ServiceCommissionLive, :index
       live "/admin/services/new", ServiceProductLive.Index, :new
       live "/admin/services/:id/edit", ServiceProductLive.Index, :edit
       live "/admin/deposits", DepositLive.Index, :index

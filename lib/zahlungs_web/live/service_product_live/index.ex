@@ -242,6 +242,7 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
         <button :if={@catalog_account} type="button" phx-click="price_update" phx-disable-with="Mengambil harga..." class="chip mr-2">
           Perbarui dari SBI
         </button>
+        <.link navigate={~p"/admin/services/commission"} class="chip mr-2">Komisi kasir</.link>
         <.link patch={~p"/admin/services/new"}><.button>Produk baru</.button></.link>
       </:actions>
     </.header>
