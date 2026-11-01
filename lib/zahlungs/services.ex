@@ -31,7 +31,8 @@ defmodule Zahlungs.Services do
   alias Zahlungs.Accounts.User
   alias Zahlungs.{Deposits, LocalTime, Scope, Shifts, Stores}
   alias Zahlungs.Shifts.Shift
-  alias Zahlungs.Services.{Brand, BrandPrefix, CatalogCache, Dispatcher, Inquiry, Product}
+  alias Zahlungs.Services.{Brand, BrandPrefix, CatalogCache, Commissions, Dispatcher, Inquiry}
+  alias Zahlungs.Services.Product
   alias Zahlungs.Services.{Provider, Ref, Transaction}
 
   @category_labels [
@@ -43,6 +44,12 @@ defmodule Zahlungs.Services do
 
   @doc "The categories as `{value, label}` pairs, in display order."
   def categories, do: @category_labels
+
+  ## Cashier commission (see `Zahlungs.Services.Commissions`)
+
+  defdelegate commission_rates, to: Commissions, as: :rates
+  defdelegate commission_percent(category), to: Commissions, as: :percent
+  defdelegate save_commission_rates(user, values), to: Commissions, as: :save_rates
 
   ## Products
 
