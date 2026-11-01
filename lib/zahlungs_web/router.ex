@@ -77,6 +77,7 @@ defmodule ZahlungsWeb.Router do
       live "/catalog", CatalogLive, :index
       live "/cashier", CashierLive, :index
       live "/services", ServiceLive.Index, :index
+      live "/commissions", CommissionLive, :index
       live "/sales", SalesLive.Index, :index
       live "/sales/:id", SalesLive.Index, :show
       live "/shifts", ShiftLive.Index, :index

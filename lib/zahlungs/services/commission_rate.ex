@@ -6,6 +6,8 @@ defmodule Zahlungs.Services.CommissionRate do
   use Ecto.Schema
   import Ecto.Changeset
 
+  alias Zahlungs.Services.Product
+
   schema "service_commission_rates" do
     field :category, :string
     field :percent, :decimal, default: Decimal.new(0)
@@ -19,7 +21,7 @@ defmodule Zahlungs.Services.CommissionRate do
     rate
     |> cast(attrs, [:category, :percent])
     |> validate_required([:category, :percent])
-    |> validate_inclusion(:category, Zahlungs.Services.Product.categories())
+    |> validate_inclusion(:category, Product.categories())
     |> validate_number(:percent, greater_than_or_equal_to: 0, less_than_or_equal_to: 100)
     |> Zahlungs.Organizations.put_organization()
     |> unique_constraint(:category,

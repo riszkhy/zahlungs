@@ -40,6 +40,7 @@ Aturan akses berlapis (router):
 │   ├── /services               Layanan PPOB: catat pulsa/paket/token/tagihan (PLN, BPJS, PDAM…),
 │   │     │                     lalu tandai berhasil (token/SN) atau gagal
 │   │     └── /services/:id/receipt   Struk layanan versi cetak
+│   ├── /commissions            Komisi saya (kasir): komisi layanan sukses yang dicatat sendiri
 │   ├── /catalog                Katalog produk (browse, cari, filter, paginasi)
 │   ├── /sales                  Riwayat transaksi (filter tanggal, paginasi)
 │   │     └── /sales/:id        Detail + struk · Batalkan (koreksi) · Return (admin)
@@ -61,7 +62,8 @@ Aturan akses berlapis (router):
     ├── /admin/customers        Pelanggan piutang: utang, limit (+ /new, /:id/edit)
     │     └── /admin/customers/:id   Kartu piutang: batalkan pelunasan, kembalikan kelebihan
     ├── /admin/services         Produk layanan PPOB: modal, margin Rp/% (+ /new, /:id/edit)
-    │     └── /admin/services/export.xlsx   Export Excel, mengikuti filter kategori/operator
+    │     ├── /admin/services/export.xlsx   Export Excel, mengikuti filter kategori/operator
+    │     └── /admin/services/commission    Persen komisi kasir per kategori (dari margin)
     ├── /admin/deposits         Akun deposit: perkiraan saldo, isi ulang, pencocokan
     │                           (+ /new, /:id, /:id/edit)
     ├── /reports/sales          Laporan penjualan (ringkasan, harian, per kasir,
@@ -69,7 +71,9 @@ Aturan akses berlapis (router):
     ├── /reports/stock          Laporan stok (nilai persediaan, stok rendah/habis)
     ├── /reports/consignment    Settlement konsinyasi (payable/dibayar di rentang, sisa utang s.d. tanggal akhir
     │                           + sisa stok titipan per produk)
-    ├── /reports/services       Laporan layanan (berhasil/gagal, nilai, modal, margin per kategori)
+    ├── /reports/services       Laporan layanan (berhasil/gagal, nilai, modal, margin per kategori,
+    │                           komisi kasir, margin bersih)
+    ├── /reports/commissions    Komisi kasir per kasir + rincian transaksinya
     ├── /reports/receivables    Laporan piutang (utang per pelanggan, lewat jatuh tempo,
     │                           pelunasan per cara bayar dan per toko)
     └── /dashboard              Phoenix LiveDashboard (dev/test saja)
@@ -98,6 +102,8 @@ Urutan link disesuaikan peran:
 | Stock       |   –   |    –    |   ✓   | `/reports/stock`       |
 | Consignment |   –   |    –    |   ✓   | `/reports/consignment` |
 | Laporan layanan | – |   –    |   ✓   | `/reports/services`    |
+| Komisi kasir | –   |    –    |   ✓   | `/reports/commissions` |
+| Komisi saya |   –   |    ✓    |   –   | `/commissions`         |
 | Profile     |   –   |    ✓    |   ✓   | `/users/settings`      |
 | Log in      |   ✓   |    –    |   –   | `/users/log_in`        |
 | Log out     |   –   |    ✓    |   ✓   | DELETE `/users/log_out`|
@@ -298,6 +304,10 @@ Kelola user (admin):
   dicatat. Tablet mendatar dan layar lebar: panel di samping.
 - Shift tidak bisa ditutup selama masih ada layanan *diproses*.
 - **/admin/services**, **/admin/deposits**, **/reports/services**: admin saja.
+- Komisi kasir: persen dari margin per kategori (`/admin/services/commission`,
+  admin), disalin ke transaksi saat dicatat kasir; hanya transaksi sukses yang
+  berkomisi. Kasir melihat miliknya di `/commissions` dan "Komisi shift ini"
+  di /services; admin melihat semua kasir di `/reports/commissions`.
   Form toko memilih akun deposit yang dipakai toko itu.
 - Daftar produk layanan bisa disaring per kategori dan per operator (untuk
   pulsa/paket data; "Lainnya" = pulsa/paket data tanpa operator). Kolom

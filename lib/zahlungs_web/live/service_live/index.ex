@@ -373,7 +373,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
   end
 
   defp load_transactions(%{assigns: %{shift: nil}} = socket),
-    do: assign(socket, processing: [], history: [], refunds: [])
+    do: assign(socket, processing: [], history: [], refunds: [], commission: nil)
 
   defp load_transactions(socket) do
     {processing, history} =
@@ -384,9 +384,16 @@ defmodule ZahlungsWeb.ServiceLive.Index do
     assign(socket,
       processing: processing,
       history: history,
-      refunds: Services.list_refunds_due(shift_scope(socket))
+      refunds: Services.list_refunds_due(shift_scope(socket)),
+      commission: shift_commission(socket)
     )
   end
+
+  # Only a cashier earns commission; an admin serving at the counter sees none.
+  defp shift_commission(%{assigns: %{current_user: %{role: "cashier"}, shift: shift}}),
+    do: Services.shift_commission(shift)
+
+  defp shift_commission(_socket), do: nil
 
   # The price of the selected service — from the inquiry for an api bill, with
   # the bill typed in for a manual one — and the change for the cash entered.
@@ -839,6 +846,11 @@ defmodule ZahlungsWeb.ServiceLive.Index do
         </div>
       </div>
     </section>
+
+    <p :if={@commission} id="shift-commission" class="mt-6 text-sm text-gray-600">
+      Komisi shift ini: <strong class="text-green-700">{format_money(@commission)}</strong>
+      <.link navigate={~p"/commissions"} class="ml-2 underline">Komisi saya</.link>
+    </p>
 
     <section :if={@history != []} class="mt-6">
       <h3 class="font-semibold text-gray-700">Riwayat shift ini</h3>

@@ -94,7 +94,7 @@ defmodule ZahlungsWeb.Layouts do
       <.menu_group
         :if={@current_user.role != "superadmin"}
         title="Kasir"
-        links={[{"Home", ~p"/home"} | cashier_links()]}
+        links={[{"Home", ~p"/home"} | cashier_links()] ++ commission_link(@current_user)}
       />
       <.menu_group :if={@current_user.role == "admin"} title="Admin" links={admin_links()} />
 
@@ -133,6 +133,10 @@ defmodule ZahlungsWeb.Layouts do
       {"Catalog", ~p"/catalog"}
     ]
   end
+
+  # Only a cashier earns commission (an admin has the report instead).
+  defp commission_link(%{role: "cashier"}), do: [{"Komisi saya", ~p"/commissions"}]
+  defp commission_link(_user), do: []
 
   defp admin_links do
     [
