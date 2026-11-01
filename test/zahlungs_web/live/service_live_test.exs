@@ -16,6 +16,13 @@ defmodule ZahlungsWeb.ServiceLiveTest do
 
   defp money(value), do: Decimal.new(value)
 
+  # Paying is two steps: the popup, then its confirmation. What can't be paid
+  # stops at the first, with its message still there to read.
+  defp record(socket, params) do
+    reviewed = event(socket, "review", params)
+    if reviewed.assigns.confirming, do: event(reviewed, "confirm_record"), else: reviewed
+  end
+
   describe "/services" do
     test "redirects guests to the log in page", %{conn: conn} do
       assert conn |> get("/services") |> redirected_to() == "/users/log_in"
@@ -69,7 +76,7 @@ defmodule ZahlungsWeb.ServiceLiveTest do
     defp sell(socket, product, form) do
       socket
       |> event("select", %{"id" => product.id})
-      |> event("record", %{"service" => form})
+      |> record(%{"service" => form})
     end
 
     test "records a service and lists it as processing", ctx do
@@ -126,9 +133,139 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       assert rendered =~ "Rp 8.000"
     end
 
+    test "asks first: nothing is recorded until it is confirmed", ctx do
+      socket =
+        ctx.socket
+        |> event("select", %{"id" => ctx.product.id})
+        |> event("review", %{
+          "service" => %{
+            "customer_ref" => "0812-3456-7890",
+            "payment_method" => "cash",
+            "amount_paid" => "20.000"
+          }
+        })
+
+      assert Services.list_shift_transactions(ctx.shift) == []
+      assert socket.assigns.confirming
+
+      rendered = html(socket)
+      assert rendered =~ "Konfirmasi pembayaran"
+      assert rendered =~ "0812 3456 7890"
+      assert rendered =~ ctx.product.name
+      assert rendered =~ "Tunai"
+      assert rendered =~ "Rp 20.000"
+      assert rendered =~ "Rp 8.000"
+      assert rendered =~ "Ya, catat"
+
+      socket = event(socket, "confirm_record")
+
+      assert [tx] = Services.list_shift_transactions(ctx.shift)
+      assert tx.customer_ref == "081234567890"
+      refute socket.assigns.confirming
+      refute html(socket) =~ "Konfirmasi pembayaran"
+    end
+
+    test "the first thing focused in the popup is Batal", ctx do
+      rendered =
+        ctx.socket
+        |> event("select", %{"id" => ctx.product.id})
+        |> event("review", %{
+          "service" => %{"customer_ref" => "081234567890", "amount_paid" => "12000"}
+        })
+        |> html()
+
+      [_, popup] = String.split(rendered, ~s(id="confirm-service-content"), parts: 2)
+      assert popup =~ ~r/<button[^>]*cancel_record.*Ya, catat/s
+      refute popup =~ ~r/Ya, catat.*Batal/s
+    end
+
+    test "Batal records nothing and keeps what was typed", ctx do
+      socket =
+        ctx.socket
+        |> event("select", %{"id" => ctx.product.id})
+        |> event("review", %{
+          "service" => %{"customer_ref" => "081234567890", "amount_paid" => "20.000"}
+        })
+        |> event("cancel_record")
+
+      refute socket.assigns.confirming
+      assert Services.list_shift_transactions(ctx.shift) == []
+      assert socket.assigns.form["customer_ref"] == "081234567890"
+      assert socket.assigns.form["amount_paid"] == "20000"
+    end
+
+    test "a second click records it only once", ctx do
+      socket =
+        ctx.socket
+        |> event("select", %{"id" => ctx.product.id})
+        |> record(%{"service" => %{"customer_ref" => "081234567890", "amount_paid" => "12000"}})
+        |> event("confirm_record")
+
+      assert [_one] = Services.list_shift_transactions(ctx.shift)
+      assert flash(socket, :error) == nil
+    end
+
+    test "confirming without the popup records nothing", ctx do
+      ctx.socket
+      |> event("select", %{"id" => ctx.product.id})
+      |> event("confirm_record")
+
+      assert Services.list_shift_transactions(ctx.shift) == []
+    end
+
+    test "what can't be paid doesn't open the popup", ctx do
+      socket = event(ctx.socket, "select", %{"id" => ctx.product.id})
+
+      for {form, message} <- [
+            {%{"customer_ref" => "", "amount_paid" => "12000"}, "Nomor tujuan harus 6–20 angka."},
+            {%{"customer_ref" => "12ab", "amount_paid" => "12000"},
+             "Nomor tujuan harus 6–20 angka."},
+            {%{"customer_ref" => "081234567890", "amount_paid" => "100"},
+             "Uang diterima kurang dari harga."},
+            {%{"customer_ref" => "081234567890", "amount_paid" => ""},
+             "Uang diterima kurang dari harga."}
+          ] do
+        refused = event(socket, "review", %{"service" => form})
+
+        refute refused.assigns.confirming
+        assert flash(refused, :error) == message
+      end
+    end
+
+    test "a bill without its amount doesn't open the popup", ctx do
+      bill = service_product_fixture(%{category: "tagihan", cost: "1500", margin_value: "3000"})
+
+      socket =
+        ctx.socket
+        |> event("set_category", %{"category" => "tagihan"})
+        |> event("select", %{"id" => bill.id})
+        |> event("review", %{
+          "service" => %{"customer_ref" => "081234567890", "amount_paid" => "12000"}
+        })
+
+      refute socket.assigns.confirming
+      assert flash(socket, :error) == "Isi nominal tagihan."
+    end
+
+    test "a price changed while the popup is open is refused, and the popup closes", ctx do
+      socket =
+        ctx.socket
+        |> event("select", %{"id" => ctx.product.id})
+        |> event("review", %{
+          "service" => %{"customer_ref" => "081234567890", "amount_paid" => "20.000"}
+        })
+
+      {:ok, _} = Services.update_product(ctx.product, %{margin_value: "2850"})
+      socket = event(socket, "confirm_record")
+
+      assert flash(socket, :error) =~ "berubah"
+      refute socket.assigns.confirming
+      assert Services.list_shift_transactions(ctx.shift) == []
+    end
+
     test "says what went wrong", ctx do
       no_product =
-        event(ctx.socket, "record", %{"service" => %{"customer_ref" => "081234567890"}})
+        record(ctx.socket, %{"service" => %{"customer_ref" => "081234567890"}})
 
       assert flash(no_product, :error) == "Pilih produk dulu."
 
@@ -198,7 +335,7 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       {:ok, _} = Services.update_product(ctx.product, %{margin_value: "2850"})
 
       socket =
-        event(socket, "record", %{
+        record(socket, %{
           "service" => %{
             "customer_ref" => "081234567890",
             "payment_method" => "cash",
@@ -319,7 +456,7 @@ defmodule ZahlungsWeb.ServiceLiveTest do
         ctx.socket
         |> typed("0812-3456-7890")
         |> event("select", %{"id" => ctx.tsel.id})
-        |> event("record", %{
+        |> record(%{
           "service" => %{"payment_method" => "cash", "amount_paid" => "12.000"}
         })
 
@@ -480,7 +617,7 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       socket =
         ctx.socket
         |> event("select", %{"id" => ctx.product.id})
-        |> event("record", %{
+        |> record(%{
           "service" => %{
             "customer_ref" => "081234567890",
             "payment_method" => "cash",
@@ -654,7 +791,7 @@ defmodule ZahlungsWeb.ServiceLiveTest do
 
       assert is_nil(socket.assigns.inquiry)
       assert is_nil(socket.assigns.preview)
-      refute html(socket) =~ ~s(phx-submit="record")
+      refute html(socket) =~ ~s(phx-submit="review")
     end
 
     test "the same months keep the result", ctx do
@@ -694,7 +831,7 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       socket =
         ctx.socket
         |> inquire("3")
-        |> event("record", %{
+        |> record(%{
           "service" => %{"payment_method" => "cash", "amount_paid" => "573.000"}
         })
 
@@ -730,7 +867,7 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       socket
       |> event("set_category", %{"category" => "pulsa"})
       |> event("select", %{"id" => pulsa.id})
-      |> event("record", %{
+      |> record(%{
         "service" => %{
           "customer_ref" => number,
           "payment_method" => "cash",
@@ -756,10 +893,10 @@ defmodule ZahlungsWeb.ServiceLiveTest do
 
       rendered = html(socket)
       refute rendered =~ "Cek pelanggan"
-      assert rendered =~ ~s(phx-submit="record")
+      assert rendered =~ ~s(phx-submit="review")
 
       socket =
-        event(socket, "record", %{
+        record(socket, %{
           "service" => %{
             "customer_ref" => "14123344441",
             "payment_method" => "cash",
@@ -788,17 +925,17 @@ defmodule ZahlungsWeb.ServiceLiveTest do
         |> event("select", %{"id" => token.id})
 
       assert html(socket) =~ "Cek pelanggan"
-      refute html(socket) =~ ~s(phx-submit="record")
+      refute html(socket) =~ ~s(phx-submit="review")
 
       socket = event(socket, "inquire", %{"service" => %{"customer_ref" => "1412-3344-441"}})
       rendered = html(socket)
       assert rendered =~ "PELANGGAN 4441"
       assert rendered =~ "R1/900VA"
       assert rendered =~ "Rp 22.000"
-      assert rendered =~ ~s(phx-submit="record")
+      assert rendered =~ ~s(phx-submit="review")
 
       socket =
-        event(socket, "record", %{
+        record(socket, %{
           "service" => %{"payment_method" => "cash", "amount_paid" => "22.000"}
         })
 
@@ -843,7 +980,7 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       assert rendered =~ "Rp 744.000"
 
       socket =
-        event(socket, "record", %{
+        record(socket, %{
           "service" => %{"payment_method" => "cash", "amount_paid" => "750.000"}
         })
 
@@ -862,7 +999,7 @@ defmodule ZahlungsWeb.ServiceLiveTest do
 
       assert is_nil(socket.assigns.inquiry)
       refute html(socket) =~ "PELANGGAN 3331"
-      refute html(socket) =~ ~s(phx-submit="record")
+      refute html(socket) =~ ~s(phx-submit="review")
     end
 
     test "a slow or refusing provider says so", ctx do
@@ -946,6 +1083,56 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       socket = info(socket, {:service_changed, id})
       assert socket.assigns.processing == []
       assert [%{status: "success"}] = socket.assigns.history
+    end
+  end
+
+  describe "the popup on an api account" do
+    setup do
+      api_store_fixture()
+      cashier = user_on_shift_fixture()
+      %{cashier: cashier, socket: mount_live(ServiceLive.Index, cashier)}
+    end
+
+    test "nothing goes to the provider until it is confirmed", ctx do
+      product = service_product_fixture(%{provider_code: "TSEL10"})
+
+      socket =
+        ctx.socket
+        |> event("set_category", %{"category" => "pulsa"})
+        |> event("select", %{"id" => product.id})
+        |> event("review", %{
+          "service" => %{"customer_ref" => "081234567891", "amount_paid" => "12000"}
+        })
+
+      assert html(socket) =~ "Ya, bayar"
+      refute_received {:fake_provider, :pay, _ref}
+      assert Services.list_shift_transactions(Shifts.current_shift(ctx.cashier)) == []
+
+      event(socket, "confirm_record")
+      assert_received {:fake_provider, :pay, _ref}
+    end
+
+    test "a bill shows who and what is being paid", ctx do
+      bill = api_product_fixture()
+
+      socket =
+        ctx.socket
+        |> event("set_category", %{"category" => "tagihan"})
+        |> event("select", %{"id" => bill.id})
+        |> event("inquire", %{"service" => %{"customer_ref" => "530011223331"}})
+
+      inquiry = socket.assigns.inquiry
+
+      rendered =
+        socket
+        |> event("review", %{"service" => %{"amount_paid" => "750.000"}})
+        |> html()
+
+      [_, popup] = String.split(rendered, ~s(id="confirm-service-content"), parts: 2)
+      assert popup =~ inquiry.customer_name
+      assert popup =~ inquiry.period
+      assert popup =~ "3 bulan"
+      assert popup =~ "5300 1122 3331"
     end
   end
 end

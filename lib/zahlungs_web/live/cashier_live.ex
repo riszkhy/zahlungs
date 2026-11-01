@@ -12,6 +12,7 @@ defmodule ZahlungsWeb.CashierLive do
     {:ok,
      socket
      |> assign(page_title: "Cashier", last_sale: nil, last_sale_balance: nil, scanning: false)
+     |> assign(:confirming_sale, false)
      |> assign(credit_query: "", credit_results: [])
      |> assign(:discount_limit, discount_limit(socket.assigns.current_user))
      |> assign(
@@ -508,7 +509,23 @@ defmodule ZahlungsWeb.CashierLive do
      |> assign_totals()}
   end
 
-  def handle_event("checkout", _params, socket) do
+  # Completing a sale is two steps: the popup says what is about to be sold, and
+  # only its confirmation records it.
+  def handle_event("review_checkout", _params, %{assigns: %{can_checkout: true}} = socket),
+    do: {:noreply, assign(socket, :confirming_sale, true)}
+
+  def handle_event("review_checkout", _params, socket),
+    do: {:noreply, put_flash(socket, :error, checkout_problem(socket.assigns))}
+
+  def handle_event("cancel_checkout", _params, socket),
+    do: {:noreply, assign(socket, :confirming_sale, false)}
+
+  # Not confirming (any more): a second click on the way, or a stale screen.
+  def handle_event("confirm_checkout", _params, %{assigns: %{confirming_sale: false}} = socket),
+    do: {:noreply, socket}
+
+  def handle_event("confirm_checkout", _params, socket) do
+    socket = assign(socket, :confirming_sale, false)
     cart = Enum.map(socket.assigns.cart, &%{product_id: &1.product_id, quantity: &1.quantity})
 
     payment = %{
@@ -823,6 +840,19 @@ defmodule ZahlungsWeb.CashierLive do
   end
 
   defp tendered(_assigns, _total), do: {Decimal.new(0), true}
+
+  # Why a sale that can_checkout refuses can't be completed: the button is off
+  # then, so this answers a stale screen.
+  defp checkout_problem(assigns) do
+    cond do
+      assigns.amount_error -> assigns.amount_error
+      assigns.credit_error -> assigns.credit_error
+      is_nil(assigns[:shift]) -> error_message(:no_open_shift)
+      assigns.cart == [] -> error_message(:empty_cart)
+      assigns.payment_method == "credit" -> error_message(:customer_required)
+      true -> error_message(:insufficient_payment)
+    end
+  end
 
   defp credit_ok?(false, _customer, _error), do: true
   defp credit_ok?(true, customer, error), do: customer != nil and is_nil(error)
@@ -1422,7 +1452,7 @@ defmodule ZahlungsWeb.CashierLive do
         </dl>
 
         <div class="mt-4">
-          <.button phx-click="checkout" disabled={not @can_checkout} class="w-full">
+          <.button phx-click="review_checkout" disabled={not @can_checkout} class="w-full">
             Complete Sale
           </.button>
         </div>
@@ -1452,6 +1482,57 @@ defmodule ZahlungsWeb.CashierLive do
         </button>
       </div>
     </div>
+
+    <.modal :if={@confirming_sale} id="confirm-sale" show on_cancel={JS.push("cancel_checkout")}>
+      <h3 class="text-lg font-semibold">Konfirmasi penjualan</h3>
+      <p class="mt-1 text-sm text-gray-500">Periksa barang dan pembayaran sebelum melanjutkan.</p>
+
+      <div class="mt-3 max-h-60 overflow-y-auto">
+        <table class="w-full text-sm">
+          <tr :for={item <- @priced_cart} class="border-t border-gray-100">
+            <td class="py-2">
+              <p class="font-medium">{item.name}</p>
+              <p class="text-xs text-gray-500">{item.quantity} × {format_money(item.unit_price)}</p>
+              <p :if={item.promotion_name} class="text-xs text-amber-700">
+                {item.promotion_name} −{format_money(item.discount)}
+              </p>
+            </td>
+            <td class="py-2 text-right">{format_money(item.line_total)}</td>
+          </tr>
+        </table>
+      </div>
+
+      <dl class="mt-3 space-y-1 border-t border-gray-200 pt-3 text-sm">
+        <.receipt_row
+          :if={Decimal.gt?(@promo_saving, 0)}
+          label="Hemat promo"
+          value={"−" <> format_money(@promo_saving)}
+        />
+        <.receipt_row label="Subtotal" value={format_money(@subtotal)} />
+        <.receipt_row :if={Decimal.gt?(to_dec(@discount), 0)} label="Diskon" value={"−" <> format_money(to_dec(@discount))} />
+        <.receipt_row :if={Decimal.gt?(to_dec(@tax), 0)} label="Pajak" value={format_money(to_dec(@tax))} />
+        <.receipt_row label="Total" value={format_money(@total)} bold />
+        <.receipt_row label="Cara bayar" value={payment_method_label(@payment_method)} />
+        <.receipt_row :if={@payment_method == "cash"} label="Uang diterima" value={format_money(to_dec(@amount_paid))} />
+        <.receipt_row :if={@payment_method == "cash"} label="Kembalian" value={format_money(@change_due)} />
+        <%= if @payment_method == "credit" and @credit_customer do %>
+          <.receipt_row label="Pelanggan" value={@credit_customer.name} />
+          <.receipt_row label="Uang muka" value={format_money(to_dec(@down_payment))} />
+          <.receipt_row
+            label="Jadi utang"
+            value={format_money(Decimal.max(Decimal.sub(@total, to_dec(@down_payment)), 0))}
+            bold
+          />
+          <.receipt_row label="Jatuh tempo" value={@due_date} />
+        <% end %>
+      </dl>
+
+      <%!-- Batal comes first: the popup focuses it, so a scanner's Enter sells nothing. --%>
+      <div class="mt-6 flex justify-end gap-2">
+        <button type="button" phx-click="cancel_checkout" class="chip">Batal</button>
+        <.button phx-click="confirm_checkout" phx-disable-with="Menyimpan...">Ya, selesaikan</.button>
+      </div>
+    </.modal>
 
     <.modal :if={@last_sale} id="receipt-modal" show on_cancel={JS.push("new_sale")}>
       <h3 class="text-lg font-semibold text-center">Transaction complete</h3>

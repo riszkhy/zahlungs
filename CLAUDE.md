@@ -132,6 +132,7 @@ Spec: `docs/superpowers/specs/2026-10-21-layanan-ppob-sbi-design.md`. SBI has no
 
 - **A sale needs an open shift.** `Sales.create_sale/3` looks up and row-locks the cashier's open shift itself; it ignores any `shift_id` from the caller and returns `{:error, :no_open_shift}` otherwise.
 - **A credit sale needs a customer within their limit.** `create_sale/3` with `payment_method: "credit"` locks the customer and refuses `:over_credit_limit` / `:customer_inactive`; only its down payment is cash in the drawer (`expected_cash/1`), and a return refunds only that.
+- **Paying asks first.** On `/cashier` and `/services` the button only opens a popup (`review_checkout`, `review`); `confirm_checkout` / `confirm_record` do the work, and only while the popup is open, so a second click does nothing. The popup focuses Batal first.
 - **Stock can't be oversold.** Stock is decremented with a guarded `UPDATE ... WHERE stock >= qty` inside the sale's transaction.
 - **Sale items are snapshots.** Unit price, purchase price, the consignment flag + supplier, and the promotion's `discount` + `promotion_name` are copied onto `sale_items` at sale time; `line_total` is net of the discount (`unit_price` stays the normal price). Reports read the snapshot, not the product.
 - **A sale's money is worked out in its transaction**, after the shift's store is known (its promotions and today); a credit customer is still locked first (see `Customers.lock_for_credit/2`).

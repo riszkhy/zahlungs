@@ -34,7 +34,7 @@ Aturan akses berlapis (router):
 │   │     ├─ Gate: buka shift (modal awal) sebelum transaksi
 │   │     ├─ Banner shift: Catat kas · Close shift
 │   │     ├─ Cari produk / scan barcode (keyboard & kamera HP)
-│   │     ├─ Keranjang → metode bayar (Tunai / Piutang; lainnya disabled) → Complete Sale
+│   │     ├─ Keranjang → metode bayar (Tunai / Piutang; lainnya disabled) → Complete Sale → popup konfirmasi
 │   │     ├─ Piutang: cari pelanggan → sisa utang & nota → terima pelunasan
 │   │     └─ Modal struk: Print receipt · Koreksi/batalkan · New Transaction
 │   ├── /services               Layanan PPOB: catat pulsa/paket/token/tagihan (PLN, BPJS, PDAM…),
@@ -204,7 +204,7 @@ Urutan link disesuaikan peran:
 ```
 Transaksi normal:
   login → /cashier → buka shift → scan/cari → keranjang → Tunai + amount
-  → Complete Sale → struk (print) → New Transaction
+  → Complete Sale → popup konfirmasi → struk (print) → New Transaction
 
 Koreksi salah input:
   struk → "Koreksi / batalkan" → /sales/:id → Batalkan (koreksi) + alasan
@@ -319,6 +319,9 @@ Kelola user (admin):
   menampilkan produk terpilih dan harganya (Bayar / Cek tagihan); panel
   pembayaran naik menutupi daftar saat produk diketuk, dan menutup setelah
   dicatat. Tablet mendatar dan layar lebar: panel di samping.
+- Bayar / Catat membuka popup konfirmasi (nomor tujuan, produk, harga, cara bayar);
+  transaksi baru dicatat dan dikirim setelah "Ya, bayar" / "Ya, catat". Sama di
+  /cashier: Complete Sale membuka popup, penjualan tercatat setelah "Ya, selesaikan".
 - Shift tidak bisa ditutup selama masih ada layanan *diproses*.
 - **/admin/services**, **/admin/deposits**, **/reports/services**: admin saja.
 - Komisi kasir: persen dari margin per kategori (`/admin/services/commission`,

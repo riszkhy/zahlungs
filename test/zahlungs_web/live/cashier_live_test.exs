@@ -15,6 +15,13 @@ defmodule ZahlungsWeb.CashierLiveTest do
   alias Zahlungs.{Catalog, Sales, Shifts}
   alias ZahlungsWeb.CashierLive
 
+  # Completing a sale is two steps: the popup, then its confirmation. What
+  # can't be sold stops at the first, with its message still there to read.
+  defp checkout(socket) do
+    reviewed = event(socket, "review_checkout")
+    if reviewed.assigns.confirming_sale, do: event(reviewed, "confirm_checkout"), else: reviewed
+  end
+
   describe "/cashier" do
     test "redirects guests to the log in page", %{conn: conn} do
       conn = get(conn, "/cashier")
@@ -390,7 +397,7 @@ defmodule ZahlungsWeb.CashierLiveTest do
         |> event("search", %{"q" => last_one.name})
         |> event("add", %{"id" => last_one.id})
         |> event("set_amount_paid", %{"value" => "1000"})
-        |> event("checkout")
+        |> checkout()
         |> event("new_sale")
         |> event("search", %{"q" => last_one.name})
 
@@ -513,9 +520,9 @@ defmodule ZahlungsWeb.CashierLiveTest do
         socket
         |> event("set_amount_paid", %{"value" => "100000"})
         |> event("payment", %{"discount" => "-500", "tax" => ""})
-        |> event("checkout")
+        |> checkout()
 
-      assert flash(socket, :error) == "Diskon harus antara 0 dan subtotal."
+      assert flash(socket, :error) == "Diskon tidak boleh negatif."
       assert is_nil(socket.assigns.last_sale)
       assert stock_of(product) == 10
     end
@@ -539,7 +546,7 @@ defmodule ZahlungsWeb.CashierLiveTest do
 
     test "records the sale on the open shift, decrements stock and shows the receipt",
          %{socket: socket, user: user, product: product} do
-      socket = event(socket, "checkout")
+      socket = checkout(socket)
 
       sale = socket.assigns.last_sale
       assert flash(socket, :info) == "Sale #{sale.code} completed."
@@ -561,11 +568,66 @@ defmodule ZahlungsWeb.CashierLiveTest do
       assert is_nil(socket.assigns.last_sale)
     end
 
+    test "asks first: nothing is sold until it is confirmed", %{
+      socket: socket,
+      product: product
+    } do
+      assert html(socket) =~ ~s(phx-click="review_checkout")
+
+      socket = event(socket, "review_checkout")
+
+      assert socket.assigns.confirming_sale
+      assert is_nil(socket.assigns.last_sale)
+      assert stock_of(product) == 10
+
+      [_, popup] = String.split(html(socket), ~s(id="confirm-sale-content"), parts: 2)
+      assert popup =~ "Konfirmasi penjualan"
+      assert popup =~ product.name
+      assert popup =~ "Rp 1.500,00"
+      assert popup =~ "Tunai"
+      assert popup =~ "Rp 2.000,00"
+      assert popup =~ "Rp 500,00"
+      assert popup =~ ~r/cancel_checkout.*Ya, selesaikan/s
+
+      socket = event(socket, "confirm_checkout")
+
+      assert socket.assigns.last_sale
+      refute socket.assigns.confirming_sale
+      assert stock_of(product) == 8
+    end
+
+    test "Batal sells nothing and keeps the cart and the money typed", %{
+      socket: socket,
+      product: product
+    } do
+      socket = socket |> event("review_checkout") |> event("cancel_checkout")
+
+      refute socket.assigns.confirming_sale
+      assert is_nil(socket.assigns.last_sale)
+      assert [_] = socket.assigns.cart
+      assert socket.assigns.amount_paid == "2000"
+      assert stock_of(product) == 10
+    end
+
+    test "a second click sells only once", %{socket: socket, product: product} do
+      socket = socket |> checkout() |> event("confirm_checkout")
+
+      assert stock_of(product) == 8
+      assert socket.assigns.last_sale
+    end
+
+    test "confirming without the popup sells nothing", %{socket: socket, product: product} do
+      socket = event(socket, "confirm_checkout")
+
+      assert is_nil(socket.assigns.last_sale)
+      assert stock_of(product) == 10
+    end
+
     test "is refused when the cash no longer covers the total", %{
       socket: socket,
       product: product
     } do
-      socket = socket |> event("set_amount_paid", %{"value" => "1000"}) |> event("checkout")
+      socket = socket |> event("set_amount_paid", %{"value" => "1000"}) |> checkout()
 
       assert flash(socket, :error) == "Amount paid is less than the total."
       assert [_] = socket.assigns.cart
@@ -576,7 +638,7 @@ defmodule ZahlungsWeb.CashierLiveTest do
          %{socket: socket, product: product} do
       {:ok, _} = Catalog.update_product(store_scope(), product, %{stock: 1})
 
-      socket = event(socket, "checkout")
+      socket = checkout(socket)
 
       assert flash(socket, :error) == "Insufficient stock for #{product.name}."
       assert is_nil(socket.assigns.last_sale)
@@ -587,7 +649,7 @@ defmodule ZahlungsWeb.CashierLiveTest do
          %{socket: socket, user: user, product: product} do
       {:ok, _} = Shifts.close_shift(socket.assigns.shift, "0")
 
-      socket = event(socket, "checkout")
+      socket = checkout(socket)
 
       assert flash(socket, :error) == "Shift belum dibuka atau sudah ditutup."
       assert is_nil(socket.assigns.shift)
@@ -739,7 +801,19 @@ defmodule ZahlungsWeb.CashierLiveTest do
       assert socket.assigns.can_checkout
       assert html(socket) =~ ctx.customer.name
 
-      socket = event(socket, "checkout")
+      [_, popup] =
+        socket
+        |> event("review_checkout")
+        |> html()
+        |> String.split(~s(id="confirm-sale-content"), parts: 2)
+
+      assert popup =~ "Piutang"
+      assert popup =~ ctx.customer.name
+      assert popup =~ "Uang muka"
+      assert popup =~ "Jadi utang"
+      assert popup =~ "Jatuh tempo"
+
+      socket = checkout(socket)
 
       assert %{payment_method: "credit", customer_id: customer_id} = socket.assigns.last_sale
       assert customer_id == ctx.customer.id
@@ -756,8 +830,8 @@ defmodule ZahlungsWeb.CashierLiveTest do
       refute socket.assigns.can_checkout
       assert html(socket) =~ "Melebihi limit piutang"
 
-      socket = event(socket, "checkout")
-      assert flash(socket, :error) == "Melebihi limit piutang pelanggan."
+      socket = checkout(socket)
+      assert flash(socket, :error) =~ "Melebihi limit piutang"
       assert socket.assigns.last_sale == nil
     end
 
@@ -829,7 +903,18 @@ defmodule ZahlungsWeb.CashierLiveTest do
       assert html =~ ctx.promotion.name
       assert html =~ "Hemat promo"
 
-      socket = ctx.socket |> event("payment", %{"amount_paid" => "9000"}) |> event("checkout")
+      paying = event(ctx.socket, "payment", %{"amount_paid" => "9000"})
+
+      [_, popup] =
+        paying
+        |> event("review_checkout")
+        |> html()
+        |> String.split(~s(id="confirm-sale-content"), parts: 2)
+
+      assert popup =~ ctx.promotion.name
+      assert popup =~ "Hemat promo"
+
+      socket = checkout(paying)
       assert [item] = socket.assigns.last_sale.items
       assert Decimal.equal?(item.discount, Decimal.new("1000"))
       assert html(socket) =~ ctx.promotion.name
@@ -838,7 +923,7 @@ defmodule ZahlungsWeb.CashierLiveTest do
     test "a promotion that ended meanwhile: the sale is refused and the screen catches up", ctx do
       {:ok, _} = Promotions.set_active(promo_admin(), ctx.promotion, false)
 
-      socket = ctx.socket |> event("payment", %{"amount_paid" => "9000"}) |> event("checkout")
+      socket = ctx.socket |> event("payment", %{"amount_paid" => "9000"}) |> checkout()
 
       assert flash(socket, :error) =~ "Harga atau promo berubah"
       assert socket.assigns.last_sale == nil

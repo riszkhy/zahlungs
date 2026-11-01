@@ -19,6 +19,13 @@ defmodule ZahlungsWeb.ServiceLive.Index do
   alias Zahlungs.Services.{Brand, Product}
   alias ZahlungsWeb.AmountInput
 
+  @payment_methods [
+    {"cash", "Tunai"},
+    {"qris", "QRIS"},
+    {"card", "Kartu"},
+    {"transfer", "Transfer"}
+  ]
+
   @blank_form %{
     "customer_ref" => "",
     "months" => "1",
@@ -41,6 +48,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
      |> assign(sellable: account != nil, api: account != nil and Deposits.api?(account))
      |> assign(category: "pulsa", brand: nil, selected: nil, form: @blank_form, panel_open: false)
      |> assign(preview: nil, inquiry: nil, brand_prefixes: Services.brand_prefixes())
+     |> assign(:confirming, false)
      |> load_products()
      |> load_transactions()}
   end
@@ -119,8 +127,27 @@ defmodule ZahlungsWeb.ServiceLive.Index do
     end
   end
 
-  def handle_event("record", %{"service" => params}, socket) do
-    form = clean(params, socket.assigns.form)
+  # Paying is two steps: the popup says what is about to happen, and only its
+  # confirmation records the service (and sends it, on an api account).
+  def handle_event("review", %{"service" => params}, socket) do
+    socket = socket |> assign(:form, clean(params, socket.assigns.form)) |> preview()
+
+    case review_problem(socket.assigns) do
+      nil -> {:noreply, assign(socket, :confirming, true)}
+      message -> {:noreply, put_flash(socket, :error, message)}
+    end
+  end
+
+  def handle_event("cancel_record", _params, socket),
+    do: {:noreply, assign(socket, :confirming, false)}
+
+  # Not confirming (any more): a second click on the way, or a stale screen.
+  def handle_event("confirm_record", _params, %{assigns: %{confirming: false}} = socket),
+    do: {:noreply, socket}
+
+  def handle_event("confirm_record", _params, socket) do
+    form = socket.assigns.form
+    socket = assign(socket, :confirming, false)
 
     case socket.assigns.selected do
       nil ->
@@ -203,6 +230,23 @@ defmodule ZahlungsWeb.ServiceLive.Index do
 
   # An api bill is paid from its inquiry, kept on the server; the screen only
   # says which one.
+  # What would be refused anyway, said before the popup opens.
+  defp review_problem(%{selected: nil}), do: "Pilih produk dulu."
+  defp review_problem(%{preview: nil}), do: error_message(:bill_required)
+
+  defp review_problem(%{form: form, preview: preview}) do
+    cond do
+      not Regex.match?(~r/^\d{6,20}$/, digits(form["customer_ref"])) ->
+        "Nomor tujuan harus 6–20 angka."
+
+      form["payment_method"] == "cash" and is_nil(preview.change) ->
+        error_message(:insufficient_payment)
+
+      true ->
+        nil
+    end
+  end
+
   defp record_attrs(form, socket) do
     form = quoted(form, socket)
 
@@ -319,6 +363,12 @@ defmodule ZahlungsWeb.ServiceLive.Index do
   defp refund_message(%{payment_method: method, price: price}),
     do:
       "Kembalikan #{format_price(price)} ke pelanggan lewat #{payment_label(method)}, bukan dari laci."
+
+  defp payment_methods, do: @payment_methods
+
+  defp payment_method_label(method),
+    do:
+      Enum.find_value(@payment_methods, method, fn {value, label} -> value == method && label end)
 
   defp payment_label("qris"), do: "QRIS"
   defp payment_label("card"), do: "kartu"
@@ -734,7 +784,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
           </div>
         </div>
 
-        <form :if={@selected && (not @api_bill or @inquiry)} phx-change="change" phx-submit="record" class={["space-y-3", @api_bill && "mt-4"]}>
+        <form :if={@selected && (not @api_bill or @inquiry)} phx-change="change" phx-submit="review" class={["space-y-3", @api_bill && "mt-4"]}>
           <div :if={not @api_bill} class="flex justify-between gap-2 font-medium">
             <span>{@selected.name}</span>
             <span :if={@preview}>{format_price(@preview.price)}</span>
@@ -766,7 +816,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
           <label class="block text-sm">
             Cara bayar
             <select name="service[payment_method]" class="form-control">
-              <option :for={{value, label} <- [{"cash", "Tunai"}, {"qris", "QRIS"}, {"card", "Kartu"}, {"transfer", "Transfer"}]} value={value} selected={@form["payment_method"] == value}>
+              <option :for={{value, label} <- payment_methods()} value={value} selected={@form["payment_method"] == value}>
                 {label}
               </option>
             </select>
@@ -781,7 +831,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
             <span>{format_price(@preview.change)}</span>
           </div>
 
-          <button type="submit" phx-disable-with="Mencatat..." class="btn btn-primary w-full">
+          <button type="submit" phx-disable-with="Memeriksa..." class="btn btn-primary w-full">
             {if @api, do: "Bayar", else: "Catat dan terima uang"}
           </button>
         </form>
@@ -879,6 +929,61 @@ defmodule ZahlungsWeb.ServiceLive.Index do
         </span>
       </div>
     </section>
+
+    <.modal :if={@confirming} id="confirm-service" show on_cancel={JS.push("cancel_record")}>
+      <h3 class="text-lg font-semibold">Konfirmasi pembayaran</h3>
+      <p class="mt-1 text-sm text-gray-500">Periksa nomor dan produk sebelum melanjutkan.</p>
+
+      <p
+        :if={brand_category?(@category) && brand_mismatch(@selected, @form["customer_ref"], @brand, @brand_prefixes)}
+        role="alert"
+        class="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700"
+      >
+        {brand_mismatch(@selected, @form["customer_ref"], @brand, @brand_prefixes)}
+      </p>
+
+      <p class="mt-3 rounded bg-gray-50 py-3 text-center text-2xl font-semibold tracking-wide">
+        {group_digits(digits(@form["customer_ref"]))}
+      </p>
+      <p :if={@inquiry} class="mt-2 text-center text-sm text-gray-600">
+        <span class="font-semibold text-gray-800">{@inquiry.customer_name}</span><span :if={@inquiry.period}> · {@inquiry.period}</span><span :if={@inquiry.kind == "bill"}> · {@inquiry.sheets} bulan</span><span :if={@inquiry.details}> · {@inquiry.details}</span>
+      </p>
+
+      <dl class="mt-4 space-y-1 text-sm">
+        <div class="flex justify-between gap-4">
+          <dt class="text-gray-500">Produk</dt>
+          <dd class="text-right font-medium">{@selected.name}</dd>
+        </div>
+        <div :if={is_nil(@inquiry) && Product.bill?(@selected)} class="flex justify-between gap-4">
+          <dt class="text-gray-500">Nominal tagihan</dt>
+          <dd>{format_price(Decimal.new(@form["bill_amount"]))}</dd>
+        </div>
+        <div class="flex justify-between gap-4 text-base font-semibold">
+          <dt>Harga</dt>
+          <dd>{format_price(@preview.price)}</dd>
+        </div>
+        <div class="flex justify-between gap-4">
+          <dt class="text-gray-500">Cara bayar</dt>
+          <dd>{payment_method_label(@form["payment_method"])}</dd>
+        </div>
+        <div :if={@form["payment_method"] == "cash"} class="flex justify-between gap-4">
+          <dt class="text-gray-500">Uang diterima</dt>
+          <dd>{format_price(Decimal.new(@form["amount_paid"]))}</dd>
+        </div>
+        <div :if={@preview.change} class="flex justify-between gap-4">
+          <dt class="text-gray-500">Kembalian</dt>
+          <dd>{format_price(@preview.change)}</dd>
+        </div>
+      </dl>
+
+      <%!-- Batal comes first: the popup focuses it, so a stray Enter pays nothing. --%>
+      <div class="mt-6 flex justify-end gap-2">
+        <button type="button" phx-click="cancel_record" class="chip">Batal</button>
+        <.button phx-click="confirm_record" phx-disable-with="Mencatat...">
+          {if @api, do: "Ya, bayar", else: "Ya, catat"}
+        </.button>
+      </div>
+    </.modal>
 
     <%!-- Room for the bar, so the end of the page isn't hidden behind it. --%>
     <div :if={@sellable} class="h-24 lg:hidden md:landscape:hidden"></div>
