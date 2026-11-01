@@ -50,6 +50,7 @@ defmodule Zahlungs.Services do
   defdelegate commission_rates, to: Commissions, as: :rates
   defdelegate commission_percent(category), to: Commissions, as: :percent
   defdelegate save_commission_rates(user, values), to: Commissions, as: :save_rates
+  defdelegate commission(transaction), to: Commissions
 
   ## Products
 
@@ -392,6 +393,7 @@ defmodule Zahlungs.Services do
         service_inquiry_id: bill.inquiry && bill.inquiry.id,
         price: price,
         cost: cost,
+        commission_percent: Commissions.percent_for(user, product.category),
         amount_paid: payment.amount_paid,
         change_due: payment.change_due
       }

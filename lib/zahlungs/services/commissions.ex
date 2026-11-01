@@ -16,7 +16,7 @@ defmodule Zahlungs.Services.Commissions do
 
   alias Zahlungs.Accounts.User
   alias Zahlungs.Repo
-  alias Zahlungs.Services.CommissionRate
+  alias Zahlungs.Services.{CommissionRate, Transaction}
 
   @doc "Every category with its percent (0 where none is set), in display order."
   def rates do
@@ -54,6 +54,30 @@ defmodule Zahlungs.Services.Commissions do
   end
 
   def save_rates(%User{}, _values), do: {:error, :unauthorized}
+
+  @doc """
+  The percent a service recorded now by `user` carries: the category's for a
+  cashier, 0 for anyone else. The role is read from the database, not from
+  the struct (a screen may hold one from before a role change).
+  """
+  def percent_for(%User{id: user_id}, category) do
+    case Repo.one(from u in User, where: u.id == ^user_id, select: u.role) do
+      "cashier" -> percent(category)
+      _other -> Decimal.new(0)
+    end
+  end
+
+  @doc "A service's commission in whole rupiah: nothing unless it succeeded."
+  def commission(%Transaction{status: "success"} = transaction) do
+    transaction.price
+    |> Decimal.sub(transaction.cost)
+    |> Decimal.max(0)
+    |> Decimal.mult(transaction.commission_percent)
+    |> Decimal.div(100)
+    |> Decimal.round(0, :floor)
+  end
+
+  def commission(%Transaction{}), do: Decimal.new(0)
 
   defp store(values) do
     Repo.transaction(fn ->

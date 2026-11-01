@@ -49,6 +49,9 @@ defmodule Zahlungs.Services.Transaction do
     # An answer that contradicts the final status, for an admin to decide.
     field :review_reason, :string
     field :reviewed_at, :naive_datetime
+    # The cashier commission percent of the category when recorded (0 when not
+    # recorded by a cashier). Never cast; see `Zahlungs.Services.Commissions`.
+    field :commission_percent, :decimal, default: Decimal.new(0)
 
     belongs_to :service_inquiry, Zahlungs.Services.Inquiry
     belongs_to :refunded_by, Zahlungs.Accounts.User
