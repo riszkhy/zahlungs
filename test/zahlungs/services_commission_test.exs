@@ -110,6 +110,19 @@ defmodule Zahlungs.ServicesCommissionTest do
       assert Decimal.equal?(tx.commission_percent, 0)
     end
 
+    test "an admin made cashier mid-shift earns on what is recorded after" do
+      {:ok, admin} = Zahlungs.Accounts.set_user_role(user_on_shift_fixture(), "admin")
+      pulsa = service_product_fixture()
+      before = service_fixture(admin, pulsa)
+
+      {:ok, _} = Zahlungs.Accounts.set_user_role(admin, "cashier")
+
+      # `admin` still says "admin".
+      later = service_fixture(admin, pulsa)
+      assert Decimal.equal?(before.commission_percent, 0)
+      assert Decimal.equal?(later.commission_percent, "10")
+    end
+
     test "the percent can't come from the caller", ctx do
       tx = service_fixture(ctx.cashier, ctx.pulsa, %{"commission_percent" => "99"})
       assert Decimal.equal?(tx.commission_percent, "10")
@@ -212,6 +225,27 @@ defmodule Zahlungs.ServicesCommissionTest do
       refute foreigner.id in ids.(all_stores_scope(ctx.admin))
     end
 
+    test "the days are the store's local days", ctx do
+      tx = service_fixture(ctx.b, ctx.pulsa)
+      {:ok, _} = Services.mark_success(tx, ctx.b, nil)
+      {start, _finish} = Zahlungs.LocalTime.day_range(ctx.today, ctx.today, default_store())
+      yesterday = Date.add(ctx.today, -1)
+
+      count_of = fn day ->
+        report = Services.commission_report(store_scope(), day, day)
+        if row = row(report, ctx.b), do: row.count, else: 0
+      end
+
+      # The first second of the local day (the evening before, in UTC) is today.
+      Repo.update_all(from(t in Transaction, where: t.id == ^tx.id), set: [inserted_at: start])
+      assert {count_of.(ctx.today), count_of.(yesterday)} == {2, 0}
+
+      # One second earlier is yesterday.
+      earlier = NaiveDateTime.add(start, -1)
+      Repo.update_all(from(t in Transaction, where: t.id == ^tx.id), set: [inserted_at: earlier])
+      assert {count_of.(ctx.today), count_of.(yesterday)} == {1, 1}
+    end
+
     test "shift_commission/1 adds up a shift's", ctx do
       shift = Zahlungs.Shifts.current_shift(ctx.a)
       assert Decimal.equal?(Services.shift_commission(shift), 370)
@@ -265,6 +299,33 @@ defmodule Zahlungs.ServicesCommissionTest do
       assert Decimal.equal?(Services.commission(fresh(ctx.tx)), 0)
       today = Zahlungs.LocalTime.today()
       assert Services.commission_report(store_scope(), today, today).rows == []
+    end
+
+    test "a failure made a success through a review earns it", ctx do
+      {:ok, _} = Services.apply_result(ctx.tx.id, %{status: :failed, message: "Nomor salah"})
+      {:ok, _} = Services.apply_result(ctx.tx.id, success())
+      assert Decimal.equal?(Services.commission(fresh(ctx.tx)), 0)
+
+      {:ok, _} = Services.resolve_review(fresh(ctx.tx), ctx.admin, :success)
+      assert Decimal.equal?(Services.commission(fresh(ctx.tx)), 185)
+    end
+
+    test "a bill of 3 months earns on the 3 months' margin", ctx do
+      {:ok, _} = Services.save_commission_rates(ctx.admin, %{"tagihan" => "12.5"})
+      cashier = ctx.tx.user_id |> Zahlungs.Accounts.get_user!()
+      bill = api_product_fixture()
+
+      # The fake bills 3 months when the second-to-last digit is 3, and pays.
+      {:ok, inquiry} = Services.inquire(cashier, bill.id, "530011223331")
+
+      {:ok, tx} =
+        Services.record(cashier, bill.id, %{"inquiry_id" => inquiry.id, "amount_paid" => "750000"})
+
+      tx = fresh(tx)
+      assert {tx.status, tx.sheets} == {"success", 3}
+      # 3.000 the shop adds per month.
+      assert Decimal.equal?(Decimal.sub(tx.price, tx.cost), 9000)
+      assert Decimal.equal?(Services.commission(tx), 1125)
     end
   end
 
