@@ -51,6 +51,12 @@ defmodule Zahlungs.Services do
   defdelegate commission_percent(category), to: Commissions, as: :percent
   defdelegate save_commission_rates(user, values), to: Commissions, as: :save_rates
   defdelegate commission(transaction), to: Commissions
+  defdelegate shift_commission(shift), to: Commissions, as: :shift_total
+  defdelegate commission_report(scope, date_from, date_to), to: Commissions, as: :report
+
+  defdelegate commission_details(scope, user_id, date_from, date_to),
+    to: Commissions,
+    as: :details
 
   ## Products
 
@@ -1390,13 +1396,17 @@ defmodule Zahlungs.Services do
 
     value = sum_of(by_category, :value)
     cost = sum_of(by_category, :cost)
+    margin = Decimal.sub(value, cost)
+    commission = Commissions.total(in_range)
 
     %{
       success_count: Enum.sum(Enum.map(by_category, & &1.count)),
       failed_count: Repo.aggregate(where(in_range, [t], t.status == "failed"), :count),
       value: value,
       cost: cost,
-      margin: Decimal.sub(value, cost),
+      margin: margin,
+      commission: commission,
+      net_margin: Decimal.sub(margin, commission),
       by_category: by_category
     }
   end

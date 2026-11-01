@@ -15,8 +15,9 @@ defmodule Zahlungs.Services.Commissions do
   import Ecto.Query, warn: false
 
   alias Zahlungs.Accounts.User
-  alias Zahlungs.Repo
+  alias Zahlungs.{LocalTime, Repo, Scope, Stores}
   alias Zahlungs.Services.{CommissionRate, Transaction}
+  alias Zahlungs.Shifts.Shift
 
   @doc "Every category with its percent (0 where none is set), in display order."
   def rates do
@@ -78,6 +79,136 @@ defmodule Zahlungs.Services.Commissions do
   end
 
   def commission(%Transaction{}), do: Decimal.new(0)
+
+  # The same rule as commission/1, in SQL, so a report's total is the sum of
+  # its rows (each rounded down on its own).
+  defmacrop commission_of(t) do
+    quote do
+      fragment(
+        "FLOOR(GREATEST(? - ?, 0) * ? / 100)",
+        unquote(t).price,
+        unquote(t).cost,
+        unquote(t).commission_percent
+      )
+    end
+  end
+
+  defmacrop margin_of(t) do
+    quote do: fragment("GREATEST(? - ?, 0)", unquote(t).price, unquote(t).cost)
+  end
+
+  @doc "The commission of a shift's successful services."
+  def shift_total(%Shift{id: shift_id}) do
+    total(from t in Transaction, where: t.shift_id == ^shift_id)
+  end
+
+  @doc "The commission of the successful services of `query` (transactions)."
+  def total(query) do
+    Repo.one(
+      from t in query,
+        where: t.status == "success",
+        select: coalesce(sum(commission_of(t)), 0)
+    )
+    |> to_decimal()
+  end
+
+  @doc """
+  Commission per cashier for a date range (by when the services were
+  recorded, in the store's local time), in the scope's store(s). A cashier's
+  scope only ever holds their own row.
+
+  Returns `%{rows: [%{user_id, name, count, margin, commission}], count,
+  margin, commission}`; rows by name.
+  """
+  def report(%Scope{} = scope, %Date{} = date_from, %Date{} = date_to) do
+    rows =
+      Repo.all(
+        from t in earning(scope, date_from, date_to),
+          join: u in User,
+          on: u.id == t.user_id,
+          group_by: [t.user_id, u.name, u.email],
+          order_by: fragment("COALESCE(?, ?)", u.name, u.email),
+          select: %{
+            user_id: t.user_id,
+            name: coalesce(u.name, u.email),
+            count: count(t.id),
+            margin: sum(margin_of(t)),
+            commission: sum(commission_of(t))
+          }
+      )
+      |> Enum.map(&%{&1 | margin: to_decimal(&1.margin), commission: to_decimal(&1.commission)})
+
+    %{
+      rows: rows,
+      count: rows |> Enum.map(& &1.count) |> Enum.sum(),
+      margin: sum_of(rows, :margin),
+      commission: sum_of(rows, :commission)
+    }
+  end
+
+  @doc """
+  The services behind one cashier's commission in a date range, newest first.
+  In a cashier's scope `user_id` is ignored: it is always their own.
+  """
+  def details(%Scope{} = scope, user_id, %Date{} = date_from, %Date{} = date_to) do
+    user_id = own_id(scope) || user_id
+
+    Repo.all(
+      from t in earning(scope, date_from, date_to),
+        where: t.user_id == ^user_id,
+        order_by: [desc: t.inserted_at, desc: t.id],
+        select: %{
+          id: t.id,
+          code: t.code,
+          inserted_at: t.inserted_at,
+          product_name: t.product_name,
+          category: t.category,
+          margin: margin_of(t),
+          percent: t.commission_percent,
+          commission: commission_of(t)
+        }
+    )
+    |> Enum.map(&%{&1 | margin: to_decimal(&1.margin), commission: to_decimal(&1.commission)})
+  end
+
+  # Successful services that earned a commission, in the range and the
+  # scope's store(s), and only the cashier's own in a cashier's scope.
+  defp earning(scope, date_from, date_to) do
+    {start, finish} = LocalTime.day_range(date_from, date_to, scope.store)
+
+    query =
+      from t in Transaction,
+        where:
+          t.status == "success" and t.commission_percent > 0 and t.inserted_at >= ^start and
+            t.inserted_at <= ^finish
+
+    query = for_store(query, scope)
+
+    case own_id(scope) do
+      nil -> query
+      user_id -> where(query, [t], t.user_id == ^user_id)
+    end
+  end
+
+  # Whose commission a scope is limited to: a non-admin's own.
+  defp own_id(%Scope{user: %User{role: "admin"}}), do: nil
+  defp own_id(%Scope{user: %User{id: id}}), do: id
+  defp own_id(%Scope{}), do: nil
+
+  defp for_store(query, scope) do
+    case Scope.store_id(scope) do
+      nil -> where(query, [t], t.store_id in ^Stores.store_ids())
+      store_id -> where(query, [t], t.store_id == ^store_id)
+    end
+  end
+
+  defp sum_of(rows, key),
+    do: Enum.reduce(rows, Decimal.new(0), &Decimal.add(&2, Map.fetch!(&1, key)))
+
+  defp to_decimal(%Decimal{} = value), do: value
+  defp to_decimal(nil), do: Decimal.new(0)
+  defp to_decimal(value) when is_integer(value), do: Decimal.new(value)
+  defp to_decimal(value) when is_float(value), do: Decimal.from_float(value)
 
   defp store(values) do
     Repo.transaction(fn ->

@@ -123,6 +123,151 @@ defmodule Zahlungs.ServicesCommissionTest do
     end
   end
 
+  describe "report" do
+    # Pulsa at 10%: each success is 185 on a margin of 1.850.
+    setup do
+      assign_account(default_store(), deposit_account_fixture())
+      admin = admin()
+      {:ok, _} = Services.save_commission_rates(admin, %{"pulsa" => "10"})
+      pulsa = service_product_fixture()
+
+      a = user_on_shift_fixture()
+      b = user_on_shift_fixture()
+      {:ok, serving_admin} = Zahlungs.Accounts.set_user_role(user_on_shift_fixture(), "admin")
+
+      for user <- [a, a, b, serving_admin] do
+        {:ok, _} = Services.mark_success(service_fixture(user, pulsa), user, nil)
+      end
+
+      {:ok, _} = Services.mark_failed(service_fixture(a, pulsa), a, "gagal")
+      service_fixture(a, pulsa)
+
+      %{admin: admin, a: a, b: b, pulsa: pulsa, today: Zahlungs.LocalTime.today()}
+    end
+
+    defp row(report, user), do: Enum.find(report.rows, &(&1.user_id == user.id))
+
+    test "per cashier: successful services only; admins earn none", ctx do
+      report = Services.commission_report(store_scope(), ctx.today, ctx.today)
+
+      assert report.rows |> Enum.map(& &1.user_id) |> Enum.sort() ==
+               Enum.sort([ctx.a.id, ctx.b.id])
+
+      assert row(report, ctx.a).count == 2
+      assert Decimal.equal?(row(report, ctx.a).margin, 3700)
+      assert Decimal.equal?(row(report, ctx.a).commission, 370)
+      assert Decimal.equal?(row(report, ctx.b).commission, 185)
+      assert {report.count, Decimal.to_integer(report.commission)} == {3, 555}
+      assert Decimal.equal?(report.margin, 5550)
+    end
+
+    test "the total is the sum of the details", ctx do
+      details = Services.commission_details(store_scope(), ctx.a.id, ctx.today, ctx.today)
+
+      assert length(details) == 2
+      assert Enum.all?(details, &(&1.product_name == ctx.pulsa.name))
+      total = Enum.reduce(details, Decimal.new(0), &Decimal.add(&1.commission, &2))
+      assert Decimal.equal?(total, 370)
+    end
+
+    test "a cashier sees only themself", ctx do
+      scope = scope(ctx.a)
+
+      assert [%{user_id: id}] = Services.commission_report(scope, ctx.today, ctx.today).rows
+      assert id == ctx.a.id
+      assert length(Services.commission_details(scope, ctx.b.id, ctx.today, ctx.today)) == 2
+    end
+
+    test "only the chosen days count" do
+      report = Services.commission_report(store_scope(), ~D[2001-01-01], ~D[2001-01-31])
+      assert report.rows == [] and Decimal.equal?(report.commission, 0)
+    end
+
+    test "all stores of the organization, never another organization", ctx do
+      other_store = store_fixture()
+      assign_account(other_store, deposit_account_fixture())
+      elsewhere = user_on_shift_fixture(%{store_id: other_store.id})
+      {:ok, _} = Services.mark_success(service_fixture(elsewhere, ctx.pulsa), elsewhere, nil)
+
+      foreigner =
+        in_org(organization_fixture(), fn ->
+          foreign_store = store_fixture()
+          assign_account(foreign_store, deposit_account_fixture())
+          {:ok, _} = Services.save_commission_rates(admin(), %{"pulsa" => "10"})
+          foreigner = user_on_shift_fixture(%{store_id: foreign_store.id})
+          foreign = service_fixture(foreigner, service_product_fixture())
+          {:ok, _} = Services.mark_success(foreign, foreigner, nil)
+          foreigner
+        end)
+
+      ids = fn scope ->
+        scope
+        |> Services.commission_report(ctx.today, ctx.today)
+        |> Map.fetch!(:rows)
+        |> Enum.map(& &1.user_id)
+      end
+
+      refute elsewhere.id in ids.(store_scope())
+      assert elsewhere.id in ids.(all_stores_scope(ctx.admin))
+      refute foreigner.id in ids.(all_stores_scope(ctx.admin))
+    end
+
+    test "shift_commission/1 adds up a shift's", ctx do
+      shift = Zahlungs.Shifts.current_shift(ctx.a)
+      assert Decimal.equal?(Services.shift_commission(shift), 370)
+    end
+
+    test "the service report shows the commission and the margin after it", ctx do
+      report = Services.report(store_scope(), ctx.today, ctx.today)
+
+      assert Decimal.equal?(report.commission, 555)
+      assert Decimal.equal?(report.net_margin, Decimal.sub(report.margin, 555))
+    end
+  end
+
+  describe "the final status and cost" do
+    # An api account on the fake provider; number digit 9 stays pending, so
+    # each test settles the service itself.
+    setup do
+      assign_account(default_store(), api_account_fixture())
+      admin = admin()
+      {:ok, _} = Services.save_commission_rates(admin, %{"pulsa" => "10"})
+      cashier = user_fixture()
+      shift_fixture(cashier, "50000")
+      pulsa = service_product_fixture(%{provider_code: "TSEL10"})
+
+      {:ok, tx} =
+        Services.record(cashier, pulsa.id, %{
+          "customer_ref" => "081234567899",
+          "amount_paid" => "12000"
+        })
+
+      %{admin: admin, tx: tx}
+    end
+
+    defp fresh(tx), do: Repo.get!(Transaction, tx.id)
+    defp success(extra \\ %{}), do: Map.merge(%{status: :success, token_sn: "SN1"}, extra)
+
+    test "the vendor's actual cost is the cost", ctx do
+      {:ok, _} = Services.apply_result(ctx.tx.id, success(%{actual_cost: Decimal.new("10500")}))
+      assert Decimal.equal?(Services.commission(fresh(ctx.tx)), 150)
+    end
+
+    test "a success refunded through a review loses it", ctx do
+      {:ok, _} = Services.apply_result(ctx.tx.id, success())
+      assert Decimal.equal?(Services.commission(fresh(ctx.tx)), 185)
+
+      {:ok, _} =
+        Services.apply_result(ctx.tx.id, %{status: :refunded, message: "Refund transaksi"})
+
+      {:ok, _} = Services.resolve_review(fresh(ctx.tx), ctx.admin, :refund)
+
+      assert Decimal.equal?(Services.commission(fresh(ctx.tx)), 0)
+      today = Zahlungs.LocalTime.today()
+      assert Services.commission_report(store_scope(), today, today).rows == []
+    end
+  end
+
   describe "commission/1" do
     defp tx(status, price, cost, percent) do
       %Transaction{
