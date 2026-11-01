@@ -31,6 +31,7 @@ defmodule ZahlungsWeb.ReportLive.Index do
          {:ok, to} <- Date.from_iso8601(socket.assigns.to) do
       socket
       |> assign(:report, Sales.sales_report(scope, from, to))
+      |> assign(:by_promotion, Zahlungs.Promotions.report(scope, from, to))
       |> assign(:top_products, Sales.top_products(scope, from, to))
       |> assign(:by_day, Sales.sales_by_day(scope, from, to))
       |> assign(:by_cashier, Sales.sales_by_cashier(scope, from, to))
@@ -40,6 +41,7 @@ defmodule ZahlungsWeb.ReportLive.Index do
       _ ->
         assign(socket,
           report: nil,
+          by_promotion: [],
           top_products: [],
           by_day: [],
           by_cashier: [],
@@ -88,6 +90,19 @@ defmodule ZahlungsWeb.ReportLive.Index do
       <.stat label="COGS (modal)" value={format_money(@report.cogs)} />
       <.stat label="Discount" value={format_money(@report.discount)} />
       <.stat label="Tax" value={format_money(@report.tax)} />
+    </div>
+
+    <div :if={@report && Decimal.gt?(@report.promo_discount, 0)} class="mt-4">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <.stat label="Potongan promo" value={format_money(@report.promo_discount)} accent="text-amber-700" />
+      </div>
+      <h3 class="mt-6 font-semibold text-gray-700">Per promo</h3>
+      <.table id="by-promotion" rows={@by_promotion}>
+        <:col :let={row} label="Promo">{row.name}</:col>
+        <:col :let={row} label="Barang">{row.items}</:col>
+        <:col :let={row} label="Potongan">{format_money(row.discount)}</:col>
+        <:col :let={row} label="Omzet setelah potongan">{format_money(row.revenue)}</:col>
+      </.table>
     </div>
 
     <p :if={@report && Decimal.gt?(@report.credit_total, 0)} class="mt-3 text-sm text-gray-600">

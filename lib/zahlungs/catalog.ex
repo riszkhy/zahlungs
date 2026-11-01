@@ -31,6 +31,7 @@ defmodule Zahlungs.Catalog do
     * `:category_id` - filters by category
     * `:active` - filters by active flag (`true`/`false`); omit for all
     * `:in_stock` - when `true`, only products with stock > 0
+    * `:ids` - only these product ids
     * `:order_by` - column to order by (defaults to `:name`)
     * `:limit` / `:offset` - pagination
 
@@ -54,6 +55,7 @@ defmodule Zahlungs.Catalog do
     |> filter_category(opts[:category_id])
     |> filter_active(opts[:active])
     |> filter_in_stock(opts[:in_stock])
+    |> filter_ids(opts[:ids])
   end
 
   # Non-deleted products joined with their stock in the scope's store, as the
@@ -125,6 +127,10 @@ defmodule Zahlungs.Catalog do
   end
 
   defp filter_active(query, _), do: query
+
+  # Only these products (e.g. the ones in a cart).
+  defp filter_ids(query, ids) when is_list(ids), do: where(query, [p], p.id in ^ids)
+  defp filter_ids(query, _), do: query
 
   @doc "Gets a single (non-deleted) product (raises if not found). Preloads category."
   def get_product!(%Scope{} = scope, id) do

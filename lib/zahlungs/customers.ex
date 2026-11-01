@@ -131,18 +131,30 @@ defmodule Zahlungs.Customers do
   `refund_overpayment/3`, which lock the customer before the shift.
   """
   def lock_for_credit(customer_id, debt) do
-    case Repo.one(from c in Customer, where: c.id == ^customer_id, lock: "FOR UPDATE") do
-      nil ->
-        {:error, :not_found}
-
-      %Customer{active: false} ->
-        {:error, :customer_inactive}
-
-      %Customer{} = customer ->
-        if Decimal.gt?(Decimal.add(balance(customer), debt), customer.credit_limit),
-          do: {:error, :over_credit_limit},
-          else: {:ok, customer}
+    with {:ok, customer} <- lock_credit_customer(customer_id),
+         :ok <- check_credit_limit(customer, debt) do
+      {:ok, customer}
     end
+  end
+
+  @doc """
+  The first half of `lock_for_credit/2`, for a sale whose debt is known only
+  later in its transaction (promotions depend on the shift's store): locks
+  the customer, as the transaction's first read, and checks they are active.
+  """
+  def lock_credit_customer(customer_id) do
+    case Repo.one(from c in Customer, where: c.id == ^customer_id, lock: "FOR UPDATE") do
+      nil -> {:error, :not_found}
+      %Customer{active: false} -> {:error, :customer_inactive}
+      %Customer{} = customer -> {:ok, customer}
+    end
+  end
+
+  @doc "The second half: `debt` keeps the locked customer within their limit."
+  def check_credit_limit(%Customer{} = customer, debt) do
+    if Decimal.gt?(Decimal.add(balance(customer), debt), customer.credit_limit),
+      do: {:error, :over_credit_limit},
+      else: :ok
   end
 
   @doc "A shift's repayments not cancelled, split into cash (in the drawer) and the rest."

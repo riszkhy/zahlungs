@@ -36,7 +36,10 @@
 
     <table>
       <tr :for={item <- @sale.items}>
-        <td>{(item.product && item.product.name) || "(deleted)"}</td>
+        <td>
+          {(item.product && item.product.name) || "(deleted)"}
+          <br :if={item.promotion_name} /><small :if={item.promotion_name}>{item.promotion_name} -{format_money(item.discount)}</small>
+        </td>
         <td class="c">{item.quantity}x</td>
         <td class="r">{format_money(item.line_total)}</td>
       </tr>
@@ -44,6 +47,7 @@
 
     <div class="line"></div>
 
+    <div :if={promo_saving(@sale)} class="row"><span>Hemat promo</span><span>-{format_money(promo_saving(@sale))}</span></div>
     <div class="row"><span>Subtotal</span><span>{format_money(@sale.subtotal)}</span></div>
     <div class="row"><span>Discount</span><span>{format_money(@sale.discount)}</span></div>
     <div class="row"><span>Tax</span><span>{format_money(@sale.tax)}</span></div>

@@ -29,4 +29,18 @@ defmodule ZahlungsWeb.ReceiptControllerTest do
     conn = get(conn, "/sales/1/receipt")
     assert redirected_to(conn) == "/users/log_in"
   end
+
+  test "a promoted line shows its promotion on the receipt", %{conn: conn} do
+    user = user_on_shift_fixture()
+    product = product_fixture(price: Decimal.new("10000"), stock: 10)
+    promotion = Zahlungs.PromotionsFixtures.promotion_fixture(%{product_ids: [product.id]})
+
+    {:ok, sale} =
+      Sales.create_sale(user, [%{product_id: product.id, quantity: 1}], %{amount_paid: "9000"})
+
+    response = conn |> log_in_user(user) |> get("/sales/#{sale.id}/receipt") |> html_response(200)
+
+    assert response =~ promotion.name
+    assert response =~ "Hemat promo"
+  end
 end
