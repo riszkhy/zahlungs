@@ -164,11 +164,11 @@ defmodule ZahlungsWeb.ServiceLive.History do
     </.header>
 
     <form id="history-filter" phx-change="filter" phx-submit="filter" class="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-6">
-      <label class="block text-sm">Dari <input type="date" name="from" value={@from} class="form-control mt-1 h-11" /></label>
-      <label class="block text-sm">Sampai <input type="date" name="to" value={@to} class="form-control mt-1 h-11" /></label>
+      <label class="block text-sm">Dari <input type="date" name="from" value={@from} class="form-control mt-1" /></label>
+      <label class="block text-sm">Sampai <input type="date" name="to" value={@to} class="form-control mt-1" /></label>
       <label class="block text-sm">
         Status
-        <select name="status" class="form-control mt-1 h-11 py-0">
+        <select name="status" class="form-control mt-1">
           <option value="" selected={@status == ""}>Semua status</option>
           <option value="processing" selected={@status == "processing"}>Diproses</option>
           <option value="success" selected={@status == "success"}>Berhasil</option>
@@ -177,7 +177,7 @@ defmodule ZahlungsWeb.ServiceLive.History do
       </label>
       <label class="block text-sm">
         Kategori
-        <select name="category" class="form-control mt-1 h-11 py-0">
+        <select name="category" class="form-control mt-1">
           <option value="" selected={@category == ""}>Semua kategori</option>
           <option :for={{value, label} <- Services.categories()} value={value} selected={@category == value}>
             {label}
@@ -192,7 +192,7 @@ defmodule ZahlungsWeb.ServiceLive.History do
           value={@q}
           phx-debounce="300"
           placeholder="Nomor tujuan atau kode"
-          class="form-control mt-1 h-11"
+          class="form-control mt-1"
           autocomplete="off"
         />
       </label>

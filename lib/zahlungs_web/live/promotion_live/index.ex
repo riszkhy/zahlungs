@@ -197,7 +197,7 @@ defmodule ZahlungsWeb.PromotionLive.Index do
     <form id="discount-limit" phx-submit="save_limit" class="mt-4 flex flex-wrap items-end gap-2 text-sm">
       <label>
         Batas diskon manual kasir (% dari subtotal; kosong = tanpa batas)
-        <input type="number" name="limit" min="0" max="100" step="0.01" value={@limit} class="form-control w-32" />
+        <input type="number" name="limit" min="0" max="100" step="0.01" value={@limit} class="form-control h-11 w-32" />
       </label>
       <button type="submit" class="chip">Simpan batas</button>
     </form>

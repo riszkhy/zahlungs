@@ -9,7 +9,12 @@
 
 /* FORMS */
 .form-control {
-  @apply w-full bg-white rounded border border-gray-300 focus:border-green-600 focus:ring-2 focus:ring-green-200 text-base outline-none text-gray-700 py-1 px-3 leading-8 transition-colors duration-200 ease-in-out;
+  @apply w-full min-h-[2.625rem] bg-white rounded border border-gray-300 focus:border-green-600 focus:ring-2 focus:ring-green-200 text-base outline-none text-gray-700 py-1 px-3 leading-8 transition-colors duration-200 ease-in-out;
+}
+
+/* A date field's own controls would make it taller than the others. */
+.form-control[type="date"] {
+  @apply h-[2.625rem] py-0;
 }
 
 /* BUTTONS */
