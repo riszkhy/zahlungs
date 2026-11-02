@@ -132,7 +132,7 @@ defmodule ZahlungsWeb.ServiceLive.History do
 
   defp outcome(assigns) do
     ~H"""
-    <span :if={@transaction.token_sn} class="block break-all text-xs text-gray-500">
+    <span :if={@transaction.token_sn} class="block break-words text-xs text-gray-500">
       Token / SN: {Layanan.token_text(@transaction.token_sn)}
     </span>
     <span :if={@transaction.review_reason} class="block text-xs font-medium text-amber-700">
@@ -145,7 +145,7 @@ defmodule ZahlungsWeb.ServiceLive.History do
       :if={@transaction.status == "success"}
       href={~p"/services/#{@transaction.id}/receipt"}
       target="_blank"
-      class="text-xs text-blue-600 hover:underline"
+      class="block text-xs text-blue-600 hover:underline"
     >
       Cetak struk
     </.link>
@@ -163,28 +163,28 @@ defmodule ZahlungsWeb.ServiceLive.History do
       </:actions>
     </.header>
 
-    <form id="history-filter" phx-change="filter" phx-submit="filter" class="mt-6 flex flex-wrap items-end gap-3">
-      <label class="text-sm">Dari <input type="date" name="from" value={@from} class="form-control" /></label>
-      <label class="text-sm">Sampai <input type="date" name="to" value={@to} class="form-control" /></label>
-      <label class="text-sm">
+    <form id="history-filter" phx-change="filter" phx-submit="filter" class="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-6">
+      <label class="block text-sm">Dari <input type="date" name="from" value={@from} class="form-control mt-1 h-11" /></label>
+      <label class="block text-sm">Sampai <input type="date" name="to" value={@to} class="form-control mt-1 h-11" /></label>
+      <label class="block text-sm">
         Status
-        <select name="status" class="form-control">
+        <select name="status" class="form-control mt-1 h-11 py-0">
           <option value="" selected={@status == ""}>Semua status</option>
           <option value="processing" selected={@status == "processing"}>Diproses</option>
           <option value="success" selected={@status == "success"}>Berhasil</option>
           <option value="failed" selected={@status == "failed"}>Gagal</option>
         </select>
       </label>
-      <label class="text-sm">
+      <label class="block text-sm">
         Kategori
-        <select name="category" class="form-control">
+        <select name="category" class="form-control mt-1 h-11 py-0">
           <option value="" selected={@category == ""}>Semua kategori</option>
           <option :for={{value, label} <- Services.categories()} value={value} selected={@category == value}>
             {label}
           </option>
         </select>
       </label>
-      <label class="text-sm">
+      <label class="col-span-2 block text-sm">
         Cari
         <input
           type="search"
@@ -192,7 +192,7 @@ defmodule ZahlungsWeb.ServiceLive.History do
           value={@q}
           phx-debounce="300"
           placeholder="Nomor tujuan atau kode"
-          class="form-control"
+          class="form-control mt-1 h-11"
           autocomplete="off"
         />
       </label>
@@ -207,7 +207,8 @@ defmodule ZahlungsWeb.ServiceLive.History do
     <div :if={@transactions != []} class="mt-4 space-y-2 lg:hidden">
       <div :for={tx <- @transactions} id={"service-card-#{tx.id}"} class="list-card">
         <span class="min-w-0 flex-1">
-          <span class="block truncate font-medium">{tx.product_name} · {Layanan.group_digits(tx.customer_ref)}</span>
+          <span class="block truncate font-medium">{tx.product_name}</span>
+          <span class="block font-medium">{Layanan.group_digits(tx.customer_ref)}</span>
           <span class="block text-xs text-gray-500">
             {time(tx)} · {tx.code} · {cashier(tx)}
             <span :if={is_nil(@current_scope.store)}>· {tx.store.name}</span>
