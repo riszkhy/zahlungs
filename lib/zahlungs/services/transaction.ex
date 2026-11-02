@@ -46,6 +46,9 @@ defmodule Zahlungs.Services.Transaction do
     field :quoted_cost, :decimal
     field :provider_payload, :string
     field :customer_details, :string
+    # A paid bill's reference at its biller, and the meter's reading (PLN).
+    field :bill_reference, :string
+    field :meter_reading, :string
     # An answer that contradicts the final status, for an admin to decide.
     field :review_reason, :string
     field :reviewed_at, :naive_datetime

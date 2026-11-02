@@ -53,6 +53,17 @@ defmodule Zahlungs.ServicesReviewTest do
       assert Decimal.equal?(Services.deposit_used(ctx.account), d("10100"))
     end
 
+    test "keeps a bill's reference and the meter's reading", ctx do
+      {:ok, _} =
+        Services.apply_result(
+          ctx.tx.id,
+          success(%{bill_reference: "AAAA1111", meter_reading: "00001000-00001100"})
+        )
+
+      tx = fresh(ctx.tx)
+      assert {tx.bill_reference, tx.meter_reading} == {"AAAA1111", "00001000-00001100"}
+    end
+
     test "a bill's actual cost never marks the product (it is the whole bill)", ctx do
       bill = api_product_fixture()
       {:ok, inquiry} = Services.inquire(ctx.cashier, bill.id, "530011223341")

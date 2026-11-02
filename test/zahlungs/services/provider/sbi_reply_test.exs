@@ -134,6 +134,31 @@ defmodule Zahlungs.Services.Provider.SbiReplyTest do
       assert {:ok, %{status: :pending}} = Reply.transaction(pdf)
     end
 
+    test "a paid bill brings its reference and the meter's reading" do
+      paid = %{
+        @topup_success
+        | "msg" =>
+            "SUKSES BAYAR TAGIHAN PLN IDPEL:530011223344 @DATA:Nama:BUDI SANTOSO//Tarif daya:R1/450/Ref:AAAA1111BBBB2222CCCC3333DDDD4444/Jml bulan:1/Blth:NOV26/St meter:00001000-00001100/Nominal pokok:Rp50000/Denda:Rp0/Serverid:2600000000000001. HRG:50785 SALDO:500000 REFID:Q10000000000000000. Time:2026-11-02 21:01:35."
+      }
+
+      assert {:ok, result} = Reply.transaction(paid)
+      assert result.status == :success
+      assert result.bill_reference == "AAAA1111BBBB2222CCCC3333DDDD4444"
+      assert result.meter_reading == "00001000-00001100"
+    end
+
+    test "a blank reference or reading is none; a top-up has neither" do
+      blank = %{
+        @topup_success
+        | "msg" => "SUKSES BAYAR @DATA:Nama:X/Ref:/St meter:-/Tagihan:Rp1. HRG:1 REFID:Q1."
+      }
+
+      assert {:ok, %{bill_reference: nil, meter_reading: nil}} = Reply.transaction(blank)
+
+      assert {:ok, %{bill_reference: nil, meter_reading: nil}} =
+               Reply.transaction(@topup_success)
+    end
+
     test "the SN stops before the shop's balance" do
       answer = %{
         @topup_success
@@ -210,6 +235,21 @@ defmodule Zahlungs.Services.Provider.SbiReplyTest do
 
       assert {:ok, %{sheets: 2, period: "JUL 24, AGU 24", customer_name: "SUTARTO"}} =
                Reply.inquiry({:data, answer}, :bill)
+    end
+
+    test "the name alone, when SBI's data_1 holds the whole bill" do
+      answer = %{
+        @inquiry_pln
+        | "detail" => %{
+            "data_1" =>
+              "Nama:BUDI SANTOSO/Tarif daya:R1 450/Ref:EEEE5555FFFF6666AAAA7777BBBB8888/Jml bulan:1/Blth:NOV26/St meter:-/Nominal pokok:Rp50000"
+          }
+      }
+
+      assert {:ok, %{customer_name: "BUDI SANTOSO"}} = Reply.inquiry({:data, answer}, :bill)
+
+      doubled = %{answer | "detail" => %{"data_1" => "Nama:BUDI SANTOSO//Tarif daya:R1/450"}}
+      assert {:ok, %{customer_name: "BUDI SANTOSO"}} = Reply.inquiry({:data, doubled}, :bill)
     end
 
     test "a meter's owner has no amount" do

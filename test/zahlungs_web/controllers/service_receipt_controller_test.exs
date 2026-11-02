@@ -6,6 +6,8 @@ defmodule ZahlungsWeb.ServiceReceiptControllerTest do
   import Zahlungs.ShiftsFixtures
   import Zahlungs.ServicesFixtures
 
+  require Ecto.Query
+
   alias Zahlungs.Services
 
   setup do
@@ -38,9 +40,9 @@ defmodule ZahlungsWeb.ServiceReceiptControllerTest do
     assert response =~ product.name
     assert response =~ "1234 5678 901"
     assert response =~ "5821 0344 9917 2268 4410"
-    assert response =~ "Rp 52.500,00"
-    assert response =~ "Rp 60.000,00"
-    assert response =~ "Rp 7.500,00"
+    assert response =~ "Rp 52.500"
+    assert response =~ "Rp 60.000"
+    assert response =~ "Rp 7.500"
     assert response =~ "Berhasil"
 
     local = Zahlungs.LocalTime.to_local(tx.inserted_at, default_store())
@@ -62,8 +64,8 @@ defmodule ZahlungsWeb.ServiceReceiptControllerTest do
       conn |> log_in_user(cashier) |> get("/services/#{tx.id}/receipt") |> html_response(200)
 
     assert response =~ "Tagihan"
-    assert response =~ "Rp 245.000,00"
-    assert response =~ "Rp 248.000,00"
+    assert response =~ "Rp 245.000"
+    assert response =~ "Rp 248.000"
     assert response =~ "Diproses"
   end
 
@@ -117,8 +119,93 @@ defmodule ZahlungsWeb.ServiceReceiptControllerTest do
     assert response =~ "Ref penyedia"
     assert response =~ tx.provider_ref
     assert tx.provider_ref =~ "FAKE-"
-    assert response =~ "Rp 735.000,00"
-    assert response =~ "Rp 744.000,00"
+    assert response =~ "Rp 735.000"
+    assert response =~ "Rp 744.000"
+  end
+
+  describe "a bill's receipt" do
+    setup %{cashier: cashier} do
+      bill = service_product_fixture(%{category: "tagihan", cost: "1500", margin_value: "3000"})
+
+      tx =
+        service_fixture(cashier, bill, %{
+          "bill_amount" => "245000",
+          "customer_ref" => "530011223344",
+          "amount_paid" => "250000"
+        })
+
+      %{tx: tx}
+    end
+
+    defp receipt(conn, user, tx),
+      do: conn |> log_in_user(user) |> get("/services/#{tx.id}/receipt") |> html_response(200)
+
+    test "says who is billed, then the money: bill, admin fee, total", %{
+      conn: conn,
+      cashier: cashier,
+      tx: tx
+    } do
+      response = receipt(conn, cashier, tx)
+
+      assert response =~ "ID pelanggan"
+      refute response =~ "Nomor tujuan"
+
+      assert response =~
+               ~r/ID pelanggan.*class="line".*Tagihan.*Rp 245\.000.*Biaya admin.*Rp 3\.000.*Total.*Rp 248\.000.*Dibayar.*Rp 250\.000.*Kembalian.*Rp 2\.000/s
+
+      refute response =~ ",00"
+    end
+
+    test "shows the bill's reference and the meter's reading, when there are any", %{
+      conn: conn,
+      cashier: cashier,
+      tx: tx
+    } do
+      response = receipt(conn, cashier, tx)
+      refute response =~ "Ref tagihan"
+      refute response =~ "Stand meter"
+
+      Zahlungs.Repo.update_all(
+        Ecto.Query.where(Zahlungs.Services.Transaction, id: ^tx.id),
+        set: [bill_reference: "AAAA1111BBBB", meter_reading: "00001000-00001100"]
+      )
+
+      response = receipt(build_conn(), cashier, tx)
+      assert response =~ "Ref tagihan"
+      assert response =~ "AAAA1111BBBB"
+      assert response =~ "Stand meter"
+      assert response =~ "00001000-00001100"
+    end
+  end
+
+  test "a top-up keeps its number's label and has no admin fee", %{conn: conn, cashier: cashier} do
+    tx = service_fixture(cashier, service_product_fixture())
+
+    response =
+      conn |> log_in_user(cashier) |> get("/services/#{tx.id}/receipt") |> html_response(200)
+
+    assert response =~ "Nomor tujuan"
+    refute response =~ "ID pelanggan"
+    refute response =~ "Biaya admin"
+  end
+
+  test "names the cashier, or their email when they have no name", %{conn: conn, cashier: cashier} do
+    tx = service_fixture(cashier, service_product_fixture())
+
+    assert conn |> log_in_user(cashier) |> get("/services/#{tx.id}/receipt") |> html_response(200) =~
+             "Kasir: #{cashier.email}"
+
+    named = user_on_shift_fixture(%{name: "Bu Sari"})
+    tx = service_fixture(named, service_product_fixture())
+
+    response =
+      build_conn()
+      |> log_in_user(named)
+      |> get("/services/#{tx.id}/receipt")
+      |> html_response(200)
+
+    assert response =~ "Kasir: Bu Sari"
+    refute response =~ named.email
   end
 
   test "another store's service is not found", %{conn: conn, cashier: cashier} do

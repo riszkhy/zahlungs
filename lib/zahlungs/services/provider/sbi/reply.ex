@@ -57,7 +57,9 @@ defmodule Zahlungs.Services.Provider.Sbi.Reply do
       status: :success,
       token_sn: sn(msg),
       provider_ref: text(answer["ref_2"]),
-      actual_cost: money(answer["total_payment"]) || hrg(msg)
+      actual_cost: money(answer["total_payment"]) || hrg(msg),
+      bill_reference: stated(msg, "Ref"),
+      meter_reading: stated(msg, "St meter")
     }
   end
 
@@ -128,7 +130,7 @@ defmodule Zahlungs.Services.Provider.Sbi.Reply do
     bill? = kind == :bill
 
     %{
-      customer_name: trimmed(detail["data_1"]) || field(msg, "Nama"),
+      customer_name: customer_name(detail["data_1"]) || field(msg, "Nama"),
       details: tidy_details(text(detail["data_2"])) || field(msg, "Tarif daya"),
       sheets: months(msg),
       period: field(msg, "Blth"),
@@ -192,10 +194,25 @@ defmodule Zahlungs.Services.Provider.Sbi.Reply do
   defp field(nil, _name), do: nil
 
   defp field(msg, name) do
-    case Regex.run(~r/#{name}\s*:\s*([^\/]*)/i, msg) do
+    case Regex.run(~r/\b#{name}\s*:\s*([^\/]*)/i, msg) do
       [_, value] -> value |> String.trim() |> String.trim_trailing(".") |> nil_if_blank()
       _ -> nil
     end
+  end
+
+  # SBI writes "-" for a field it has nothing for.
+  defp stated(msg, name) do
+    case field(msg, name) do
+      "-" -> nil
+      value -> value
+    end
+  end
+
+  # `data_1` is the customer's name for a meter's owner, but for a bill the
+  # whole text (`Nama:BUDI SANTOSO/Tarif daya:R1 450/...`).
+  defp customer_name(data) do
+    text = trimmed(data)
+    if text && text =~ ~r/\bNama\s*:/i, do: field(text, "Nama"), else: text
   end
 
   defp months(msg) do

@@ -650,7 +650,9 @@ defmodule Zahlungs.Services do
   defp answer_copies(result) do
     %{
       cost: Map.get(result, :actual_cost),
-      provider_payload: clip(Map.get(result, :payload), 4000)
+      provider_payload: clip(Map.get(result, :payload), 4000),
+      bill_reference: clip(Map.get(result, :bill_reference), 64),
+      meter_reading: clip(Map.get(result, :meter_reading), 40)
     }
     |> Map.reject(fn {_field, value} -> is_nil(value) end)
   end

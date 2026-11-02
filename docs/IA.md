@@ -362,8 +362,9 @@ Berlaku bila akun deposit toko bermode **API** (diatur di `/admin/deposits`).
   sampai kasir menekan **Uang sudah dikembalikan**. Bila gagalnya setelah shift
   ditutup, pengembalian tunai dicatat sebagai kas keluar di shift yang sedang
   buka.
-- **Struk tagihan** memuat nama pelanggan, periode, jumlah bulan dan referensi
-  penyedia.
+- **Struk tagihan** memuat ID pelanggan, nama, tarif/daya, periode, jumlah bulan,
+  stand meter, ref tagihan dan ref penyedia; lalu tagihan, biaya admin (total −
+  tagihan) dan total.
 - **/admin/deposits** (akun API): penyedia, kredensial (tidak pernah
   ditampilkan lagi, hanya "tersimpan"), URL callback untuk didaftarkan ke
   penyedia, **Tes koneksi**, **Ambil saldo dari penyedia** (mengisi form
