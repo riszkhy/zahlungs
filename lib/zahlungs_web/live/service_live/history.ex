@@ -133,7 +133,7 @@ defmodule ZahlungsWeb.ServiceLive.History do
   defp outcome(assigns) do
     ~H"""
     <span :if={@transaction.token_sn} class="block break-all text-xs text-gray-500">
-      Token / SN: {@transaction.token_sn}
+      Token / SN: {Layanan.token_text(@transaction.token_sn)}
     </span>
     <span :if={@transaction.review_reason} class="block text-xs font-medium text-amber-700">
       Perlu ditinjau — admin akan meninjau

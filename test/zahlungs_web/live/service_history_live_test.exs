@@ -101,6 +101,23 @@ defmodule ZahlungsWeb.ServiceHistoryLiveTest do
       refute rendered =~ ~s(href="/services/#{processing.id}/receipt")
     end
 
+    test "a token's answer shows the token alone", %{cashier: cashier} do
+      token = service_product_fixture(%{category: "token_pln"})
+
+      {:ok, _} =
+        Services.mark_success(
+          service_fixture(cashier, token),
+          cashier,
+          "1111-2222-3333-4444-5555/BUDI SANTOSO/R1M/900VA/16,9KWH"
+        )
+
+      rendered = ServiceLive.History |> mount_live(cashier) |> html()
+
+      assert rendered =~ "1111 2222 3333 4444 5555"
+      refute rendered =~ "BUDI SANTOSO"
+      refute rendered =~ "16,9KWH"
+    end
+
     test "names the store only across stores", %{cashier: cashier, pulsa: pulsa} do
       service_fixture(cashier, pulsa)
       admin = admin_fixture()

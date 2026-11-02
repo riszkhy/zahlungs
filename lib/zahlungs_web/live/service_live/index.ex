@@ -482,6 +482,20 @@ defmodule ZahlungsWeb.ServiceLive.Index do
   defp digits(value) when is_binary(value), do: String.replace(value, ~r/[\s\-\.\+]/, "")
   defp digits(_value), do: ""
 
+  @doc """
+  A token or serial number to read out: the token alone out of SBI's whole
+  answer, digits only in groups of four; an SN as it came.
+  """
+  def token_text(answer) do
+    token =
+      case Services.TokenAnswer.parse(answer) do
+        %{token: token} -> token
+        nil -> answer
+      end
+
+    if token =~ ~r/^\d{12,}$/, do: group_digits(token), else: token
+  end
+
   @doc "A number in groups of four from the left, to read out: `0812 3456 7890`."
   def group_digits(number) when is_binary(number) do
     number
@@ -910,7 +924,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
       <div :for={tx <- @history} id={"history-#{tx.id}"} class="list-card mt-2">
         <span class="min-w-0 flex-1">
           <span class="block truncate font-medium">{tx.product_name} · {group_digits(tx.customer_ref)}</span>
-          <span :if={tx.token_sn} class="block text-xs text-gray-500">Token / SN: {tx.token_sn}</span>
+          <span :if={tx.token_sn} class="block text-xs text-gray-500">Token / SN: {token_text(tx.token_sn)}</span>
           <span :if={tx.review_reason} class="block text-xs font-medium text-amber-700">
             Perlu ditinjau — admin akan meninjau
           </span>

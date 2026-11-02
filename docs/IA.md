@@ -362,6 +362,8 @@ Berlaku bila akun deposit toko bermode **API** (diatur di `/admin/deposits`).
   sampai kasir menekan **Uang sudah dikembalikan**. Bila gagalnya setelah shift
   ditutup, pengembalian tunai dicatat sebagai kas keluar di shift yang sedang
   buka.
+- **Struk token PLN** memecah jawaban SBI: token sendiri dengan huruf besar, lalu no. meter,
+  nama, tarif/daya dan jumlah kWh. Bentuk jawaban lain tampil apa adanya.
 - **Struk tagihan** memuat ID pelanggan, nama, tarif/daya, periode, jumlah bulan,
   stand meter, ref tagihan dan ref penyedia; lalu tagihan, biaya admin (total −
   tagihan) dan total.

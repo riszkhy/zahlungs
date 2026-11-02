@@ -14,6 +14,7 @@
       .row span + span { text-align: right; overflow-wrap: anywhere; }
       .b { font-weight: bold; }
       .token { font-size: 15px; font-weight: bold; text-align: center; letter-spacing: 1px; margin: 8px 0; word-break: break-all; }
+      .token-label { font-size: 11px; text-align: center; margin: 8px 0 -6px; }
       .status { text-align: center; font-size: 12px; font-weight: bold; margin-top: 8px; }
       .foot { text-align: center; font-size: 11px; color: #666; margin-top: 12px; }
       .noprint { text-align: center; margin-top: 16px; }
@@ -35,11 +36,14 @@
 
     <div class="row b"><span>{@transaction.product_name}</span></div>
     <div class="row"><span>{number_label(@transaction)}</span><span>{group_digits(@transaction.customer_ref)}</span></div>
-    <div :if={@transaction.customer_name} class="row">
-      <span>Nama</span><span>{@transaction.customer_name}</span>
+    <div :if={customer_name(@transaction)} class="row">
+      <span>Nama</span><span>{customer_name(@transaction)}</span>
     </div>
-    <div :if={@transaction.customer_details} class="row">
-      <span>Tarif/daya</span><span>{@transaction.customer_details}</span>
+    <div :if={tariff(@transaction)} class="row">
+      <span>Tarif/daya</span><span>{tariff(@transaction)}</span>
+    </div>
+    <div :if={kwh(@transaction)} class="row">
+      <span>Jumlah kWh</span><span>{kwh(@transaction)}</span>
     </div>
     <div :if={@transaction.period} class="row">
       <span>Periode</span><span>{@transaction.period}</span>
@@ -50,6 +54,7 @@
     <div :if={@transaction.meter_reading} class="row">
       <span>Stand meter</span><span>{@transaction.meter_reading}</span>
     </div>
+    <p :if={@transaction.token_sn && @transaction.category == "token_pln"} class="token-label">TOKEN</p>
     <p :if={@transaction.token_sn} class="token">{token_text(@transaction.token_sn)}</p>
     <div :if={@transaction.bill_reference} class="row">
       <span>Ref tagihan</span><span>{@transaction.bill_reference}</span>

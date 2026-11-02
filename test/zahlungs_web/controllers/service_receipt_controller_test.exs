@@ -178,6 +178,73 @@ defmodule ZahlungsWeb.ServiceReceiptControllerTest do
     end
   end
 
+  describe "a token's receipt" do
+    setup %{cashier: cashier} do
+      product = service_product_fixture(%{category: "token_pln", name: "PLN 25.000"})
+      %{tx: service_fixture(cashier, product, %{"customer_ref" => "14530869511"})}
+    end
+
+    defp sold(tx, cashier, answer) do
+      {:ok, tx} = Services.mark_success(tx, cashier, answer)
+      tx
+    end
+
+    test "splits SBI's answer: the token alone, then who it is for", %{
+      conn: conn,
+      cashier: cashier,
+      tx: tx
+    } do
+      tx = sold(tx, cashier, "1111-2222-3333-4444-5555/BUDI SANTOSO/R1M/900VA/16,9KWH")
+      response = receipt(conn, cashier, tx)
+
+      assert response =~ "No. meter"
+      refute response =~ "Nomor tujuan"
+      assert response =~ "TOKEN"
+      assert response =~ ~s(<p class="token">1111 2222 3333 4444 5555</p>)
+      assert response =~ ~r/Nama.*BUDI SANTOSO/s
+      assert response =~ ~r/Tarif\/daya.*R1M\/900VA/s
+      assert response =~ ~r/Jumlah kWh.*16,9 kWh/s
+      refute response =~ "1111-2222"
+      refute response =~ "16,9KWH"
+    end
+
+    test "what the owner check found comes first", %{conn: conn, cashier: cashier, tx: tx} do
+      tx = sold(tx, cashier, "1111-2222-3333-4444-5555/DARI JAWABAN/R1M/900VA/16,9KWH")
+
+      Zahlungs.Repo.update_all(
+        Ecto.Query.where(Zahlungs.Services.Transaction, id: ^tx.id),
+        set: [customer_name: "DARI CEK", customer_details: "R1/450"]
+      )
+
+      response = receipt(conn, cashier, tx)
+
+      assert response =~ "DARI CEK"
+      assert response =~ ~r/Tarif\/daya.*R1\/450/s
+      refute response =~ "DARI JAWABAN"
+      refute response =~ "R1M/900VA"
+      assert response =~ "16,9 kWh"
+    end
+
+    test "an answer of another shape is shown whole", %{conn: conn, cashier: cashier, tx: tx} do
+      tx = sold(tx, cashier, "1111-2222-3333-4444-5555/BUDI/R1/450")
+      response = receipt(conn, cashier, tx)
+
+      assert response =~ "1111-2222-3333-4444-5555/BUDI/R1/450"
+      refute response =~ "Jumlah kWh"
+    end
+  end
+
+  test "a top-up's serial number has no token label", %{conn: conn, cashier: cashier} do
+    tx = service_fixture(cashier, service_product_fixture())
+    {:ok, tx} = Services.mark_success(tx, cashier, "R240814.1900.210036")
+
+    response =
+      conn |> log_in_user(cashier) |> get("/services/#{tx.id}/receipt") |> html_response(200)
+
+    assert response =~ "R240814.1900.210036"
+    refute response =~ "TOKEN"
+  end
+
   test "a top-up keeps its number's label and has no admin fee", %{conn: conn, cashier: cashier} do
     tx = service_fixture(cashier, service_product_fixture())
 

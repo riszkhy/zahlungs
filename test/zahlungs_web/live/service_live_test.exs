@@ -263,6 +263,22 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       assert Services.list_shift_transactions(ctx.shift) == []
     end
 
+    test "this shift's history shows a token's answer as the token alone", ctx do
+      token = service_product_fixture(%{category: "token_pln"})
+
+      {:ok, tx} =
+        Services.mark_success(
+          service_fixture(ctx.cashier, token),
+          ctx.cashier,
+          "1111-2222-3333-4444-5555/BUDI SANTOSO/R1M/900VA/16,9KWH"
+        )
+
+      rendered = ctx.socket |> info({:service_changed, tx.id}) |> html()
+
+      assert rendered =~ "1111 2222 3333 4444 5555"
+      refute rendered =~ "16,9KWH"
+    end
+
     test "says what went wrong", ctx do
       no_product =
         record(ctx.socket, %{"service" => %{"customer_ref" => "081234567890"}})
