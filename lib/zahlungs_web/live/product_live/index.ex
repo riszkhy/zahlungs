@@ -179,7 +179,7 @@ defmodule ZahlungsWeb.ProductLive.Index do
 
     <div id="products-beeper" phx-hook="Beeper" class="hidden"></div>
 
-    <form phx-change="filter" phx-submit="scan" class="mt-6 flex flex-wrap gap-3 items-end">
+    <form phx-change="filter" phx-submit="scan" class="mt-6 flex flex-wrap gap-3 items-center">
       <input
         type="text"
         name="search"

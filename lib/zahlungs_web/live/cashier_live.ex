@@ -1210,7 +1210,7 @@ defmodule ZahlungsWeb.CashierLive do
             type="text"
             name="q"
             value={@search}
-            placeholder="Scan barcode or search by name / SKU, then Enter..."
+            placeholder="Scan barcode or search name / SKU"
             phx-debounce="200"
             autocomplete="off"
             class="form-control"
