@@ -239,10 +239,10 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
       Produk layanan
       <:subtitle>Pulsa, paket data, token PLN dan tagihan (khusus admin)</:subtitle>
       <:actions>
-        <button :if={@catalog_account} type="button" phx-click="price_update" phx-disable-with="Mengambil harga..." class="chip mr-2">
+        <button :if={@catalog_account} type="button" phx-click="price_update" phx-disable-with="Mengambil harga..." class="chip">
           Perbarui dari SBI
         </button>
-        <.link navigate={~p"/admin/services/commission"} class="chip mr-2">Komisi kasir</.link>
+        <.link navigate={~p"/admin/services/commission"} class="chip">Komisi kasir</.link>
         <.link patch={~p"/admin/services/new"}><.button>Produk baru</.button></.link>
       </:actions>
     </.header>
@@ -290,23 +290,41 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
       </a>
     </form>
 
+    <%!-- Below landscape-tablet width a row doesn't fit: one card per product, its actions in reach. --%>
+    <div class="mt-4 space-y-2 lg:hidden">
+      <div :for={product <- @products} id={"service-product-card-#{product.id}"} class="list-card flex-wrap">
+        <span class="min-w-0 flex-1">
+          <span class="block font-medium">{product.name}</span>
+          <span class="block text-xs text-gray-500">
+            {category_label(product)}
+            · <span class="whitespace-nowrap">Modal {format_money(product.cost)}</span>
+            · <span class="whitespace-nowrap">Margin {margin_label(product)}</span>
+          </span>
+        </span>
+        <span class="text-right font-semibold">{price_label(product)}</span>
+        <span class="w-full"><.product_status product={product} /></span>
+        <span class="flex w-full flex-wrap gap-2">
+          <.link patch={~p"/admin/services/#{product}/edit"} class="chip">Edit</.link>
+          <.link
+            phx-click={JS.push("delete", value: %{id: product.id})}
+            data-confirm="Hapus produk layanan ini? Transaksi lamanya tetap tersimpan."
+            class="chip"
+          >
+            Hapus
+          </.link>
+        </span>
+      </div>
+      <p :if={@products == []} class="text-sm text-gray-500">Tidak ada produk.</p>
+    </div>
+
+    <div class="hidden lg:block">
     <.table id="service-products" rows={@products}>
       <:col :let={product} label="Nama">{product.name}</:col>
       <:col :let={product} label="Kategori">{category_label(product)}</:col>
       <:col :let={product} label="Modal">{format_money(product.cost)}</:col>
       <:col :let={product} label="Margin">{margin_label(product)}</:col>
       <:col :let={product} label="Harga">{price_label(product)}</:col>
-      <:col :let={product} label="Status">
-        <span class={if product.active, do: "text-green-600", else: "text-gray-400"}>
-          {if product.active, do: "Aktif", else: "Nonaktif"}
-        </span>
-        <span :if={vendor_status(product.provider_status)} class="ml-1 rounded-full bg-amber-100 px-2 text-xs text-amber-800">
-          {vendor_status(product.provider_status)}
-        </span>
-        <span :if={vendor_price_up?(product)} class="ml-1 rounded-full bg-red-100 px-2 text-xs text-red-700">
-          Modal SBI naik
-        </span>
-      </:col>
+      <:col :let={product} label="Status"><.product_status product={product} /></:col>
       <:action :let={product}>
         <.link patch={~p"/admin/services/#{product}/edit"}>Edit</.link>
       </:action>
@@ -319,6 +337,7 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
         </.link>
       </:action>
     </.table>
+    </div>
     <.pagination page={@page} per_page={@per_page} total={@total} noun="produk" />
 
     <.modal :if={@form} id="service-product-modal" show on_cancel={JS.patch(~p"/admin/services")}>
@@ -425,6 +444,20 @@ defmodule ZahlungsWeb.ServiceProductLive.Index do
         <div class="mt-6"><.button class="w-full">Simpan</.button></div>
       </.form>
     </.modal>
+    """
+  end
+
+  defp product_status(assigns) do
+    ~H"""
+    <span class={if @product.active, do: "text-green-600", else: "text-gray-400"}>
+      {if @product.active, do: "Aktif", else: "Nonaktif"}
+    </span>
+    <span :if={vendor_status(@product.provider_status)} class="ml-1 rounded-full bg-amber-100 px-2 text-xs text-amber-800">
+      {vendor_status(@product.provider_status)}
+    </span>
+    <span :if={vendor_price_up?(@product)} class="ml-1 rounded-full bg-red-100 px-2 text-xs text-red-700">
+      Modal SBI naik
+    </span>
     """
   end
 end

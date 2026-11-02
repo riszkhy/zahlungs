@@ -28,6 +28,42 @@ defmodule ZahlungsWeb.CoreComponentsTest do
     end
   end
 
+  describe "header/1" do
+    import Phoenix.Component, only: [sigil_H: 2]
+
+    defp header_html(rendered) do
+      rendered |> Phoenix.HTML.Safe.to_iodata() |> IO.iodata_to_binary()
+    end
+
+    # A fixed-width (flex-none) row of actions is what pushed pages wider than a phone.
+    test "its actions may wrap below the title instead of widening the page" do
+      assigns = %{}
+
+      html =
+        header_html(~H"""
+        <CoreComponents.header>
+          Title
+          <:actions><a href="#">One</a></:actions>
+        </CoreComponents.header>
+        """)
+
+      assert html =~ ~s(class="flex flex-wrap items-center justify-between gap-x-6 gap-y-3")
+      assert html =~ ~s(class="flex flex-wrap items-center gap-2")
+      refute html =~ "flex-none"
+    end
+
+    test "without actions it is not a flex row" do
+      assigns = %{}
+
+      html =
+        header_html(~H"""
+        <CoreComponents.header>Title</CoreComponents.header>
+        """)
+
+      refute html =~ "flex"
+    end
+  end
+
   describe "pagination/1" do
     import Phoenix.LiveViewTest, only: [render_component: 2]
 

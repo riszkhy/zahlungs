@@ -83,6 +83,32 @@ defmodule ZahlungsWeb.ProductLiveTest do
       assert flash(miss, :error) =~ code
     end
 
+    test "each product is also a card with its actions, the table only on wide screens",
+         %{socket: socket, product: product} do
+      rendered = socket |> event("filter", %{"search" => product.sku}) |> html()
+
+      assert rendered =~ ~s(class="mt-4 space-y-2 lg:hidden")
+      assert rendered =~ ~s(class="hidden lg:block")
+
+      [_, card] = Regex.run(~r{id="product-card-#{product.id}"[^>]*>(.*?)</div>}s, rendered)
+
+      assert card =~ product.name
+      assert card =~ product.sku
+      assert card =~ "Stock #{product.stock}"
+      assert card =~ ZahlungsWeb.CoreComponents.format_money(product.price)
+      assert card =~ "Active"
+      assert card =~ ~s(href="/products/#{product.id}/edit")
+      assert card =~ "toggle_active"
+      assert card =~ "Deactivate"
+      assert card =~ "delete"
+    end
+
+    test "with no match the cards say so", %{socket: socket} do
+      code = "NO-SUCH-#{System.unique_integer([:positive])}"
+
+      assert socket |> event("filter", %{"search" => code}) |> html() =~ "Tidak ada produk."
+    end
+
     test "toggle_active deactivates and reactivates a product",
          %{socket: socket, product: product} do
       socket = event(socket, "toggle_active", %{"id" => product.id})

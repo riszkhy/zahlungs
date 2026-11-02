@@ -328,7 +328,7 @@ defmodule ZahlungsWeb.CoreComponents do
 
   def header(assigns) do
     ~H"""
-    <header class={[@actions != [] && "flex items-center justify-between gap-6", @class]}>
+    <header class={[@actions != [] && "flex flex-wrap items-center justify-between gap-x-6 gap-y-3", @class]}>
       <div>
         <h1 class="text-lg font-semibold leading-8 text-black">
           {render_slot(@inner_block)}
@@ -337,7 +337,7 @@ defmodule ZahlungsWeb.CoreComponents do
           {render_slot(@subtitle)}
         </p>
       </div>
-      <div :if={@actions != []} class="flex-none">{render_slot(@actions)}</div>
+      <div :if={@actions != []} class="flex flex-wrap items-center gap-2">{render_slot(@actions)}</div>
     </header>
     """
   end

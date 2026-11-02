@@ -53,6 +53,48 @@ defmodule ZahlungsWeb.ServiceProductLiveTest do
       assert rendered =~ "Rp 12.000,00"
     end
 
+    test "each product is also a card with its actions, the table only on wide screens",
+         %{admin: admin} do
+      product = service_product_fixture(%{operator: "telkomsel"})
+
+      Zahlungs.Repo.update_all(
+        from(p in Services.Product, where: p.id == ^product.id),
+        set: [provider_status: "gangguan"]
+      )
+
+      rendered =
+        ServiceProductLive.Index
+        |> mount_live(admin)
+        |> event("filter", %{"category" => "pulsa", "operator" => "telkomsel"})
+        |> html()
+
+      assert rendered =~ ~s(class="mt-4 space-y-2 lg:hidden")
+      assert rendered =~ ~s(class="hidden lg:block")
+
+      [_, card] =
+        Regex.run(~r{id="service-product-card-#{product.id}"[^>]*>(.*?)</div>}s, rendered)
+
+      assert card =~ product.name
+      assert card =~ "Telkomsel"
+      assert card =~ "Modal Rp 10.150,00"
+      assert card =~ "Margin Rp 1.850,00"
+      assert card =~ "Rp 12.000,00"
+      assert card =~ "Aktif"
+      assert card =~ "Gangguan"
+      assert card =~ ~s(href="/admin/services/#{product.id}/edit")
+      assert card =~ "delete"
+    end
+
+    test "with no match the cards say so", %{admin: admin} do
+      rendered =
+        ServiceProductLive.Index
+        |> mount_live(admin)
+        |> event("filter", %{"category" => "tagihan"})
+        |> html()
+
+      assert rendered =~ "Tidak ada produk."
+    end
+
     test "filters by category", %{product: product, admin: admin} do
       token = service_product_fixture(%{category: "token_pln"})
 

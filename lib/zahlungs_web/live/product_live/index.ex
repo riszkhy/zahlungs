@@ -218,17 +218,46 @@ defmodule ZahlungsWeb.ProductLive.Index do
       <p data-scan-status class="mt-1 text-xs text-gray-400">Point the camera at a barcode.</p>
     </div>
 
+    <%!-- Below landscape-tablet width a row doesn't fit: one card per product, its actions in reach. --%>
+    <div class="mt-4 space-y-2 lg:hidden">
+      <div :for={product <- @products} id={"product-card-#{product.id}"} class="list-card flex-wrap">
+        <span class="min-w-0 flex-1">
+          <span class="block font-medium">{product.name}</span>
+          <span class="block text-xs text-gray-500">
+            {product.sku}
+            <span :if={product.category}>· {product.category.name}</span>
+            · Stock {product.stock}
+          </span>
+        </span>
+        <span class="text-right">
+          <span class="block font-semibold">{format_money(product.price)}</span>
+          <.active_status product={product} />
+        </span>
+        <span class="flex w-full flex-wrap gap-2">
+          <.link patch={~p"/products/#{product}/edit"} class="chip">Edit</.link>
+          <.link phx-click={JS.push("toggle_active", value: %{id: product.id})} class="chip">
+            {if product.active, do: "Deactivate", else: "Activate"}
+          </.link>
+          <.link
+            phx-click={JS.push("delete", value: %{id: product.id})}
+            data-confirm="Delete this product? It will be hidden but kept for history."
+            class="chip"
+          >
+            Delete
+          </.link>
+        </span>
+      </div>
+      <p :if={@products == []} class="text-sm text-gray-500">Tidak ada produk.</p>
+    </div>
+
+    <div class="hidden lg:block">
     <.table id="products" rows={@products}>
       <:col :let={product} label="SKU">{product.sku}</:col>
       <:col :let={product} label="Name">{product.name}</:col>
       <:col :let={product} label="Category">{product.category && product.category.name}</:col>
       <:col :let={product} label="Price">{format_money(product.price)}</:col>
       <:col :let={product} label="Stock">{product.stock}</:col>
-      <:col :let={product} label="Status">
-        <span class={if product.active, do: "text-green-600", else: "text-gray-400"}>
-          {if product.active, do: "Active", else: "Inactive"}
-        </span>
-      </:col>
+      <:col :let={product} label="Status"><.active_status product={product} /></:col>
       <:action :let={product}>
         <.link patch={~p"/products/#{product}/edit"}>Edit</.link>
       </:action>
@@ -246,6 +275,7 @@ defmodule ZahlungsWeb.ProductLive.Index do
         </.link>
       </:action>
     </.table>
+    </div>
 
     <.pagination page={@page} per_page={@per_page} total={@total} noun="produk" />
 
@@ -265,6 +295,14 @@ defmodule ZahlungsWeb.ProductLive.Index do
         patch={~p"/products"}
       />
     </.modal>
+    """
+  end
+
+  defp active_status(assigns) do
+    ~H"""
+    <span class={if @product.active, do: "text-green-600", else: "text-gray-400"}>
+      {if @product.active, do: "Active", else: "Inactive"}
+    </span>
     """
   end
 end

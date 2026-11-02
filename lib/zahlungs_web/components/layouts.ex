@@ -14,7 +14,9 @@ defmodule ZahlungsWeb.Layouts do
 
   @doc """
   The store the user is working in. An admin gets a switcher (any active store,
-  or all of them); a cashier just sees the name of their store.
+  or all of them); a cashier just sees the name of their store. Either one
+  shrinks when the bar runs out of room, so the Menu button beside it stays on
+  screen.
   """
   attr :scope, :map, required: true
 
@@ -22,13 +24,13 @@ defmodule ZahlungsWeb.Layouts do
     assigns = assign(assigns, :admin?, Zahlungs.Scope.admin?(assigns.scope))
 
     ~H"""
-    <.form :if={@admin?} for={%{}} action={~p"/stores/select"} method="post" class="inline">
+    <.form :if={@admin?} for={%{}} action={~p"/stores/select"} method="post" class="min-w-0">
       <input type="hidden" name="return_to" value="" />
       <select
         name="store_id"
         aria-label="Toko aktif"
         onchange="this.form.return_to.value = window.location.pathname; this.form.submit()"
-        class="rounded border-0 bg-white/15 py-1 pl-2 pr-7 text-sm text-white focus:ring-1 focus:ring-white"
+        class="max-w-full rounded border-0 bg-white/15 py-1 pl-2 pr-7 text-sm text-white focus:ring-1 focus:ring-white"
       >
         <option value="all" selected={is_nil(@scope.store)} class="text-gray-800">Semua toko</option>
         <option
@@ -41,7 +43,11 @@ defmodule ZahlungsWeb.Layouts do
         </option>
       </select>
     </.form>
-    <span :if={not @admin? and @scope.store} class="rounded bg-white/15 px-2 py-1 text-white">
+    <span
+      :if={not @admin? and @scope.store}
+      title={@scope.store.name}
+      class="min-w-0 truncate rounded bg-white/15 px-2 py-1 text-white"
+    >
       {@scope.store.name}
     </span>
     """

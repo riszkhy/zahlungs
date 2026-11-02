@@ -258,5 +258,28 @@ defmodule ZahlungsWeb.MultiStoreAuthTest do
       assert response =~ "Cabang Kasir"
       refute response =~ ~s(action="/stores/select")
     end
+
+    test "an admin's switcher gives way on a narrow screen, so Menu stays on it", %{conn: conn} do
+      response = conn |> log_in_user(admin_fixture()) |> get("/home") |> html_response(200)
+
+      assert response =~ ~s(class="ml-auto flex min-w-0 items-center gap-2")
+      assert response =~ ~s(method="post" class="min-w-0")
+      assert response =~ ~s(class="max-w-full rounded border-0)
+      assert response =~ ~s(class="nav-tap shrink-0")
+    end
+
+    test "a cashier's long store name is cut short, the whole of it in the title", %{conn: conn} do
+      store = store_fixture(name: "Cabang Dengan Nama Yang Panjang Sekali")
+
+      response =
+        conn
+        |> log_in_user(user_fixture(store_id: store.id))
+        |> get("/home")
+        |> html_response(200)
+
+      assert response =~ ~s(class="ml-auto flex min-w-0 items-center gap-2")
+      assert response =~ ~s(title="Cabang Dengan Nama Yang Panjang Sekali")
+      assert response =~ ~s(class="min-w-0 truncate rounded)
+    end
   end
 end

@@ -26,13 +26,13 @@
 
         <.primary_nav :if={assigns[:current_user]} current_user={assigns[:current_user]} />
 
-        <div class="ml-auto flex items-center gap-2">
+        <div class="ml-auto flex min-w-0 items-center gap-2">
           <.store_switcher :if={assigns[:current_scope]} scope={assigns[:current_scope]} />
 
           <button
             :if={assigns[:current_user]}
             type="button"
-            class="nav-tap"
+            class="nav-tap shrink-0"
             @click="open = true"
             aria-label="Buka menu"
             aria-controls="menu-drawer"
