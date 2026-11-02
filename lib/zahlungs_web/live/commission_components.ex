@@ -36,7 +36,7 @@ defmodule ZahlungsWeb.CommissionComponents do
       <:col :let={row} label="Kode">{row.code}</:col>
       <:col :let={row} label="Produk">{row.product_name} <span class="text-gray-500">· {category_label(row.category)}</span></:col>
       <:col :let={row} label="Margin">{format_money(row.margin)}</:col>
-      <:col :let={row} label="Persen">{Decimal.to_string(Decimal.normalize(row.percent), :normal)}%</:col>
+      <:col :let={row} label="Aturan">{rule(row)}</:col>
       <:col :let={row} label="Komisi">{format_money(row.commission)}</:col>
     </.table>
     """
@@ -50,6 +50,13 @@ defmodule ZahlungsWeb.CommissionComponents do
     else
       _ -> :error
     end
+  end
+
+  # What a service earned by: one of the two is 0.
+  defp rule(%{amount: amount, percent: percent}) do
+    if Decimal.gt?(amount, 0),
+      do: format_price(amount),
+      else: "#{Decimal.to_string(Decimal.normalize(percent), :normal)}%"
   end
 
   defp category_label(category) do

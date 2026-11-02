@@ -67,7 +67,7 @@ Aturan akses berlapis (router):
     │     └── /admin/customers/:id   Kartu piutang: batalkan pelunasan, kembalikan kelebihan
     ├── /admin/services         Produk layanan PPOB: modal, margin Rp/% (+ /new, /:id/edit)
     │     ├── /admin/services/export.xlsx   Export Excel, mengikuti filter kategori/operator
-    │     └── /admin/services/commission    Persen komisi kasir per kategori (dari margin)
+    │     └── /admin/services/commission    Komisi kasir per kategori: persen dari margin atau rupiah per transaksi
     ├── /admin/deposits         Akun deposit: perkiraan saldo, isi ulang, pencocokan
     │                           (+ /new, /:id, /:id/edit)
     ├── /reports/sales          Laporan penjualan (ringkasan, harian, per kasir,
@@ -324,9 +324,10 @@ Kelola user (admin):
   /cashier: Complete Sale membuka popup, penjualan tercatat setelah "Ya, selesaikan".
 - Shift tidak bisa ditutup selama masih ada layanan *diproses*.
 - **/admin/services**, **/admin/deposits**, **/reports/services**: admin saja.
-- Komisi kasir: persen dari margin per kategori (`/admin/services/commission`,
-  admin), disalin ke transaksi saat dicatat kasir; hanya transaksi sukses yang
-  berkomisi. Kasir melihat miliknya di `/commissions` dan "Komisi shift ini"
+- Komisi kasir: per kategori persen dari margin atau rupiah per transaksi
+  (`/admin/services/commission`, admin), disalin ke transaksi saat dicatat kasir;
+  hanya transaksi sukses yang berkomisi. Komisi rupiah dibayar penuh walau margin
+  lebih kecil, dan tagihan beberapa bulan tetap satu kali. Kasir melihat miliknya di `/commissions` dan "Komisi shift ini"
   di /services; admin melihat semua kasir di `/reports/commissions`.
   Form toko memilih akun deposit yang dipakai toko itu.
 - Daftar produk layanan bisa disaring per kategori dan per operator (untuk

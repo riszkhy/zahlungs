@@ -329,6 +329,184 @@ defmodule Zahlungs.ServicesCommissionTest do
     end
   end
 
+  describe "in rupiah" do
+    # Pulsa earns Rp 500 a service, token PLN 10% of the margin.
+    setup do
+      assign_account(default_store(), deposit_account_fixture())
+      admin = admin()
+
+      {:ok, _} =
+        Services.save_commission_rates(admin, %{
+          "pulsa" => %{"kind" => "amount", "value" => "500"},
+          "token_pln" => %{"kind" => "percent", "value" => "10"}
+        })
+
+      %{admin: admin, cashier: user_on_shift_fixture(), pulsa: service_product_fixture()}
+    end
+
+    defp rate(category), do: Enum.find(Services.commission_rates(), &(&1.category == category))
+
+    test "each category is a percent or an amount, never both", ctx do
+      assert %{kind: "amount"} = rate("pulsa")
+      assert Decimal.equal?(rate("pulsa").amount, 500)
+      assert Decimal.equal?(rate("pulsa").percent, 0)
+
+      assert %{kind: "percent"} = rate("token_pln")
+      assert Decimal.equal?(rate("token_pln").percent, 10)
+      assert Decimal.equal?(rate("token_pln").amount, 0)
+
+      assert %{kind: "percent"} = rate("tagihan")
+
+      {:ok, _} =
+        Services.save_commission_rates(ctx.admin, %{
+          "pulsa" => %{"kind" => "percent", "value" => "20"}
+        })
+
+      assert %{kind: "percent"} = rate("pulsa")
+      assert Decimal.equal?(rate("pulsa").percent, 20)
+      assert Decimal.equal?(rate("pulsa").amount, 0)
+    end
+
+    test "an amount is whole rupiah up to a million; a wrong one saves nothing", ctx do
+      for bad <- ["-1", "500.50", "1.000", "abc", "1000001"] do
+        assert {:error, %{"paket_data" => message}} =
+                 Services.save_commission_rates(ctx.admin, %{
+                   "pulsa" => %{"kind" => "amount", "value" => "900"},
+                   "paket_data" => %{"kind" => "amount", "value" => bad}
+                 })
+
+        assert is_binary(message)
+        assert Decimal.equal?(rate("pulsa").amount, 500)
+      end
+
+      assert {:ok, _} =
+               Services.save_commission_rates(ctx.admin, %{
+                 "pulsa" => %{"kind" => "amount", "value" => "1000000"},
+                 "paket_data" => %{"kind" => "amount", "value" => ""}
+               })
+
+      assert Decimal.equal?(rate("pulsa").amount, 1_000_000)
+      assert Decimal.equal?(rate("paket_data").amount, 0)
+    end
+
+    test "a kind that isn't one is refused", ctx do
+      assert {:error, %{"pulsa" => _}} =
+               Services.save_commission_rates(ctx.admin, %{
+                 "pulsa" => %{"kind" => "gratis", "value" => "5"}
+               })
+
+      assert %{kind: "amount"} = rate("pulsa")
+    end
+
+    test "a cashier's service carries the amount; an admin's none", ctx do
+      tx = service_fixture(ctx.cashier, ctx.pulsa)
+      assert Decimal.equal?(tx.commission_amount, 500)
+      assert Decimal.equal?(tx.commission_percent, 0)
+
+      {:ok, serving_admin} = Zahlungs.Accounts.set_user_role(user_on_shift_fixture(), "admin")
+      assert Decimal.equal?(service_fixture(serving_admin, ctx.pulsa).commission_amount, 0)
+    end
+
+    test "the amount can't come from the caller", ctx do
+      tx = service_fixture(ctx.cashier, ctx.pulsa, %{"commission_amount" => "99999"})
+      assert Decimal.equal?(tx.commission_amount, 500)
+    end
+
+    test "a later change leaves recorded services alone", ctx do
+      tx = service_fixture(ctx.cashier, ctx.pulsa)
+
+      {:ok, _} =
+        Services.save_commission_rates(ctx.admin, %{
+          "pulsa" => %{"kind" => "amount", "value" => "900"}
+        })
+
+      assert Decimal.equal?(Repo.get!(Transaction, tx.id).commission_amount, 500)
+    end
+
+    test "paid in full on success, whatever the margin; nothing otherwise" do
+      with_amount = &%{tx(&1, &2, &3, "0") | commission_amount: Decimal.new(500)}
+
+      assert Decimal.equal?(Services.commission(with_amount.("success", "12000", "10150")), 500)
+      # A margin smaller than the commission, and a sale at a loss.
+      assert Decimal.equal?(Services.commission(with_amount.("success", "12000", "11900")), 500)
+      assert Decimal.equal?(Services.commission(with_amount.("success", "12000", "12500")), 500)
+
+      assert Decimal.equal?(Services.commission(with_amount.("processing", "12000", "10150")), 0)
+      assert Decimal.equal?(Services.commission(with_amount.("failed", "12000", "10150")), 0)
+    end
+
+    test "the report mixes both, its total the sum of its details", ctx do
+      token = service_product_fixture(%{category: "token_pln"})
+
+      for product <- [ctx.pulsa, ctx.pulsa, token] do
+        {:ok, _} = Services.mark_success(service_fixture(ctx.cashier, product), ctx.cashier, nil)
+      end
+
+      today = Zahlungs.LocalTime.today()
+      report = Services.commission_report(store_scope(), today, today)
+
+      # 500 + 500 + 10% of 1.850.
+      assert [%{count: 3} = row] = report.rows
+      assert row.user_id == ctx.cashier.id
+      assert Decimal.equal?(row.commission, 1185)
+      assert Decimal.equal?(report.commission, 1185)
+
+      details = Services.commission_details(store_scope(), ctx.cashier.id, today, today)
+
+      assert Enum.reduce(details, Decimal.new(0), &Decimal.add(&1.commission, &2))
+             |> Decimal.equal?(1185)
+
+      assert Enum.count(details, &Decimal.equal?(&1.amount, 500)) == 2
+      assert Enum.count(details, &Decimal.equal?(&1.percent, 10)) == 1
+
+      shift = Zahlungs.Shifts.current_shift(ctx.cashier)
+      assert Decimal.equal?(Services.shift_commission(shift), 1185)
+    end
+
+    test "a service at a loss still counts, and the service report's margin goes down", ctx do
+      {:ok, tx} = Services.mark_success(service_fixture(ctx.cashier, ctx.pulsa), ctx.cashier, nil)
+
+      Repo.update_all(from(t in Transaction, where: t.id == ^tx.id),
+        set: [cost: Decimal.new(12_100)]
+      )
+
+      today = Zahlungs.LocalTime.today()
+
+      assert [%{commission: commission}] =
+               Services.commission_report(store_scope(), today, today).rows
+
+      assert Decimal.equal?(commission, 500)
+
+      report = Services.report(store_scope(), today, today)
+      assert Decimal.equal?(report.margin, -100)
+      assert Decimal.equal?(report.commission, 500)
+      assert Decimal.equal?(report.net_margin, -600)
+    end
+
+    test "a bill of 3 months is one commission", _ctx do
+      assign_account(default_store(), api_account_fixture())
+      admin = admin()
+
+      {:ok, _} =
+        Services.save_commission_rates(admin, %{
+          "tagihan" => %{"kind" => "amount", "value" => "2000"}
+        })
+
+      cashier = user_on_shift_fixture()
+      bill = api_product_fixture()
+
+      # The fake bills 3 months when the second-to-last digit is 3, and pays.
+      {:ok, inquiry} = Services.inquire(cashier, bill.id, "530011223331")
+
+      {:ok, tx} =
+        Services.record(cashier, bill.id, %{"inquiry_id" => inquiry.id, "amount_paid" => "750000"})
+
+      tx = Repo.get!(Transaction, tx.id)
+      assert {tx.status, tx.sheets} == {"success", 3}
+      assert Decimal.equal?(Services.commission(tx), 2000)
+    end
+  end
+
   describe "commission/1" do
     defp tx(status, price, cost, percent) do
       %Transaction{

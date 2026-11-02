@@ -3,13 +3,14 @@ defmodule Zahlungs.Services.Commissions do
   Cashier commission on service transactions (called through
   `Zahlungs.Services`).
 
-  An admin sets a percent of the margin per category (`rates/0`,
-  `save_rates/2`). When a cashier records a service, the category's percent
-  is copied onto it; anyone else's service gets 0. The amount is never
-  stored: it is `floor(max(price − cost, 0) × percent / 100)` for a
-  successful service and 0 otherwise, so every path that settles a service
-  (the provider's answer, a callback, a review) is right without knowing
-  about commission.
+  An admin sets each category to a percent of the margin or a rupiah amount
+  per service (`rates/0`, `save_rates/2`). When a cashier records a service,
+  the category's rule is copied onto it; anyone else's service gets 0. What is
+  earned is never stored: it is `floor(max(price − cost, 0) × percent / 100) +
+  amount` for a successful service (one of the two is 0) and 0 otherwise, so
+  every path that settles a service (the provider's answer, a callback, a
+  review) is right without knowing about commission. An amount is paid in
+  full whatever the margin, once per service, also for a bill of many months.
   """
 
   import Ecto.Query, warn: false
@@ -19,12 +20,25 @@ defmodule Zahlungs.Services.Commissions do
   alias Zahlungs.Services.{CommissionRate, Transaction}
   alias Zahlungs.Shifts.Shift
 
-  @doc "Every category with its percent (0 where none is set), in display order."
+  @max_amount 1_000_000
+
+  @doc """
+  Every category with its rule, in display order: `kind` (`"percent"` or
+  `"amount"`), `percent` and `amount` (0% where none is set).
+  """
   def rates do
-    stored = Map.new(Repo.all(CommissionRate), &{&1.category, &1.percent})
+    stored = Map.new(Repo.all(CommissionRate), &{&1.category, &1})
 
     for {category, label} <- Zahlungs.Services.categories() do
-      %{category: category, label: label, percent: Map.get(stored, category, Decimal.new(0))}
+      rate = Map.get(stored, category, %CommissionRate{})
+
+      %{
+        category: category,
+        label: label,
+        kind: rate.kind,
+        percent: rate.percent,
+        amount: rate.amount
+      }
     end
   end
 
@@ -35,9 +49,10 @@ defmodule Zahlungs.Services.Commissions do
   end
 
   @doc """
-  Saves the percents of `values` (category => text; blank is 0), all or none.
-  Only an admin may. Returns `{:ok, rates}` or `{:error, %{category => message}}`;
-  unknown categories are ignored.
+  Saves the rules of `values`, all or none: category =>
+  `%{"kind" => "percent" | "amount", "value" => text}`, or just the text for a
+  percent; blank is 0. Only an admin may. Returns `{:ok, rates}` or
+  `{:error, %{category => message}}`; unknown categories are ignored.
   """
   def save_rates(%User{role: "admin"}, values) when is_map(values) do
     parsed =
@@ -57,15 +72,20 @@ defmodule Zahlungs.Services.Commissions do
   def save_rates(%User{}, _values), do: {:error, :unauthorized}
 
   @doc """
-  The percent a service recorded now by `user` carries: the category's for a
-  cashier, 0 for anyone else. The role is read from the database, not from
-  the struct (a screen may hold one from before a role change).
+  The `%{percent, amount}` a service recorded now by `user` carries: the
+  category's for a cashier, 0 for anyone else. The role is read from the
+  database, not from the struct (a screen may hold one from before a role
+  change).
   """
-  def percent_for(%User{id: user_id}, category) do
-    case Repo.one(from u in User, where: u.id == ^user_id, select: u.role) do
-      "cashier" -> percent(category)
-      _other -> Decimal.new(0)
-    end
+  def rate_for(%User{id: user_id}, category) do
+    rate =
+      case Repo.one(from u in User, where: u.id == ^user_id, select: u.role) do
+        "cashier" -> Repo.one(from r in CommissionRate, where: r.category == ^category)
+        _other -> nil
+      end
+
+    rate = rate || %CommissionRate{}
+    %{percent: rate.percent, amount: rate.amount}
   end
 
   @doc "A service's commission in whole rupiah: nothing unless it succeeded."
@@ -76,6 +96,7 @@ defmodule Zahlungs.Services.Commissions do
     |> Decimal.mult(transaction.commission_percent)
     |> Decimal.div(100)
     |> Decimal.round(0, :floor)
+    |> Decimal.add(transaction.commission_amount)
   end
 
   def commission(%Transaction{}), do: Decimal.new(0)
@@ -85,10 +106,11 @@ defmodule Zahlungs.Services.Commissions do
   defmacrop commission_of(t) do
     quote do
       fragment(
-        "FLOOR(GREATEST(? - ?, 0) * ? / 100)",
+        "FLOOR(GREATEST(? - ?, 0) * ? / 100) + ?",
         unquote(t).price,
         unquote(t).cost,
-        unquote(t).commission_percent
+        unquote(t).commission_percent,
+        unquote(t).commission_amount
       )
     end
   end
@@ -165,6 +187,7 @@ defmodule Zahlungs.Services.Commissions do
           category: t.category,
           margin: margin_of(t),
           percent: t.commission_percent,
+          amount: t.commission_amount,
           commission: commission_of(t)
         }
     )
@@ -179,8 +202,8 @@ defmodule Zahlungs.Services.Commissions do
     query =
       from t in Transaction,
         where:
-          t.status == "success" and t.commission_percent > 0 and t.inserted_at >= ^start and
-            t.inserted_at <= ^finish
+          t.status == "success" and (t.commission_percent > 0 or t.commission_amount > 0) and
+            t.inserted_at >= ^start and t.inserted_at <= ^finish
 
     query = for_store(query, scope)
 
@@ -212,26 +235,62 @@ defmodule Zahlungs.Services.Commissions do
 
   defp store(values) do
     Repo.transaction(fn ->
-      Enum.each(values, fn {category, percent} ->
+      Enum.each(values, fn {category, rule} ->
         %CommissionRate{}
-        |> CommissionRate.changeset(%{category: category, percent: percent})
-        |> Repo.insert!(on_conflict: {:replace, [:percent, :updated_at]})
+        |> CommissionRate.changeset(Map.put(rule, :category, category))
+        |> Repo.insert!(on_conflict: {:replace, [:kind, :percent, :amount, :updated_at]})
       end)
 
       rates()
     end)
   end
 
-  defp parse(nil), do: {:ok, Decimal.new(0)}
+  # A rule as the context stores it: the kind's value, and 0 for the other.
+  defp parse(%{"kind" => "amount"} = rule) do
+    with {:ok, amount} <- parse_amount(rule["value"]) do
+      {:ok, %{kind: "amount", percent: Decimal.new(0), amount: amount}}
+    end
+  end
 
-  defp parse(text) when is_binary(text) do
+  defp parse(%{"kind" => "percent"} = rule), do: parse(rule["value"])
+  defp parse(%{}), do: {:error, "pilih persen atau rupiah"}
+
+  defp parse(value) do
+    with {:ok, percent} <- parse_percent(value) do
+      {:ok, %{kind: "percent", percent: percent, amount: Decimal.new(0)}}
+    end
+  end
+
+  # Digits only: "1.000" could be a thousand or one, so it is sent back, not guessed.
+  defp parse_amount(text) do
+    text = String.trim(text || "")
+
+    cond do
+      text == "" ->
+        {:ok, Decimal.new(0)}
+
+      not Regex.match?(~r/^\d+$/, text) ->
+        {:error, "tulis rupiah penuh, angka saja tanpa titik, mis. 1000"}
+
+      Decimal.gt?(Decimal.new(text), @max_amount) ->
+        {:error, "paling banyak Rp 1.000.000"}
+
+      true ->
+        {:ok, Decimal.new(text)}
+    end
+  end
+
+  defp parse_percent(nil), do: {:ok, Decimal.new(0)}
+
+  defp parse_percent(text) when is_binary(text) do
     case String.trim(text) do
       "" -> {:ok, Decimal.new(0)}
       trimmed -> trimmed |> Decimal.parse() |> check()
     end
   end
 
-  defp parse(number) when is_number(number), do: number |> to_string() |> parse()
+  defp parse_percent(number) when is_number(number),
+    do: number |> to_string() |> parse_percent()
 
   defp check({%Decimal{} = value, ""}) do
     cond do

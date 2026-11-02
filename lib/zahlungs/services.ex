@@ -377,6 +377,7 @@ defmodule Zahlungs.Services do
          {:ok, payment} <- settle(attrs, price),
          :ok <- use_inquiry(bill.inquiry) do
       code = generate_code(store)
+      commission = Commissions.rate_for(user, product.category)
 
       %Transaction{
         store_id: store.id,
@@ -399,7 +400,8 @@ defmodule Zahlungs.Services do
         service_inquiry_id: bill.inquiry && bill.inquiry.id,
         price: price,
         cost: cost,
-        commission_percent: Commissions.percent_for(user, product.category),
+        commission_percent: commission.percent,
+        commission_amount: commission.amount,
         amount_paid: payment.amount_paid,
         change_due: payment.change_due
       }

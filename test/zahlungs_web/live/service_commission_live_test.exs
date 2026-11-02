@@ -29,37 +29,62 @@ defmodule ZahlungsWeb.ServiceCommissionLiveTest do
            |> html_response(200) =~ "Komisi kasir"
   end
 
-  test "asks a percent for every category" do
+  defp percent(value), do: %{"kind" => "percent", "value" => value}
+  defp rupiah(value), do: %{"kind" => "amount", "value" => value}
+
+  defp rate(category), do: Enum.find(Services.commission_rates(), &(&1.category == category))
+
+  test "asks a kind and a value for every category" do
     rendered = ServiceCommissionLive |> mount_live(admin_fixture()) |> html()
 
     for {category, label} <- Services.categories() do
-      assert rendered =~ ~s(name="rates[#{category}]")
+      assert rendered =~ ~s(name="rates[#{category}][kind]")
+      assert rendered =~ ~s(name="rates[#{category}][value]")
       assert rendered =~ label
     end
 
+    assert rendered =~ "Persen"
+    assert rendered =~ "Rupiah"
     assert rendered =~ "Perubahan berlaku untuk transaksi berikutnya"
+    assert rendered =~ "tetap dibayar penuh"
   end
 
-  test "saves the percents" do
+  test "saves percents and amounts, and shows them again" do
     socket =
       ServiceCommissionLive
       |> mount_live(admin_fixture())
-      |> event("save", %{"rates" => %{"pulsa" => "10", "tagihan" => "12.5"}})
+      |> event("save", %{"rates" => %{"pulsa" => rupiah("500"), "tagihan" => percent("12.5")}})
 
-    assert flash(socket, :info) == "Persen komisi disimpan."
-    assert Decimal.equal?(Services.commission_percent("pulsa"), 10)
-    assert Decimal.equal?(Services.commission_percent("tagihan"), "12.5")
+    assert flash(socket, :info) == "Komisi disimpan."
+    assert %{kind: "amount"} = rate("pulsa")
+    assert Decimal.equal?(rate("pulsa").amount, 500)
+    assert Decimal.equal?(rate("tagihan").percent, "12.5")
+
+    reopened = ServiceCommissionLive |> mount_live(admin_fixture()) |> html()
+    assert reopened =~ ~s(value="500")
+    assert reopened =~ ~s(value="12.5")
+    assert reopened =~ ~r/<option[^>]*value="amount"[^>]*selected/
   end
 
-  test "shows what is wrong and saves nothing" do
+  test "shows what is wrong and saves nothing, keeping what was typed" do
     socket =
       ServiceCommissionLive
       |> mount_live(admin_fixture())
-      |> event("save", %{"rates" => %{"pulsa" => "101", "tagihan" => "5"}})
+      |> event("save", %{"rates" => %{"pulsa" => percent("101"), "tagihan" => percent("5")}})
 
     rendered = html(socket)
     assert rendered =~ "harus antara 0 dan 100"
     assert rendered =~ ~s(value="101")
+    assert Decimal.equal?(Services.commission_percent("tagihan"), 0)
+
+    rendered =
+      socket
+      |> event("save", %{"rates" => %{"pulsa" => rupiah("1.000"), "tagihan" => percent("5")}})
+      |> html()
+
+    assert rendered =~ "tanpa titik"
+    assert rendered =~ ~s(value="1.000")
+    assert rendered =~ ~r/<option[^>]*value="amount"[^>]*selected/
     assert Decimal.equal?(Services.commission_percent("tagihan"), 0)
   end
 

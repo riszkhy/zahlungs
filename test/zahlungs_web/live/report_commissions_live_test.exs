@@ -70,6 +70,30 @@ defmodule ZahlungsWeb.ReportCommissionsLiveTest do
     assert socket |> event("select_cashier", %{"id" => "#{cashier.id}"}) |> html() =~ tx.code
   end
 
+  test "the details say each service's rule", %{admin: admin, cashier: cashier, tx: tx} do
+    {:ok, _} =
+      Services.save_commission_rates(admin, %{
+        "pulsa" => %{"kind" => "amount", "value" => "500"}
+      })
+
+    {:ok, by_amount} =
+      Services.mark_success(service_fixture(cashier, service_product_fixture()), cashier, nil)
+
+    rendered =
+      ReportLive.Commissions
+      |> mount_live(admin)
+      |> event("select_cashier", %{"id" => cashier.id})
+      |> html()
+
+    assert rendered =~ "Aturan"
+    assert rendered =~ tx.code
+    assert rendered =~ "10%"
+    assert rendered =~ by_amount.code
+    assert rendered =~ "Rp 500"
+    # 185 + 500
+    assert rendered =~ "Rp 685,00"
+  end
+
   test "is in the admin menu", %{conn: conn, admin: admin} do
     response = conn |> log_in_user(admin) |> get("/reports/services") |> html_response(200)
 
