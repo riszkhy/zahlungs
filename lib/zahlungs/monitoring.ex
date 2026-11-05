@@ -10,7 +10,8 @@ defmodule Zahlungs.Monitoring do
   import Ecto.Query, warn: false
 
   alias Zahlungs.Accounts.UserLogin
-  alias Zahlungs.{LocalTime, Organizations, Repo}
+  alias Zahlungs.Deposits.{Account, Entry}
+  alias Zahlungs.{LocalTime, Organizations, Repo, Services}
   alias Zahlungs.Organizations.Organization
   alias Zahlungs.Sales.Sale
   alias Zahlungs.Services.Transaction
@@ -43,13 +44,18 @@ defmodule Zahlungs.Monitoring do
       sales: sales_totals(store_ids, since, now),
       services: services_totals(store_ids, since, now),
       open_shifts: open_shifts(store_ids),
-      store_logins: store_logins(store_ids)
+      store_logins: store_logins(store_ids),
+      stuck: count_services(store_ids, stuck(now)),
+      refunds_due: count_services(store_ids, refund_due()),
+      in_review: count_services(store_ids, in_review())
     }
 
     store_rows =
       Enum.group_by(stores, & &1.organization_id, &store_row(&1, figures, now))
 
-    logins = organization_logins(Enum.map(organizations, & &1.organization.id))
+    organization_ids = Enum.map(organizations, & &1.organization.id)
+    logins = organization_logins(organization_ids)
+    deposits = deposits_of(organization_ids)
 
     rows =
       Enum.map(organizations, fn listed ->
@@ -59,6 +65,7 @@ defmodule Zahlungs.Monitoring do
           listed,
           Map.get(store_rows, id, []),
           logins[id],
+          Map.get(deposits, id, []),
           now,
           today
         )
@@ -67,9 +74,13 @@ defmodule Zahlungs.Monitoring do
     %{rows: rows, summary: %{}, at: now}
   end
 
-  defp organization_row(listed, stores, last_login_at, now, today) do
+  defp organization_row(listed, stores, last_login_at, deposits, now, today) do
     last_transaction_at = stores |> Enum.map(& &1.last_transaction_at) |> latest()
     open_stores = Enum.filter(stores, & &1.active)
+    stuck = sum_of(stores, :stuck)
+    refunds_due = sum_of(stores, :refunds_due)
+    in_review = sum_of(stores, :in_review)
+    negative_deposits = Enum.count(deposits, &Decimal.negative?(&1.balance))
 
     %{
       organization: listed.organization,
@@ -85,13 +96,13 @@ defmodule Zahlungs.Monitoring do
       sales_count: sum_of(stores, :sales_count),
       services_total: total_of(stores, :services_total),
       services_count: sum_of(stores, :services_count),
-      stuck: 0,
-      refunds_due: 0,
-      in_review: 0,
-      negative_deposits: 0,
-      problem?: false,
+      stuck: stuck,
+      refunds_due: refunds_due,
+      in_review: in_review,
+      negative_deposits: negative_deposits,
+      problem?: stuck + refunds_due + in_review + negative_deposits > 0,
       stores: stores,
-      deposits: []
+      deposits: deposits
     }
   end
 
@@ -111,7 +122,10 @@ defmodule Zahlungs.Monitoring do
       sales_total: sales_total,
       sales_count: sales_count,
       services_total: services_total,
-      services_count: services_count
+      services_count: services_count,
+      stuck: Map.get(figures.stuck, store.id, 0),
+      refunds_due: Map.get(figures.refunds_due, store.id, 0),
+      in_review: Map.get(figures.in_review, store.id, 0)
     })
   end
 
@@ -194,6 +208,80 @@ defmodule Zahlungs.Monitoring do
       skip_org_id: true
     )
     |> Map.new()
+  end
+
+  defp count_services(store_ids, condition) do
+    Repo.all(
+      from t in Transaction,
+        where: t.store_id in ^store_ids,
+        where: ^condition,
+        group_by: t.store_id,
+        select: {t.store_id, count(t.id)}
+    )
+    |> Map.new()
+  end
+
+  # The same wait as `Services.awaiting_too_long?/2`.
+  defp stuck(now) do
+    limit = NaiveDateTime.add(now, -Services.settle_by_hand_after())
+
+    dynamic([t], t.channel == "api" and t.status == "processing" and t.inserted_at <= ^limit)
+  end
+
+  # The same rule as `Services.list_refunds_due/1`.
+  defp refund_due do
+    dynamic(
+      [t],
+      t.channel == "api" and t.status == "failed" and is_nil(t.refunded_at) and
+        is_nil(t.review_reason)
+    )
+  end
+
+  defp in_review, do: dynamic([t], not is_nil(t.review_reason))
+
+  # Active accounts by organization, each with what `Deposits.estimated_balance/1`
+  # gives: entries less the cost of the services processing or successful on it.
+  defp deposits_of(organization_ids) do
+    accounts =
+      Repo.all(
+        from(a in Account,
+          where: a.organization_id in ^organization_ids and a.active,
+          order_by: [asc: a.name, asc: a.id],
+          select: map(a, [:id, :organization_id, :name])
+        ),
+        skip_org_id: true
+      )
+
+    account_ids = Enum.map(accounts, & &1.id)
+
+    entries =
+      Repo.all(
+        from(e in Entry,
+          where: e.deposit_account_id in ^account_ids,
+          group_by: e.deposit_account_id,
+          select: {e.deposit_account_id, sum(e.amount)}
+        ),
+        skip_org_id: true
+      )
+      |> Map.new()
+
+    used =
+      Repo.all(
+        from t in Transaction,
+          where: t.deposit_account_id in ^account_ids and t.status in ["processing", "success"],
+          group_by: t.deposit_account_id,
+          select: {t.deposit_account_id, sum(t.cost)}
+      )
+      |> Map.new()
+
+    Enum.group_by(accounts, & &1.organization_id, fn account ->
+      balance =
+        entries
+        |> Map.get(account.id, Decimal.new(0))
+        |> Decimal.sub(Map.get(used, account.id, Decimal.new(0)))
+
+      %{id: account.id, name: account.name, balance: balance}
+    end)
   end
 
   defp latest(times) do

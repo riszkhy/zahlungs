@@ -8,7 +8,7 @@ defmodule Zahlungs.MonitoringTest do
   import Zahlungs.StoresFixtures
 
   alias Zahlungs.Accounts.UserLogin
-  alias Zahlungs.{LocalTime, Monitoring, Sales}
+  alias Zahlungs.{Deposits, LocalTime, Monitoring, Sales}
   alias Zahlungs.Organizations.Organization
   alias Zahlungs.Sales.Sale
   alias Zahlungs.Services.Transaction
@@ -82,6 +82,16 @@ defmodule Zahlungs.MonitoringTest do
       inserted_at: attrs.at,
       updated_at: attrs.at
     })
+  end
+
+  defp top_up!(ctx, amount) do
+    {:ok, _entry} =
+      in_org(ctx.org, fn ->
+        Deposits.record_correction(ctx.cashier, ctx.account, %{
+          "amount" => amount,
+          "note" => "Uji"
+        })
+      end)
   end
 
   defp admin_login!(ctx, attrs) do
@@ -284,6 +294,99 @@ defmodule Zahlungs.MonitoringTest do
       row = row_of(overview(), a.org)
       assert row.last_login_at == ago(7200)
       assert hd(row.stores).last_login_at == ago(7200)
+    end
+  end
+
+  describe "overview/2 problems" do
+    test "an api service is stuck from ten minutes, a manual one never" do
+      a = shop()
+      service!(a, channel: "api", status: "processing", at: ago(599))
+      row = row_of(overview(), a.org)
+      assert row.stuck == 0
+      refute row.problem?
+
+      service!(a, channel: "api", status: "processing", at: ago(600))
+      service!(a, channel: "manual", status: "processing", at: ago(86_400))
+      row = row_of(overview(), a.org)
+      assert row.stuck == 1
+      assert hd(row.stores).stuck == 1
+      assert row.problem?
+    end
+
+    test "a failed api service is due a refund until refunded, unless in review" do
+      a = shop()
+      service!(a, channel: "api", status: "failed", at: ago(3600))
+      service!(a, channel: "api", status: "failed", refunded_at: ago(60), at: ago(3600))
+      service!(a, channel: "manual", status: "failed", at: ago(3600))
+      service!(a, channel: "api", status: "failed", review_reason: "Uji", at: ago(3600))
+
+      row = row_of(overview(), a.org)
+      assert row.refunds_due == 1
+      assert row.in_review == 1
+      assert hd(row.stores).refunds_due == 1
+      assert hd(row.stores).in_review == 1
+      assert row.problem?
+    end
+
+    test "a balance is the same as the deposit page's estimate" do
+      a = shop()
+      top_up!(a, "1000")
+      service!(a, cost: "300", status: "success", at: ago(3600))
+      service!(a, cost: "200", status: "processing", at: ago(3600))
+      service!(a, cost: "999", status: "failed", at: ago(3600))
+
+      [deposit] = row_of(overview(), a.org).deposits
+      expected = in_org(a.org, fn -> Deposits.estimated_balance(a.account) end)
+      assert deposit.id == a.account.id
+      assert deposit.name == a.account.name
+      assert Decimal.equal?(expected, 500)
+      assert Decimal.equal?(deposit.balance, expected)
+    end
+
+    test "only a balance below zero counts" do
+      a = shop()
+      row = row_of(overview(), a.org)
+      assert row.negative_deposits == 0
+      refute row.problem?
+
+      service!(a, cost: "1", status: "success", at: ago(3600))
+      row = row_of(overview(), a.org)
+      assert row.negative_deposits == 1
+      assert row.problem?
+    end
+
+    test "an inactive account is neither listed nor counted" do
+      a = shop()
+      service!(a, cost: "1", status: "success", at: ago(3600))
+      {:ok, _} = in_org(a.org, fn -> Deposits.update_account(a.account, %{active: false}) end)
+
+      row = row_of(overview(), a.org)
+      assert row.deposits == []
+      assert row.negative_deposits == 0
+    end
+
+    test "an account two stores share counts once" do
+      a = shop()
+      other = in_org(a.org, fn -> assign_account(store_fixture(), a.account) end)
+      service!(a, cost: "1", status: "success", at: ago(3600))
+      service!(%{a | store: other}, cost: "1", status: "success", at: ago(3600))
+
+      row = row_of(overview(), a.org)
+      assert [deposit] = row.deposits
+      assert Decimal.equal?(deposit.balance, -2)
+      assert row.negative_deposits == 1
+    end
+
+    test "one organization's problems and accounts stay its own" do
+      a = shop()
+      b = shop()
+      service!(a, channel: "api", status: "processing", cost: "5", at: ago(3600))
+
+      overview = overview()
+      assert row_of(overview, a.org).stuck == 1
+      refute row_of(overview, b.org).problem?
+      assert [%{id: id}] = row_of(overview, b.org).deposits
+      assert id == b.account.id
     end
   end
 end
