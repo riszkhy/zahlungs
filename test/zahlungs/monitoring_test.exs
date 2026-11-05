@@ -389,4 +389,160 @@ defmodule Zahlungs.MonitoringTest do
       assert id == b.account.id
     end
   end
+
+  describe "overview/2 order and summary" do
+    test "what needs handling comes first, then by name in any case" do
+      problem = shop(name: "Zeta")
+      service!(problem, channel: "api", status: "processing", at: ago(3600))
+      overdue = shop(name: "Yota", paid_until: ~D[2026-11-04])
+      asleep = shop(name: "Xeno")
+      sale!(asleep, at: ago(31 * 86_400))
+      quiet = shop(name: "Wira")
+      sale!(quiet, at: ago(8 * 86_400))
+      busy_b = shop(name: "Beta")
+      sale!(busy_b, at: ago(3600))
+      busy_a = shop(name: "alfa")
+      sale!(busy_a, at: ago(3600))
+
+      ids = Enum.map(overview().rows, & &1.organization.id)
+      wanted = Enum.map([problem, overdue, asleep, quiet, busy_a, busy_b], & &1.org.id)
+
+      assert Enum.filter(ids, &(&1 in wanted)) == wanted
+    end
+
+    test "the same name falls back to the id" do
+      first = organization_fixture(name: "Kembar")
+      second = organization_fixture(name: "Kembar")
+
+      ids = Enum.map(overview().rows, & &1.organization.id)
+
+      assert Enum.filter(ids, &(&1 in [first.id, second.id])) == [first.id, second.id]
+    end
+
+    test "the summary covers active organizations only" do
+      before = overview().summary
+
+      a = shop()
+      sale!(a, total: "100", at: ago(3600))
+      service!(a, price: "40", status: "success", at: ago(3600))
+
+      for status <- ~w(pending suspended rejected) do
+        other = shop(status: status, paid_until: ~D[2020-01-01])
+        sale!(other, total: "9000", at: ago(3600))
+        service!(other, channel: "api", status: "processing", at: ago(3600))
+      end
+
+      shop(paid_until: ~D[2020-01-01])
+      troubled = shop()
+      service!(troubled, channel: "api", status: "processing", at: ago(3600))
+
+      now = overview().summary
+      assert now.active_organizations - before.active_organizations == 3
+      assert Decimal.equal?(Decimal.sub(now.sales_total, before.sales_total), 100)
+      assert Decimal.equal?(Decimal.sub(now.services_total, before.services_total), 40)
+      assert now.overdue - before.overdue == 1
+      assert now.with_problems - before.with_problems == 1
+    end
+
+    test "the summary follows the chosen period" do
+      a = shop()
+      before = {overview(7).summary, overview(30).summary}
+      sale!(a, total: "100", at: ago(10 * 86_400))
+      {before_7, before_30} = before
+
+      assert Decimal.equal?(overview(7).summary.sales_total, before_7.sales_total)
+
+      assert Decimal.equal?(
+               Decimal.sub(overview(30).summary.sales_total, before_30.sales_total),
+               100
+             )
+    end
+  end
+
+  describe "filter/2" do
+    defp listed(name, attrs \\ []) do
+      %{
+        organization: %Organization{name: name, status: Keyword.get(attrs, :status, "active")},
+        activity: Keyword.get(attrs, :activity, :active),
+        billing: Keyword.get(attrs, :billing, :ok),
+        problem?: Keyword.get(attrs, :problem?, false)
+      }
+    end
+
+    defp names(rows), do: Enum.map(rows, & &1.organization.name)
+
+    test "status: one, every, or an unknown value means every" do
+      rows = [listed("Alfa"), listed("Beta", status: "suspended")]
+
+      assert names(Monitoring.filter(rows, status: "active")) == ["Alfa"]
+      assert names(Monitoring.filter(rows, status: "suspended")) == ["Beta"]
+      assert Monitoring.filter(rows, status: "") == rows
+      assert Monitoring.filter(rows, status: "entah") == rows
+    end
+
+    test "quick quiet takes quiet, asleep and never; not active" do
+      rows = [
+        listed("Aktif"),
+        listed("Sepi", activity: :quiet),
+        listed("Tidur", activity: :asleep),
+        listed("Belum", activity: :never)
+      ]
+
+      assert names(Monitoring.filter(rows, quick: "quiet")) == ["Sepi", "Tidur", "Belum"]
+    end
+
+    test "quick billing takes overdue, due soon and unrecorded; not ok or no billing" do
+      rows = [
+        listed("Beres"),
+        listed("Lewat", billing: :overdue),
+        listed("Segera", billing: :due_soon),
+        listed("Kosong", billing: :unrecorded),
+        listed("Tangguh", billing: nil, status: "suspended")
+      ]
+
+      assert names(Monitoring.filter(rows, quick: "billing")) == ["Lewat", "Segera", "Kosong"]
+    end
+
+    test "quick problems takes only organizations with a problem" do
+      rows = [listed("Beres"), listed("Masalah", problem?: true)]
+
+      assert names(Monitoring.filter(rows, quick: "problems")) == ["Masalah"]
+    end
+
+    test "an empty or unknown quick means no such filter" do
+      rows = [listed("Beres"), listed("Masalah", problem?: true)]
+
+      assert Monitoring.filter(rows, quick: "") == rows
+      assert Monitoring.filter(rows, quick: "entah") == rows
+    end
+
+    test "search: part of the name, any case; % and _ are text" do
+      rows = [listed("Alfa Mart"), listed("Beta")]
+
+      assert names(Monitoring.filter(rows, search: "aLf")) == ["Alfa Mart"]
+      assert Monitoring.filter(rows, search: "%") == []
+      assert Monitoring.filter(rows, search: "_") == []
+    end
+
+    test "search: edge spaces are ignored and only spaces is no search" do
+      rows = [listed("Alfa Mart"), listed("Beta")]
+
+      assert names(Monitoring.filter(rows, search: "  alf ")) == ["Alfa Mart"]
+      assert names(Monitoring.filter(rows, search: "a m")) == ["Alfa Mart"]
+      assert Monitoring.filter(rows, search: "   ") == rows
+    end
+
+    test "filters combine, and keep the order" do
+      rows = [
+        listed("Zeta", problem?: true),
+        listed("Alfa", problem?: true),
+        listed("Mira", problem?: true, status: "suspended"),
+        listed("Beta")
+      ]
+
+      filtered = Monitoring.filter(rows, status: "active", quick: "problems", search: "a")
+
+      assert names(filtered) == ["Zeta", "Alfa"]
+    end
+  end
 end

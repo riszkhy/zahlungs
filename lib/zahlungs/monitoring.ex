@@ -35,7 +35,8 @@ defmodule Zahlungs.Monitoring do
     today = now |> LocalTime.to_local() |> NaiveDateTime.to_date()
 
     organizations = Organizations.list_organizations()
-    stores = stores_of(Enum.map(organizations, & &1.organization.id))
+    organization_ids = Enum.map(organizations, & &1.organization.id)
+    stores = stores_of(organization_ids)
     store_ids = Enum.map(stores, & &1.id)
 
     figures = %{
@@ -53,7 +54,6 @@ defmodule Zahlungs.Monitoring do
     store_rows =
       Enum.group_by(stores, & &1.organization_id, &store_row(&1, figures, now))
 
-    organization_ids = Enum.map(organizations, & &1.organization.id)
     logins = organization_logins(organization_ids)
     deposits = deposits_of(organization_ids)
 
@@ -70,8 +70,61 @@ defmodule Zahlungs.Monitoring do
           today
         )
       end)
+      |> Enum.sort_by(&sort_key/1)
 
-    %{rows: rows, summary: %{}, at: now}
+    %{rows: rows, summary: summary(rows), at: now}
+  end
+
+  @doc """
+  The rows that match, in the same order. Options: `:status` (an organization's
+  status; anything else means every status), `:quick` (`"quiet"`, `"billing"` or
+  `"problems"`; anything else means no such filter) and `:search` (part of the
+  name, in any case; edge spaces don't count).
+  """
+  def filter(rows, opts) do
+    search = opts |> Keyword.get(:search, "") |> String.trim() |> String.downcase()
+
+    Enum.filter(rows, fn row ->
+      status?(row, opts[:status]) and quick?(row, opts[:quick]) and search?(row, search)
+    end)
+  end
+
+  defp status?(row, status) do
+    status not in Organization.statuses() or row.organization.status == status
+  end
+
+  defp quick?(row, "quiet"), do: row.activity in [:quiet, :asleep, :never]
+  defp quick?(row, "billing"), do: row.billing in [:overdue, :due_soon, :unrecorded]
+  defp quick?(row, "problems"), do: row.problem?
+  defp quick?(_row, _quick), do: true
+
+  # In Elixir, so % and _ are plain text.
+  defp search?(row, search) do
+    row.organization.name |> String.downcase() |> String.contains?(search)
+  end
+
+  # What needs handling comes first.
+  defp sort_key(row) do
+    {rank(row), String.downcase(row.organization.name), row.organization.id}
+  end
+
+  defp rank(%{problem?: true}), do: 0
+  defp rank(%{billing: :overdue}), do: 1
+  defp rank(%{activity: :asleep}), do: 2
+  defp rank(%{activity: :quiet}), do: 3
+  defp rank(_row), do: 4
+
+  # Active organizations only, whatever the page's filters.
+  defp summary(rows) do
+    active = Enum.filter(rows, &(&1.organization.status == "active"))
+
+    %{
+      active_organizations: length(active),
+      sales_total: total_of(active, :sales_total),
+      services_total: total_of(active, :services_total),
+      overdue: Enum.count(active, &(&1.billing == :overdue)),
+      with_problems: Enum.count(active, & &1.problem?)
+    }
   end
 
   defp organization_row(listed, stores, last_login_at, deposits, now, today) do
