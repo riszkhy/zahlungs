@@ -290,6 +290,14 @@ Kelola user (admin):
 - **/platform/organizations** (hanya `superadmin`): daftar organisasi + pemilik,
   filter status, Setujui / Tolak / Tangguhkan / Aktifkan lagi, catatan, dan
   catatan tagihan manual.
+- **/platform/monitoring** (hanya `superadmin`): keadaan semua organisasi, hanya
+  membaca. Kartu ringkasan, periode 7 atau 30 hari, saringan status, Sepi/Tidur,
+  Tagihan, Masalah layanan, dan pencarian nama. Tiap kartu organisasi menampilkan
+  keaktifan (Aktif sampai 7 hari, Sepi sampai 30 hari, lalu Tidur, atau Belum
+  pernah), tagihan, total omzet dan jumlah transaksi, serta layanan tertahan,
+  perlu dikembalikan, menunggu keputusan, dan saldo deposit minus; rincian per
+  cabang bisa dibuka. Operator melihat total omzet tiap toko, tidak isi transaksi
+  atau data pelanggan.
 - **/platform/brands** (hanya `superadmin`): "Awalan nomor", empat angka
   pertama nomor HP untuk tiap brand pulsa/paket data, berlaku untuk semua
   organisasi. Disimpan sekaligus; awalan harus 08xx dan hanya milik satu

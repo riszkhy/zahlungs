@@ -996,6 +996,9 @@ defmodule Zahlungs.Services do
 
   @settle_by_hand_after 10 * 60
 
+  @doc "How long, in seconds, an api service waits before it counts as waiting too long."
+  def settle_by_hand_after, do: @settle_by_hand_after
+
   @doc """
   Whether an api service has waited for the provider so long (#{div(@settle_by_hand_after, 60)}
   minutes since it was recorded) that an admin may mark it by hand, after

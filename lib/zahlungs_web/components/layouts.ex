@@ -72,7 +72,11 @@ defmodule ZahlungsWeb.Layouts do
   defp primary_links(_user), do: cashier_links()
 
   defp platform_links,
-    do: [{"Organisasi", ~p"/platform/organizations"}, {"Awalan nomor", ~p"/platform/brands"}]
+    do: [
+      {"Organisasi", ~p"/platform/organizations"},
+      {"Monitoring", ~p"/platform/monitoring"},
+      {"Awalan nomor", ~p"/platform/brands"}
+    ]
 
   @doc """
   The full menu, grouped, in a drawer that slides in from the right. Opened by
