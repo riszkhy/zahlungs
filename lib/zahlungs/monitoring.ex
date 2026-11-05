@@ -7,11 +7,204 @@ defmodule Zahlungs.Monitoring do
   from the `/platform` pages. It writes nothing and calls no provider.
   """
 
+  import Ecto.Query, warn: false
+
+  alias Zahlungs.Accounts.UserLogin
+  alias Zahlungs.{LocalTime, Organizations, Repo}
   alias Zahlungs.Organizations.Organization
+  alias Zahlungs.Sales.Sale
+  alias Zahlungs.Services.Transaction
+  alias Zahlungs.Shifts.Shift
+  alias Zahlungs.Stores.Store
 
   @quiet_after 7 * 86_400
   @asleep_after 30 * 86_400
   @due_soon_days 7
+
+  @doc """
+  Every organization's state over the last `days` days (`now − days × 24 hours`
+  up to `now`), as `%{rows: [row], summary: summary, at: now}`. A fixed number of
+  aggregate queries, whatever the number of organizations; an organization
+  without data gets zeros. Rows that aren't an aggregate select only the columns
+  shown, so a customer's or provider's details are never read.
+  """
+  def overview(days, now \\ NaiveDateTime.utc_now()) do
+    now = NaiveDateTime.truncate(now, :second)
+    since = NaiveDateTime.add(now, -days * 86_400)
+    today = now |> LocalTime.to_local() |> NaiveDateTime.to_date()
+
+    organizations = Organizations.list_organizations()
+    stores = stores_of(Enum.map(organizations, & &1.organization.id))
+    store_ids = Enum.map(stores, & &1.id)
+
+    figures = %{
+      last_sale: last_at(Sale, store_ids),
+      last_service: last_at(Transaction, store_ids),
+      sales: sales_totals(store_ids, since, now),
+      services: services_totals(store_ids, since, now),
+      open_shifts: open_shifts(store_ids),
+      store_logins: store_logins(store_ids)
+    }
+
+    store_rows =
+      Enum.group_by(stores, & &1.organization_id, &store_row(&1, figures, now))
+
+    logins = organization_logins(Enum.map(organizations, & &1.organization.id))
+
+    rows =
+      Enum.map(organizations, fn listed ->
+        id = listed.organization.id
+
+        organization_row(
+          listed,
+          Map.get(store_rows, id, []),
+          logins[id],
+          now,
+          today
+        )
+      end)
+
+    %{rows: rows, summary: %{}, at: now}
+  end
+
+  defp organization_row(listed, stores, last_login_at, now, today) do
+    last_transaction_at = stores |> Enum.map(& &1.last_transaction_at) |> latest()
+    open_stores = Enum.filter(stores, & &1.active)
+
+    %{
+      organization: listed.organization,
+      owner_email: listed.owner_email,
+      activity: activity(last_transaction_at, now),
+      billing: billing(listed.organization, today),
+      last_transaction_at: last_transaction_at,
+      last_login_at: last_login_at,
+      open_shifts: sum_of(stores, :open_shifts),
+      quiet_stores: Enum.count(open_stores, &(&1.activity != :active)),
+      active_stores: length(open_stores),
+      sales_total: total_of(stores, :sales_total),
+      sales_count: sum_of(stores, :sales_count),
+      services_total: total_of(stores, :services_total),
+      services_count: sum_of(stores, :services_count),
+      stuck: 0,
+      refunds_due: 0,
+      in_review: 0,
+      negative_deposits: 0,
+      problem?: false,
+      stores: stores,
+      deposits: []
+    }
+  end
+
+  defp store_row(store, figures, now) do
+    last_transaction_at = latest([figures.last_sale[store.id], figures.last_service[store.id]])
+    {sales_total, sales_count} = Map.get(figures.sales, store.id, {Decimal.new(0), 0})
+    {services_total, services_count} = Map.get(figures.services, store.id, {Decimal.new(0), 0})
+
+    store
+    |> Map.delete(:organization_id)
+    |> Map.merge(%{
+      # A closed store is shown as closed, not as one gone quiet.
+      activity: if(store.active, do: activity(last_transaction_at, now)),
+      open_shifts: Map.get(figures.open_shifts, store.id, 0),
+      last_transaction_at: last_transaction_at,
+      last_login_at: figures.store_logins[store.id],
+      sales_total: sales_total,
+      sales_count: sales_count,
+      services_total: services_total,
+      services_count: services_count
+    })
+  end
+
+  defp stores_of(organization_ids) do
+    Repo.all(
+      from(s in Store,
+        where: s.organization_id in ^organization_ids,
+        order_by: [asc: s.name, asc: s.id],
+        select: map(s, [:id, :organization_id, :name, :code, :active, :utc_offset_hours])
+      ),
+      skip_org_id: true
+    )
+  end
+
+  # Any status: a sale voided later still shows the store was in use.
+  defp last_at(schema, store_ids) do
+    Repo.all(
+      from r in schema,
+        where: r.store_id in ^store_ids,
+        group_by: r.store_id,
+        select: {r.store_id, max(r.inserted_at)}
+    )
+    |> Map.new()
+  end
+
+  defp sales_totals(store_ids, since, now) do
+    Repo.all(
+      from s in Sale,
+        where:
+          s.store_id in ^store_ids and s.status == "completed" and s.inserted_at >= ^since and
+            s.inserted_at <= ^now,
+        group_by: s.store_id,
+        select: {s.store_id, sum(s.total), count(s.id)}
+    )
+    |> Map.new(fn {store_id, total, count} -> {store_id, {total, count}} end)
+  end
+
+  defp services_totals(store_ids, since, now) do
+    Repo.all(
+      from t in Transaction,
+        where:
+          t.store_id in ^store_ids and t.status == "success" and t.inserted_at >= ^since and
+            t.inserted_at <= ^now,
+        group_by: t.store_id,
+        select: {t.store_id, sum(t.price), count(t.id)}
+    )
+    |> Map.new(fn {store_id, total, count} -> {store_id, {total, count}} end)
+  end
+
+  defp open_shifts(store_ids) do
+    Repo.all(
+      from s in Shift,
+        where: s.store_id in ^store_ids and s.status == "open",
+        group_by: s.store_id,
+        select: {s.store_id, count(s.id)}
+    )
+    |> Map.new()
+  end
+
+  defp store_logins(store_ids) do
+    Repo.all(
+      from(l in UserLogin,
+        where: l.store_id in ^store_ids,
+        group_by: l.store_id,
+        select: {l.store_id, max(l.inserted_at)}
+      ),
+      skip_org_id: true
+    )
+    |> Map.new()
+  end
+
+  # An admin may log in without a store, so this isn't the stores' latest.
+  defp organization_logins(organization_ids) do
+    Repo.all(
+      from(l in UserLogin,
+        where: l.organization_id in ^organization_ids,
+        group_by: l.organization_id,
+        select: {l.organization_id, max(l.inserted_at)}
+      ),
+      skip_org_id: true
+    )
+    |> Map.new()
+  end
+
+  defp latest(times) do
+    times |> Enum.reject(&is_nil/1) |> Enum.max(NaiveDateTime, fn -> nil end)
+  end
+
+  defp sum_of(rows, field), do: rows |> Enum.map(&Map.fetch!(&1, field)) |> Enum.sum()
+
+  defp total_of(rows, field) do
+    Enum.reduce(rows, Decimal.new(0), &Decimal.add(&2, Map.fetch!(&1, field)))
+  end
 
   @doc """
   How recently an organization or store was used, from its last transaction:
