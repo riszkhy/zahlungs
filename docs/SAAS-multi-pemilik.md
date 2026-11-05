@@ -28,7 +28,7 @@ Status: diimplementasikan di branch `feat/saas-multi-owner`.
 
 | Role | Milik | Bisa apa |
 | --- | --- | --- |
-| `superadmin` | tidak ada organisasi | Hanya `/platform`: meninjau organisasi, mencatat tagihan |
+| `superadmin` | tidak ada organisasi | Hanya `/platform`: meninjau organisasi, mencatat tagihan, memantau keadaan toko |
 | `admin` | satu organisasi | Semua toko organisasinya (pendaftar pertama = pemilik) |
 | `cashier` | satu toko | Berjualan di tokonya |
 
@@ -60,6 +60,19 @@ login pemilik saat pending/rejected/suspended → ditolak dengan pesan yang sesu
            pendaftar baru (halaman tidak perlu dimuat ulang)
 penangguhan → sesi yang sedang terbuka berakhir pada request berikutnya
 ```
+
+## Monitoring
+
+`/platform/monitoring` (hanya super admin) membaca semua organisasi lewat
+`Zahlungs.Monitoring`, dihitung saat halaman dibuka, tanpa menulis apa pun dan
+tanpa memanggil provider. Yang terlihat oleh operator: keaktifan, total omzet dan
+jumlah transaksi tiap toko, keadaan tagihan, jumlah layanan bermasalah, dan saldo
+perkiraan akun deposit. Isi transaksi, data pelanggan, kredensial, nama kasir, dan
+rincian login tidak dibaca.
+
+Halaman publik belum punya ketentuan atau kebijakan privasi yang menyebutkan bahwa
+operator melihat omzet toko. Sebaiknya pemilik toko diberi tahu sebelum fitur ini
+dipakai di produksi.
 
 ## Menjalankan
 
