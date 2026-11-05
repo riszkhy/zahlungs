@@ -348,6 +348,14 @@ defmodule Zahlungs.Monitoring do
   end
 
   @doc """
+  A time in the zone of a store's row. `LocalTime` reads the offset only from a
+  `%Store{}`, and would quietly use the default for a plain map.
+  """
+  def local_time(%{utc_offset_hours: hours}, at) do
+    LocalTime.to_local(at, %Store{utc_offset_hours: hours})
+  end
+
+  @doc """
   How recently an organization or store was used, from its last transaction:
   `:active`, `:quiet`, `:asleep`, or `:never`. Counted in hours, so it doesn't
   depend on a store's time zone; the edge of a band belongs to the more active one.
