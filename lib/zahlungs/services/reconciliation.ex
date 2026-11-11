@@ -22,7 +22,13 @@ defmodule Zahlungs.Services.Reconciliation do
   out. Nothing here changes a service: fixes go through `Services.recheck_row/2`.
   """
 
+  import Ecto.Query, warn: false
+
+  alias Zahlungs.{Accounts, Deposits, LocalTime, Repo}
+  alias Zahlungs.Deposits.Account
   alias Zahlungs.Services.Transaction
+
+  @max_pages 20
 
   @kinds [:follow, :conflict, :pending_there, :ours_only, :cost_diff, :theirs_only, :matched]
 
@@ -142,4 +148,94 @@ defmodule Zahlungs.Services.Reconciliation do
 
   defp seconds(%NaiveDateTime{} = time),
     do: time |> NaiveDateTime.to_gregorian_seconds() |> elem(0)
+
+  @doc """
+  The report for `account` on `date` (a day of the default zone, WIB), asked
+  by `admin`. Everything is checked before the provider is asked; then every
+  page of that day's history is read (at most #{@max_pages}), and the next
+  day's only when a service of the day was sent but isn't in it. One page that
+  fails fails the whole report: a report is never shown half read.
+  """
+  def run(admin, %Account{} = account, %Date{} = date, %Date{} = today) do
+    with :ok <- check_admin(admin, account),
+         :ok <- check_date(date, today),
+         {:ok, adapter, credentials} <- connection(account),
+         {:ok, day} <- history(adapter, credentials, date) do
+      services = services(account, date, day)
+
+      with {:ok, next_day} <- next_day(adapter, credentials, date, services, day) do
+        {:ok, Map.put(compare(services, day, next_day), :date, date)}
+      end
+    end
+  end
+
+  # The role from the database, not from the socket, and the account of the
+  # admin's own organization.
+  defp check_admin(admin, account) do
+    user = Accounts.get_user!(admin.id)
+
+    if Accounts.admin?(user) and user.organization_id == account.organization_id,
+      do: :ok,
+      else: {:error, :not_admin}
+  end
+
+  defp check_date(date, today) do
+    if Date.compare(date, today) == :gt, do: {:error, :future_date}, else: :ok
+  end
+
+  defp connection(%Account{mode: "api"} = account) do
+    with {:ok, adapter, credentials} <- Deposits.connection(account) do
+      if Code.ensure_loaded?(adapter) and function_exported?(adapter, :history, 3),
+        do: {:ok, adapter, credentials},
+        else: {:error, :unsupported}
+    end
+  end
+
+  defp connection(_manual), do: {:error, :unsupported}
+
+  # Every page of a day, in order; any error (or too many pages) is the
+  # whole day's.
+  defp history(adapter, credentials, date) do
+    case adapter.history(credentials, date, 1) do
+      {:ok, %{last_page: last}} when last > @max_pages ->
+        {:error, :unavailable}
+
+      {:ok, %{rows: rows, last_page: last}} ->
+        Enum.reduce_while(2..last//1, {:ok, rows}, fn page, {:ok, acc} ->
+          case adapter.history(credentials, date, page) do
+            {:ok, %{rows: more}} -> {:cont, {:ok, acc ++ more}}
+            _error -> {:halt, {:error, :unavailable}}
+          end
+        end)
+
+      _error ->
+        {:error, :unavailable}
+    end
+  end
+
+  # The account's api services made that day, and any other of the account
+  # whose ref is in the day's history.
+  defp services(account, date, day) do
+    {from, to} = LocalTime.day_range(date, date)
+    refs = day |> Enum.map(& &1.ref) |> Enum.reject(&is_nil/1) |> Enum.uniq()
+
+    Repo.all(
+      from t in Transaction,
+        where:
+          t.deposit_account_id == ^account.id and t.channel == "api" and
+            ((t.inserted_at >= ^from and t.inserted_at <= ^to) or t.ref_id in ^refs),
+        order_by: t.id
+    )
+  end
+
+  defp next_day(adapter, credentials, date, services, day) do
+    found = for %{ref: ref, inquiry?: false} <- day, is_binary(ref), into: MapSet.new(), do: ref
+
+    missing? =
+      Enum.any?(services, fn service ->
+        service.sent_at && is_binary(service.ref_id) && not MapSet.member?(found, service.ref_id)
+      end)
+
+    if missing?, do: history(adapter, credentials, Date.add(date, 1)), else: {:ok, []}
+  end
 end

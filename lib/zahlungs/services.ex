@@ -33,7 +33,7 @@ defmodule Zahlungs.Services do
   alias Zahlungs.Shifts.Shift
   alias Zahlungs.Services.{Brand, BrandPrefix, CatalogCache, Commissions, Dispatcher, Inquiry}
   alias Zahlungs.Services.Product
-  alias Zahlungs.Services.{Provider, Ref, Transaction}
+  alias Zahlungs.Services.{Provider, Reconciliation, Ref, Transaction}
 
   @category_labels [
     {"pulsa", "Pulsa"},
@@ -57,6 +57,20 @@ defmodule Zahlungs.Services do
   defdelegate commission_details(scope, user_id, date_from, date_to),
     to: Commissions,
     as: :details
+
+  ## Reconciliation with the provider (see `Zahlungs.Services.Reconciliation`)
+
+  @doc """
+  Matches `account`'s api services with the provider's history of `date` (a
+  day in the default zone): `{:ok, %{rows: rows, summary: summary, date:
+  date}}`, or `{:error, :not_admin | :future_date | :unsupported |
+  :credentials | :unavailable}`, refused before the provider is asked where
+  it can be. Nothing is stored and no service changes.
+  """
+  def reconcile(admin, account, date, today \\ LocalTime.today()),
+    do: Reconciliation.run(admin, account, date, today)
+
+  defdelegate reconciliation_summary(rows), to: Reconciliation, as: :summarize
 
   ## Products
 

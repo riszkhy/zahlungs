@@ -3,9 +3,13 @@ defmodule Zahlungs.Services.ReconciliationTest do
   Matching a deposit account's api services with SBI's transaction history.
   Every value here is made up.
   """
-  use ExUnit.Case, async: true
+  use Zahlungs.DataCase, async: true
 
+  import Zahlungs.{AccountsFixtures, ServicesFixtures, ShiftsFixtures, StoresFixtures}
+
+  alias Zahlungs.Services
   alias Zahlungs.Services.{Reconciliation, Transaction}
+  alias Zahlungs.Services.Provider.Sbi.StubClient
 
   defp d(value), do: Decimal.new(value)
 
@@ -195,6 +199,204 @@ defmodule Zahlungs.Services.ReconciliationTest do
 
       assert Decimal.equal?(summary.cost_difference, d(-50))
       assert Decimal.equal?(summary.theirs_only_total, d(2000))
+    end
+  end
+
+  ## With the database and SBI's stub
+
+  @today ~D[2026-11-13]
+  @day ~D[2026-11-12]
+
+  defp sbi_account(attrs \\ %{}) do
+    deposit_account_fixture(
+      Map.merge(
+        %{
+          mode: "api",
+          provider: "sbi",
+          credentials: %{"member_id" => "MM1", "pin" => "1234", "password" => "pw"}
+        },
+        attrs
+      )
+    )
+  end
+
+  defp setup_report(_ctx), do: report_context(default_store())
+
+  defp report_context(store) do
+    account = sbi_account()
+    store = assign_account(store, account)
+    cashier = user_on_shift_fixture(store_id: store.id)
+    {:ok, admin} = Zahlungs.Accounts.set_user_role(user_fixture(store_id: store.id), "admin")
+    product = service_product_fixture()
+    shift = Zahlungs.Shifts.current_shift(cashier)
+
+    %{
+      account: account,
+      store: store,
+      cashier: cashier,
+      admin: admin,
+      product: product,
+      shift: shift
+    }
+  end
+
+  # An api service of the account, written directly: nothing is sent.
+  defp service!(ctx, attrs) do
+    n = System.unique_integer([:positive])
+
+    Repo.insert!(
+      struct(
+        %Transaction{
+          code: "LYT-#{n}",
+          category: "pulsa",
+          product_name: ctx.product.name,
+          customer_ref: "089900001111",
+          price: Decimal.new(12_000),
+          cost: Decimal.new(5150),
+          amount_paid: Decimal.new(12_000),
+          status: "processing",
+          channel: "api",
+          ref_id: "Z#{n}",
+          sent_at: ~N[2026-11-12 03:00:01],
+          inserted_at: ~N[2026-11-12 03:00:00],
+          updated_at: ~N[2026-11-12 03:00:00],
+          store_id: ctx.store.id,
+          shift_id: ctx.shift.id,
+          user_id: ctx.cashier.id,
+          service_product_id: ctx.product.id,
+          deposit_account_id: ctx.account.id
+        },
+        attrs
+      )
+    )
+  end
+
+  defp sbi_row(ref, status \\ 1) do
+    %{
+      "ref_1" => ref,
+      "status" => status,
+      "total_payment" => "5150",
+      "created_at" => "2026-11-12 10:00:05",
+      "msg" => "TRX T5.089900001111 SUKSES, HRG:5150 SN:1 REFID:#{ref}."
+    }
+  end
+
+  defp page(rows, last_page \\ 1),
+    do: {:ok, 200, %{"data" => %{"data" => rows, "meta" => %{"last_page" => last_page}}}}
+
+  defp history_requests, do: for({"history", body, _} <- StubClient.requests(), do: body)
+
+  defp kinds(rows), do: Map.new(rows, &{&1.ref, &1.kind})
+
+  describe "reconcile/4" do
+    setup :setup_report
+
+    test "reads every page and matches by ref", ctx do
+      a = service!(ctx, status: "success")
+      b = service!(ctx, status: "success")
+
+      StubClient.expect("history", page([sbi_row(a.ref_id)], 3))
+      StubClient.expect("history", page([], 3))
+      StubClient.expect("history", page([sbi_row(b.ref_id)], 3))
+
+      assert {:ok, %{rows: rows, date: @day}} =
+               Services.reconcile(ctx.admin, ctx.account, @day, @today)
+
+      assert kinds(rows) == %{a.ref_id => :matched, b.ref_id => :matched}
+      assert Enum.map(history_requests(), & &1["page"]) == [1, 2, 3]
+      assert Enum.all?(history_requests(), &(&1["date"] == "2026-11-12"))
+    end
+
+    test "one failed page fails the whole report", ctx do
+      StubClient.expect("history", page([], 2))
+      StubClient.expect("history", {:error, :timeout})
+
+      assert Services.reconcile(ctx.admin, ctx.account, @day, @today) == {:error, :unavailable}
+    end
+
+    test "more than 20 pages is refused", ctx do
+      StubClient.expect("history", page([], 21))
+
+      assert Services.reconcile(ctx.admin, ctx.account, @day, @today) == {:error, :unavailable}
+      assert length(history_requests()) == 1
+    end
+
+    test "the next day is asked only when something is missing", ctx do
+      a = service!(ctx, status: "success")
+      StubClient.expect("history", page([sbi_row(a.ref_id)]))
+
+      assert {:ok, _} = Services.reconcile(ctx.admin, ctx.account, @day, @today)
+      assert Enum.map(history_requests(), & &1["date"]) == ["2026-11-12"]
+
+      b = service!(ctx, status: "processing")
+      StubClient.expect("history", page([sbi_row(a.ref_id)]))
+      StubClient.expect("history", page([sbi_row(b.ref_id)]))
+
+      assert {:ok, %{rows: rows}} = Services.reconcile(ctx.admin, ctx.account, @day, @today)
+      assert kinds(rows)[b.ref_id] == :follow
+
+      assert Enum.map(history_requests(), & &1["date"]) ==
+               ["2026-11-12", "2026-11-12", "2026-11-13"]
+    end
+
+    test "a service of another day is matched by its ref", ctx do
+      late = service!(ctx, status: "success", inserted_at: ~N[2026-11-11 16:59:00])
+      StubClient.expect("history", page([sbi_row(late.ref_id)]))
+
+      assert {:ok, %{rows: [%{kind: :matched, ours: %{id: id}}]}} =
+               Services.reconcile(ctx.admin, ctx.account, @day, @today)
+
+      assert id == late.id
+    end
+
+    test "only this account's services", ctx do
+      other_account = sbi_account()
+      other = service!(%{ctx | account: other_account}, status: "success")
+
+      foreign_ref =
+        in_org(organization_fixture(), fn ->
+          foreign = report_context(store_fixture())
+          service!(foreign, status: "success").ref_id
+        end)
+
+      StubClient.expect("history", page([sbi_row(other.ref_id), sbi_row(foreign_ref)]))
+
+      assert {:ok, %{rows: rows}} = Services.reconcile(ctx.admin, ctx.account, @day, @today)
+      assert kinds(rows) == %{other.ref_id => :theirs_only, foreign_ref => :theirs_only}
+      assert Enum.all?(rows, &is_nil(&1.ours))
+    end
+
+    test "the day is the default zone's", ctx do
+      first = service!(ctx, status: "success", inserted_at: ~N[2026-11-11 17:00:00])
+      before = service!(ctx, status: "success", inserted_at: ~N[2026-11-11 16:59:59])
+      StubClient.expect("history", page([]))
+      StubClient.expect("history", page([]))
+
+      assert {:ok, %{rows: rows}} = Services.reconcile(ctx.admin, ctx.account, @day, @today)
+      assert kinds(rows) == %{first.ref_id => :ours_only}
+      refute Map.has_key?(kinds(rows), before.ref_id)
+    end
+
+    test "refused before asking SBI", ctx do
+      assert Services.reconcile(ctx.cashier, ctx.account, @day, @today) == {:error, :not_admin}
+
+      assert Services.reconcile(ctx.admin, ctx.account, ~D[2026-11-14], @today) ==
+               {:error, :future_date}
+
+      manual = deposit_account_fixture()
+      assert Services.reconcile(ctx.admin, manual, @day, @today) == {:error, :unsupported}
+
+      fake = api_account_fixture()
+      assert Services.reconcile(ctx.admin, fake, @day, @today) == {:error, :unsupported}
+
+      assert StubClient.requests() == []
+    end
+
+    test "credentials that can't be read", ctx do
+      account = Repo.update!(Ecto.Changeset.change(ctx.account, credentials: "x"))
+
+      assert Services.reconcile(ctx.admin, account, @day, @today) == {:error, :credentials}
+      assert StubClient.requests() == []
     end
   end
 end
