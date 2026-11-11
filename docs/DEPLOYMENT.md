@@ -240,6 +240,10 @@ Rincian model dan batasannya ada di `docs/SAAS-multi-pemilik.md`.
     dekat tengah malam di golongan yang benar); `total_payment` = potongan
     sebenarnya (tidak ada Selisih modal palsu); `ref_1` = kode yang dikirim
     Zahlungs (bila semua "Hanya di …", ref dibaca dari field lain).
+    Coba juga satu tanggal tanpa transaksi (harus "Tidak ada transaksi pada
+    tanggal ini.", bukan "Riwayat SBI belum bisa diambil") dan tanggal hari
+    ini, lalu bandingkan jam yang tampil dengan jam transaksi di aplikasi SBI
+    (`created_at` dianggap WIB).
 
 ## 9. Rollback
 

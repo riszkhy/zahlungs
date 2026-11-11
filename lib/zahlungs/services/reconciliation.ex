@@ -163,7 +163,7 @@ defmodule Zahlungs.Services.Reconciliation do
          {:ok, day} <- history(adapter, credentials, date) do
       services = services(account, date, day)
 
-      with {:ok, next_day} <- next_day(adapter, credentials, date, services, day) do
+      with {:ok, next_day} <- next_day(adapter, credentials, date, today, services, day) do
         {:ok, Map.put(compare(services, day, next_day), :date, date)}
       end
     end
@@ -230,7 +230,10 @@ defmodule Zahlungs.Services.Reconciliation do
     )
   end
 
-  defp next_day(adapter, credentials, date, services, day) do
+  # Today has no next day yet: a service not in today's history is ours_only.
+  defp next_day(_adapter, _credentials, today, today, _services, _day), do: {:ok, []}
+
+  defp next_day(adapter, credentials, date, _today, services, day) do
     found = for %{ref: ref, inquiry?: false} <- day, is_binary(ref), into: MapSet.new(), do: ref
 
     missing? =

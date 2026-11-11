@@ -111,7 +111,7 @@ defmodule Zahlungs.Services.Provider.Sbi do
   @doc """
   One page of SBI's transaction history for a day: every status, at most 1000
   rows. SBI asks for the member's password in `rqid` here, not a `sign`. An
-  answer without `meta` is one page; no answer is `{:error, :timeout}`, and
+  answer without `meta`, or a bare list of rows, is one page; no answer is `{:error, :timeout}`, and
   any other answer that isn't a list of rows `{:error, :unavailable}`.
   """
   @impl true
@@ -127,30 +127,42 @@ defmodule Zahlungs.Services.Provider.Sbi do
     headers = [{"rqid", credentials["password"]}, {"content-type", "application/json"}]
 
     case client().post("history", body, headers, @history_timeout) do
-      {:ok, status, answer} -> history_page(Reply.envelope(status, answer))
-      {:error, :timeout} -> {:error, :timeout}
-      {:error, _reason} -> {:error, :unavailable}
+      {:ok, status, %{"data" => rows}} when status < 500 and is_list(rows) ->
+        history_page({:data, %{"data" => rows}})
+
+      {:ok, status, answer} ->
+        history_page(Reply.envelope(status, answer))
+
+      {:error, :timeout} ->
+        {:error, :timeout}
+
+      {:error, _reason} ->
+        {:error, :unavailable}
     end
   end
 
   defp history_page({:data, %{"data" => rows} = data}) when is_list(rows) do
-    {:ok,
-     %{
-       rows: for(%{} = row <- rows, do: Reply.history_row(row)),
-       last_page: last_page(data["meta"])
-     }}
+    with {:ok, last} <- last_page(data["meta"]) do
+      {:ok, %{rows: for(%{} = row <- rows, do: Reply.history_row(row)), last_page: last}}
+    end
   end
 
   defp history_page(_answer), do: {:error, :unavailable}
 
-  defp last_page(%{"last_page" => last}) do
-    case Integer.parse(to_string(last)) do
-      {n, ""} when n >= 1 -> n
-      _ -> 1
+  # No meta (or no last page in it) is one page; a last page that isn't a
+  # whole number is an answer Zahlungs can't read.
+  defp last_page(%{"last_page" => last}) when is_integer(last) and last >= 1, do: {:ok, last}
+
+  defp last_page(%{"last_page" => last}) when is_binary(last) do
+    case Integer.parse(String.trim(last)) do
+      {n, ""} when n >= 1 -> {:ok, n}
+      _ -> {:error, :unavailable}
     end
   end
 
-  defp last_page(_meta), do: 1
+  defp last_page(%{"last_page" => nil}), do: {:ok, 1}
+  defp last_page(%{"last_page" => _other}), do: {:error, :unavailable}
+  defp last_page(_meta), do: {:ok, 1}
 
   defp transaction_answer({:ok, status, answer}) do
     case Reply.envelope(status, answer) do

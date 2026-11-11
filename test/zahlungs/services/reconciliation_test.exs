@@ -339,6 +339,15 @@ defmodule Zahlungs.Services.ReconciliationTest do
                ["2026-11-12", "2026-11-12", "2026-11-13"]
     end
 
+    test "today's report never asks for tomorrow", ctx do
+      sent = service!(ctx, status: "processing")
+      StubClient.expect("history", page([]))
+
+      assert {:ok, %{rows: rows}} = Services.reconcile(ctx.admin, ctx.account, @day, @day)
+      assert kinds(rows) == %{sent.ref_id => :ours_only}
+      assert Enum.map(history_requests(), & &1["date"]) == ["2026-11-12"]
+    end
+
     test "a service of another day is matched by its ref", ctx do
       late = service!(ctx, status: "success", inserted_at: ~N[2026-11-11 16:59:00])
       StubClient.expect("history", page([sbi_row(late.ref_id)]))

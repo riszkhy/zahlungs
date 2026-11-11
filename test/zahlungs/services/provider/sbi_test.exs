@@ -326,6 +326,26 @@ defmodule Zahlungs.Services.Provider.SbiTest do
       assert Sbi.history(@credentials, ~D[2026-11-12], 1) == {:ok, %{rows: [], last_page: 1}}
     end
 
+    test "a bare list of rows is one page" do
+      StubClient.expect("history", {:ok, 200, %{"status" => "success", "data" => []}})
+      StubClient.expect("history", {:ok, 200, %{"status" => "success", "data" => [@row_data]}})
+
+      assert Sbi.history(@credentials, ~D[2026-11-12], 1) == {:ok, %{rows: [], last_page: 1}}
+
+      assert {:ok, %{rows: [%{ref: "Z1261112090000A1B2C3"}], last_page: 1}} =
+               Sbi.history(@credentials, ~D[2026-11-12], 1)
+    end
+
+    test "a last page that isn't a number is unavailable, never a crash" do
+      StubClient.expect("history", ok(%{"data" => [], "meta" => %{"last_page" => "3"}}))
+      StubClient.expect("history", ok(%{"data" => [], "meta" => %{"last_page" => %{"n" => 3}}}))
+      StubClient.expect("history", ok(%{"data" => [], "meta" => %{"last_page" => "tiga"}}))
+
+      assert {:ok, %{last_page: 3}} = Sbi.history(@credentials, ~D[2026-11-12], 1)
+      assert Sbi.history(@credentials, ~D[2026-11-12], 1) == {:error, :unavailable}
+      assert Sbi.history(@credentials, ~D[2026-11-12], 1) == {:error, :unavailable}
+    end
+
     test "anything else is unavailable" do
       StubClient.expect("history", ok(%{"data" => "x"}))
       StubClient.expect("history", {:ok, 500, "<html>"})
