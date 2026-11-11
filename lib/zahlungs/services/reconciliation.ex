@@ -201,15 +201,17 @@ defmodule Zahlungs.Services.Reconciliation do
         {:error, :unavailable}
 
       {:ok, %{rows: rows, last_page: last}} ->
-        Enum.reduce_while(2..last//1, {:ok, rows}, fn page, {:ok, acc} ->
-          case adapter.history(credentials, date, page) do
-            {:ok, %{rows: more}} -> {:cont, {:ok, acc ++ more}}
-            _error -> {:halt, {:error, :unavailable}}
-          end
-        end)
+        Enum.reduce_while(2..last//1, {:ok, rows}, &next_page(adapter, credentials, date, &1, &2))
 
       _error ->
         {:error, :unavailable}
+    end
+  end
+
+  defp next_page(adapter, credentials, date, page, {:ok, rows}) do
+    case adapter.history(credentials, date, page) do
+      {:ok, %{rows: more}} -> {:cont, {:ok, rows ++ more}}
+      _error -> {:halt, {:error, :unavailable}}
     end
   end
 

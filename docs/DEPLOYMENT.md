@@ -233,6 +233,13 @@ Rincian model dan batasannya ada di `docs/SAAS-multi-pemilik.md`.
 9. **Pencocokan saldo** di akun deposit dengan saldo SBI → selisih harus nol.
    Bila tidak nol, periksa transaksi yang berstatus gagal: kemungkinan SBI
    memotong saldo untuk kode RC yang kita anggap gagal.
+10. **Rekonsiliasi per tanggal** (tautan di halaman akun deposit) untuk hari
+    uji itu → semua transaksi uji di golongan Cocok. Ini memastikan empat
+    asumsi riwayat SBI: header `rqid` = password tanpa `sign` (bila laporan
+    gagal diambil, header salah); tanggal riwayat = tanggal WIB (transaksi
+    dekat tengah malam di golongan yang benar); `total_payment` = potongan
+    sebenarnya (tidak ada Selisih modal palsu); `ref_1` = kode yang dikirim
+    Zahlungs (bila semua "Hanya di …", ref dibaca dari field lain).
 
 ## 9. Rollback
 
