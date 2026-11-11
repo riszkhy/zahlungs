@@ -29,7 +29,7 @@ defmodule Zahlungs.Services do
   alias Zahlungs.Repo
 
   alias Zahlungs.Accounts.User
-  alias Zahlungs.{Deposits, LocalTime, Scope, Shifts, Stores}
+  alias Zahlungs.{Accounts, Deposits, LocalTime, Scope, Shifts, Stores}
   alias Zahlungs.Shifts.Shift
   alias Zahlungs.Services.{Brand, BrandPrefix, CatalogCache, Commissions, Dispatcher, Inquiry}
   alias Zahlungs.Services.Product
@@ -804,6 +804,40 @@ defmodule Zahlungs.Services do
       end
 
     apply_result(transaction.id, result)
+  end
+
+  @doc """
+  The reconciliation page's fix for one row (`Services.Reconciliation`): asks
+  the provider about the row's service again, whatever its status, and hands
+  the answer to `apply_result/2` — a processing service is settled, a final
+  one that the answer contradicts only goes to review. Unlike
+  `check_status/1` it **never sends** a payment: a service never sent is
+  `{:error, :not_sent}`.
+
+  Returns the row worked out again from the service as it is now and the
+  history row it already had. Only for an admin (the role read from the
+  database); a service outside the admin's organization raises
+  `Ecto.NoResultsError`.
+  """
+  def recheck_row(%User{} = admin, %{ours: %Transaction{id: id}, theirs: theirs}) do
+    if Accounts.admin?(Accounts.get_user!(admin.id)) do
+      transaction =
+        Repo.one!(from t in Transaction, where: t.id == ^id and t.store_id in ^Stores.store_ids())
+
+      cond do
+        transaction.channel != "api" ->
+          {:error, :not_api}
+
+        is_nil(transaction.sent_at) ->
+          {:error, :not_sent}
+
+        true ->
+          ask_status(transaction)
+          {:ok, Reconciliation.classify(Repo.get!(Transaction, id), theirs)}
+      end
+    else
+      {:error, :not_admin}
+    end
   end
 
   @doc """

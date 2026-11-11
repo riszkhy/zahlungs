@@ -399,4 +399,101 @@ defmodule Zahlungs.Services.ReconciliationTest do
       assert StubClient.requests() == []
     end
   end
+
+  describe "recheck_row/2" do
+    setup :setup_report
+
+    defp status_answer(ref, status) do
+      {:ok, 200,
+       %{
+         "data" => %{
+           "ref_1" => ref,
+           "ref_2" => "R1",
+           "status" => status,
+           "total_payment" => "5150",
+           "msg" =>
+             if(status == 1,
+               do: "TRX SUKSES SN:1 REFID:#{ref}.",
+               else: "TRX GAGAL KET:Nomor salah"
+             )
+         }
+       }}
+    end
+
+    defp row_for(service, theirs_status),
+      do: Reconciliation.classify(service, theirs(ref: service.ref_id, status: theirs_status))
+
+    test "a processing service follows SBI", ctx do
+      service = service!(ctx, status: "processing")
+      StubClient.expect("status", status_answer(service.ref_id, 1))
+
+      assert {:ok, %{kind: :matched, ours: %{status: "success"}}} =
+               Services.recheck_row(ctx.admin, row_for(service, :success))
+
+      assert [{"status", %{"ref_1" => ref}, _}] = StubClient.requests()
+      assert ref == service.ref_id
+    end
+
+    test "a contradiction goes to review without changing the status", ctx do
+      service = service!(ctx, status: "success")
+      StubClient.expect("status", status_answer(service.ref_id, 11))
+
+      assert {:ok, %{kind: :conflict, in_review?: true, ours: %{status: "success"}}} =
+               Services.recheck_row(ctx.admin, row_for(service, :failed))
+    end
+
+    test "pressed twice changes nothing more", ctx do
+      service = service!(ctx, status: "processing")
+      StubClient.expect("status", status_answer(service.ref_id, 11))
+      StubClient.expect("status", status_answer(service.ref_id, 11))
+      row = row_for(service, :failed)
+
+      assert {:ok, first} = Services.recheck_row(ctx.admin, row)
+      cash = Zahlungs.Shifts.expected_cash(ctx.shift)
+
+      assert {:ok, second} = Services.recheck_row(ctx.admin, first)
+      assert second.kind == :matched
+      assert second.ours.status == "failed"
+      assert is_nil(second.ours.refunded_at)
+      assert Decimal.equal?(Zahlungs.Shifts.expected_cash(ctx.shift), cash)
+    end
+
+    test "never sends", ctx do
+      service = service!(ctx, sent_at: nil)
+
+      assert Services.recheck_row(ctx.admin, Reconciliation.classify(service, nil)) ==
+               {:error, :not_sent}
+
+      assert StubClient.requests() == []
+    end
+
+    test "a manual service", ctx do
+      service = service!(ctx, channel: "manual", ref_id: nil)
+
+      assert Services.recheck_row(ctx.admin, Reconciliation.classify(service, nil)) ==
+               {:error, :not_api}
+    end
+
+    test "a cashier", ctx do
+      service = service!(ctx, status: "processing")
+
+      assert Services.recheck_row(ctx.cashier, row_for(service, :success)) ==
+               {:error, :not_admin}
+
+      assert StubClient.requests() == []
+    end
+
+    test "another organization's service", ctx do
+      foreign =
+        in_org(organization_fixture(), fn ->
+          service!(report_context(store_fixture()), status: "processing")
+        end)
+
+      assert_raise Ecto.NoResultsError, fn ->
+        Services.recheck_row(ctx.admin, Reconciliation.classify(foreign, nil))
+      end
+
+      assert StubClient.requests() == []
+    end
+  end
 end
