@@ -458,6 +458,32 @@ defmodule Zahlungs.Services.ReconciliationTest do
       assert Decimal.equal?(Zahlungs.Shifts.expected_cash(ctx.shift), cash)
     end
 
+    test "SBI's final answer replaces a pending history row", ctx do
+      service = service!(ctx, status: "success")
+      StubClient.expect("status", status_answer(service.ref_id, 1))
+
+      assert {:ok, %{kind: :matched, theirs: %{status: :success}}} =
+               Services.recheck_row(ctx.admin, row_for(service, :pending))
+    end
+
+    test "a service missing from the history is found by its status", ctx do
+      service = service!(ctx, status: "success")
+      StubClient.expect("status", status_answer(service.ref_id, 1))
+
+      assert {:ok, %{kind: :matched, theirs: %{ref: ref, status: :success}}} =
+               Services.recheck_row(ctx.admin, Reconciliation.classify(service, nil))
+
+      assert ref == service.ref_id
+    end
+
+    test "no answer keeps the row as it was", ctx do
+      service = service!(ctx, status: "success")
+      StubClient.expect("status", {:error, :timeout})
+
+      assert {:ok, %{kind: :ours_only, theirs: nil}} =
+               Services.recheck_row(ctx.admin, Reconciliation.classify(service, nil))
+    end
+
     test "never sends", ctx do
       service = service!(ctx, sent_at: nil)
 

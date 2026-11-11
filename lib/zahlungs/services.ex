@@ -779,31 +779,33 @@ defmodule Zahlungs.Services do
   end
 
   defp ask_status(transaction) do
+    apply_result(transaction.id, provider_status(transaction))
+  end
+
+  # What the provider says about a sent service now; no answer is pending.
+  defp provider_status(transaction) do
     enter_store_organization(transaction)
     account = Deposits.get_account!(transaction.deposit_account_id)
 
-    result =
-      with {:ok, adapter, credentials} <- Deposits.connection(account),
-           {:ok, result} <- adapter.status(credentials, provider_request(transaction)) do
-        result
-      else
-        {:error, :not_found} ->
-          %{
-            status: :pending,
-            message: "Penyedia tidak mengenal transaksi ini. Periksa di aplikasi penyedia."
-          }
+    with {:ok, adapter, credentials} <- Deposits.connection(account),
+         {:ok, result} <- adapter.status(credentials, provider_request(transaction)) do
+      result
+    else
+      {:error, :not_found} ->
+        %{
+          status: :pending,
+          message: "Penyedia tidak mengenal transaksi ini. Periksa di aplikasi penyedia."
+        }
 
-        {:error, :credentials} ->
-          %{
-            status: :pending,
-            message: "Kredensial penyedia tidak bisa dibaca. Minta admin mengisinya ulang."
-          }
+      {:error, :credentials} ->
+        %{
+          status: :pending,
+          message: "Kredensial penyedia tidak bisa dibaca. Minta admin mengisinya ulang."
+        }
 
-        {:error, _} ->
-          %{status: :pending, message: "Belum ada jawaban penyedia"}
-      end
-
-    apply_result(transaction.id, result)
+      {:error, _} ->
+        %{status: :pending, message: "Belum ada jawaban penyedia"}
+    end
   end
 
   @doc """
@@ -815,7 +817,8 @@ defmodule Zahlungs.Services do
   `{:error, :not_sent}`.
 
   Returns the row worked out again from the service as it is now and the
-  history row it already had. Only for an admin (the role read from the
+  history row it had, or, when the provider's answer is final, that answer in
+  its place (the history is not read again). Only for an admin (the role read from the
   database); a service outside the admin's organization raises
   `Ecto.NoResultsError`.
   """
@@ -832,13 +835,34 @@ defmodule Zahlungs.Services do
           {:error, :not_sent}
 
         true ->
-          ask_status(transaction)
+          result = provider_status(transaction)
+          apply_result(transaction.id, result)
+          theirs = answered_row(theirs, transaction, result)
           {:ok, Reconciliation.classify(Repo.get!(Transaction, id), theirs)}
       end
     else
       {:error, :not_admin}
     end
   end
+
+  # The provider's final answer stands for its history row; a pending one
+  # leaves the row as it was.
+  defp answered_row(theirs, transaction, %{status: status} = result)
+       when status in [:success, :failed, :refunded] do
+    row =
+      theirs ||
+        %{
+          ref: transaction.ref_id,
+          inquiry?: false,
+          product_code: transaction.provider_code,
+          customer_id: transaction.customer_ref,
+          at: nil
+        }
+
+    Map.merge(row, %{status: status, cost: Map.get(result, :actual_cost)})
+  end
+
+  defp answered_row(theirs, _transaction, _pending), do: theirs
 
   @doc """
   One round of the status checker: every api service still processing, in
