@@ -300,4 +300,65 @@ defmodule Zahlungs.Services.Provider.SbiReplyTest do
       assert is_nil(Reply.money("abc"))
     end
   end
+
+  describe "history_row/1" do
+    @row %{
+      "ref_1" => "Z1261112090000A1B2C3",
+      "ref_2" => "2411120900001",
+      "product_code" => "T5",
+      "customer_id" => "089900001111",
+      "status" => 1,
+      "total_payment" => "5150",
+      "created_at" => "2026-11-12 09:00:05.000000",
+      "msg" => "TRX T5.089900001111 SUKSES, HRG:5150 SN:1111222233 REFID:Z1261112090000A1B2C3."
+    }
+
+    test "a success keeps the ref, the cost and the time in UTC" do
+      row = Reply.history_row(@row)
+
+      assert row.ref == "Z1261112090000A1B2C3"
+      assert row.status == :success
+      assert row.inquiry? == false
+      assert Decimal.equal?(row.cost, 5150)
+      assert row.at == ~N[2026-11-12 02:00:05]
+      assert row.product_code == "T5"
+      assert row.customer_id == "089900001111"
+    end
+
+    test "status 11 is a failure and 2 is pending" do
+      assert Reply.history_row(%{@row | "status" => 11, "msg" => "TRX GAGAL"}).status == :failed
+
+      assert Reply.history_row(%{@row | "status" => 2, "msg" => "TRX DIPROSES"}).status ==
+               :pending
+    end
+
+    test "an RC in the message decides" do
+      assert Reply.history_row(%{@row | "status" => 11, "msg" => "RC:31 DIREFUND"}).status ==
+               :refunded
+
+      assert Reply.history_row(%{@row | "msg" => "RC:94 REF SUDAH ADA"}).status == :pending
+    end
+
+    test "an inquiry row is marked" do
+      assert Reply.history_row(%{@row | "msg" => "INQ PLN SUKSES"}).inquiry? == true
+
+      assert Reply.history_row(%{@row | "msg" => "PLN 5400001111 CEK TAGIHAN SUKSES"}).inquiry? ==
+               true
+    end
+
+    test "numbers as text, unreadable ones nil" do
+      row =
+        Reply.history_row(%{
+          @row
+          | "total_payment" => "abc",
+            "msg" => "TRX SUKSES",
+            "created_at" => "kemarin",
+            "ref_1" => ""
+        })
+
+      assert row.cost == nil
+      assert row.at == nil
+      assert row.ref == nil
+    end
+  end
 end

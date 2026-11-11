@@ -291,4 +291,54 @@ defmodule Zahlungs.Services.Provider.SbiTest do
     assert Sbi.callback_ref(%{"ref_1" => ""}) == :error
     assert Sbi.callback_ref(%{}) == :error
   end
+
+  describe "history/3" do
+    @row_data %{
+      "ref_1" => "Z1261112090000A1B2C3",
+      "status" => 1,
+      "total_payment" => "5150",
+      "created_at" => "2026-11-12 09:00:05",
+      "msg" => "TRX T5.089900001111 SUKSES, HRG:5150 SN:1111222233 REFID:Z1261112090000A1B2C3."
+    }
+
+    test "asks for one day's page with rqid, without sign" do
+      StubClient.expect("history", ok(%{"data" => [@row_data], "meta" => %{"last_page" => 3}}))
+
+      assert {:ok, %{rows: [%{ref: "Z1261112090000A1B2C3"}], last_page: 3}} =
+               Sbi.history(@credentials, ~D[2026-11-12], 2)
+
+      assert [{"history", body, headers}] = StubClient.requests()
+
+      assert body == %{
+               "mmid" => "MM123",
+               "date" => "2026-11-12",
+               "page" => 2,
+               "per_page" => 1000,
+               "status" => ""
+             }
+
+      assert {"rqid", "rahasia"} in headers
+      refute List.keymember?(headers, "sign", 0)
+    end
+
+    test "no meta is one page" do
+      StubClient.expect("history", ok(%{"data" => []}))
+      assert Sbi.history(@credentials, ~D[2026-11-12], 1) == {:ok, %{rows: [], last_page: 1}}
+    end
+
+    test "anything else is unavailable" do
+      StubClient.expect("history", ok(%{"data" => "x"}))
+      StubClient.expect("history", {:ok, 500, "<html>"})
+      StubClient.expect("history", error("RC:91 IP tidak terdaftar"))
+
+      for _ <- 1..3 do
+        assert Sbi.history(@credentials, ~D[2026-11-12], 1) == {:error, :unavailable}
+      end
+    end
+
+    test "no answer is a timeout" do
+      StubClient.expect("history", {:error, :timeout})
+      assert Sbi.history(@credentials, ~D[2026-11-12], 1) == {:error, :timeout}
+    end
+  end
 end
