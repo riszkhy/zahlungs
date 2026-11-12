@@ -47,17 +47,19 @@ defmodule ZahlungsWeb.ServiceCorrection do
   attr :reason, :string, default: ""
   attr :token_sn, :string, default: ""
 
-  @doc "The popup. Batal comes first, so the popup focuses it."
+  @doc """
+  The popup. The modal focuses its first field (SN towards success, else the
+  reason); Batal sits at the bottom, before the button that names the action.
+  """
   def popup(assigns) do
     assigns = assign(assigns, :to, target(assigns.transaction))
 
     ~H"""
     <.modal id="correct-service" show on_cancel={JS.push("cancel_correction")}>
-      <div class="flex flex-wrap items-start justify-between gap-2 pr-10">
+      <div class="pr-10">
         <h3 class="text-lg font-semibold">
           {if @to == "failed", do: "Jadikan gagal", else: "Jadikan berhasil"}
         </h3>
-        <button type="button" phx-click="cancel_correction" class="chip">Batal</button>
       </div>
 
       <dl class="mt-3 space-y-1 text-sm">
@@ -79,12 +81,16 @@ defmodule ZahlungsWeb.ServiceCorrection do
         </div>
         <div class="flex justify-between gap-4 font-medium">
           <dt class="text-gray-500">Status</dt>
-          <dd>{status_label(@transaction.status)} → {status_label(@to)}</dd>
+          <dd><.status_badge status={@transaction.status} /> → <.status_badge status={@to} /></dd>
         </div>
       </dl>
 
-      <p :if={@to == "failed"} class="mt-3 rounded bg-amber-50 px-3 py-2 text-sm text-amber-800">
-        Uang {format_price(@transaction.price)} menunggu dikembalikan ke pelanggan oleh kasir.
+      <p class="mt-3 rounded bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        <%= if @to == "failed" do %>
+          Uang {format_price(@transaction.price)} menunggu dikembalikan ke pelanggan oleh kasir.
+        <% else %>
+          Uang {format_price(@transaction.price)} tidak jadi dikembalikan ke pelanggan; transaksi dihitung berhasil.
+        <% end %>
       </p>
 
       <form phx-submit="confirm_correction" class="mt-4 space-y-3">
@@ -98,11 +104,30 @@ defmodule ZahlungsWeb.ServiceCorrection do
           <textarea name="reason" maxlength="200" required rows="2" class="form-control mt-1">{@reason}</textarea>
         </label>
         <p :if={@error} role="alert" class="text-sm text-red-600">{@error}</p>
-        <div class="flex justify-end">
-          <.button phx-disable-with="Menyimpan...">Simpan koreksi</.button>
+        <div class="flex justify-end gap-2">
+          <button type="button" phx-click="cancel_correction" class="chip">Batal</button>
+          <.button :if={@to == "failed"} class="!bg-red-600" phx-disable-with="Menyimpan...">
+            Jadikan gagal
+          </.button>
+          <.button :if={@to == "success"} phx-disable-with="Menyimpan...">Jadikan berhasil</.button>
         </div>
       </form>
     </.modal>
+    """
+  end
+
+  attr :status, :string, required: true
+
+  defp status_badge(assigns) do
+    ~H"""
+    <span class={[
+      "inline-block rounded-full px-2 py-0.5 text-xs",
+      @status == "success" && "bg-green-100 text-green-700",
+      @status == "failed" && "bg-red-100 text-red-700",
+      @status == "processing" && "bg-amber-100 text-amber-800"
+    ]}>
+      {status_label(@status)}
+    </span>
     """
   end
 

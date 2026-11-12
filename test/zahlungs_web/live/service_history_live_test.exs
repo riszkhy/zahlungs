@@ -295,6 +295,38 @@ defmodule ZahlungsWeb.ServiceHistoryLiveTest do
       assert html =~ ~r/class="[^"]*\bpr-10\b[^"]*">\s*<h3/
     end
 
+    defp popup_html(ctx, tx) do
+      ServiceLive.History
+      |> mount_live(ctx.admin)
+      |> event("review_correction", %{"id" => tx.id})
+      |> html()
+    end
+
+    test "the popup names its action", ctx do
+      html = popup_html(ctx, ctx.success)
+      assert html =~ ~r/<button[^>]*!bg-red-600[^>]*>\s*Jadikan gagal\s*<\/button>/
+      refute html =~ "Simpan koreksi"
+    end
+
+    test "towards success warns the money stays", ctx do
+      {:ok, failed} = Services.correct_status(ctx.admin, ctx.success, "failed", "Uji")
+      html = popup_html(ctx, failed)
+      assert html =~ "tidak jadi dikembalikan ke pelanggan; transaksi dihitung berhasil."
+      assert html =~ ~r/<button[^>]*>\s*Jadikan berhasil\s*<\/button>/
+    end
+
+    test "Batal sits at the bottom, before the main button", ctx do
+      html = popup_html(ctx, ctx.success)
+      assert html =~ ~r/<\/textarea>.*phx-click="cancel_correction".*Jadikan gagal/s
+      refute html =~ ~r/<\/h3>\s*<button[^>]*cancel_correction/
+    end
+
+    test "a failed service has a red badge", ctx do
+      {:ok, _} = Services.correct_status(ctx.admin, ctx.success, "failed", "Uji")
+      html = ServiceLive.History |> mount_live(ctx.admin) |> html()
+      assert html =~ ~r/bg-red-100 text-red-700[^>]*>\s*Gagal/
+    end
+
     test "a blank reason keeps the popup open", ctx do
       socket = ServiceLive.History |> mount_live(ctx.admin) |> corrected(ctx.success.id, "  ")
 

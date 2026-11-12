@@ -170,6 +170,10 @@ Polanya sama dengan popup bayar: tombol (`review_correction`) hanya membuka popu
 dan `confirm_correction` bekerja hanya selama popup terbuka. Fokus awal ada di
 **Batal**.
 
+> Diganti oleh `2026-11-12-rapikan-rekonsiliasi-design.md`: fokus awal di kolom
+> isian pertama, Batal di bawah, tombol "Jadikan gagal" / "Jadikan berhasil"
+> menggantikan "Simpan koreksi", dan arah berhasil juga punya peringatan uang.
+
 - **Isi:** kode transaksi, produk, nomor pelanggan, harga, status sekarang, dan
   status tujuan. Tujuannya tidak dipilih, melainkan mengikuti status sekarang:
   - Berhasil: **Jadikan gagal**, dengan catatan "Uang {harga} menunggu dikembalikan

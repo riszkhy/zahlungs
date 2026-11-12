@@ -193,7 +193,7 @@ defmodule ZahlungsWeb.ServiceLive.History do
     <span class={[
       "inline-block rounded-full px-2 py-0.5 text-xs",
       @transaction.status == "success" && "bg-green-100 text-green-700",
-      @transaction.status == "failed" && "bg-gray-200 text-gray-700",
+      @transaction.status == "failed" && "bg-red-100 text-red-700",
       @transaction.status == "processing" && "bg-amber-100 text-amber-800"
     ]}>
       {status_label(@transaction.status)}
