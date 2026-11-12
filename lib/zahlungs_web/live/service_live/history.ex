@@ -218,6 +218,15 @@ defmodule ZahlungsWeb.ServiceLive.History do
     """
   end
 
+  # The failure or provider's note, unless it only repeats the correction's
+  # reason (a correction to failed makes its reason the failure reason).
+  defp note(transaction) do
+    case transaction.failure_reason || transaction.provider_message do
+      note when transaction.corrected_at != nil and note == transaction.correction_reason -> nil
+      note -> note
+    end
+  end
+
   attr :transaction, :map, required: true
 
   defp outcome(assigns) do
@@ -231,8 +240,8 @@ defmodule ZahlungsWeb.ServiceLive.History do
     <span :if={@transaction.review_reason} class="block text-xs font-medium text-amber-700">
       Perlu ditinjau — admin akan meninjau
     </span>
-    <span :if={@transaction.failure_reason || @transaction.provider_message} class="block text-xs text-gray-500">
-      {@transaction.failure_reason || @transaction.provider_message}
+    <span :if={note(@transaction)} class="block text-xs text-gray-500">
+      {note(@transaction)}
     </span>
     <.link
       :if={@transaction.status == "success"}

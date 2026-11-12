@@ -327,6 +327,28 @@ defmodule ZahlungsWeb.ServiceHistoryLiveTest do
       assert html =~ ~r/bg-red-100 text-red-700[^>]*>\s*Gagal/
     end
 
+    test "a correction's reason shows once on the card", ctx do
+      {:ok, _} = Services.correct_status(ctx.admin, ctx.success, "failed", "Alasan unik koreksi")
+      html = ServiceLive.History |> mount_live(ctx.admin) |> html()
+
+      assert html =~ ~r/Dikoreksi [^<]*: Alasan unik koreksi/
+      # Once in the card and once in the table row (two layouts of one list).
+      assert length(String.split(html, "Alasan unik koreksi")) - 1 == 2
+    end
+
+    test "a failure from elsewhere still shows beside a correction", ctx do
+      {:ok, failed} = Services.correct_status(ctx.admin, ctx.success, "failed", "Koreksi awal")
+
+      failed
+      |> Ecto.Changeset.change(failure_reason: "Nomor tidak aktif")
+      |> Zahlungs.Repo.update!()
+
+      html = ServiceLive.History |> mount_live(ctx.admin) |> html()
+
+      assert html =~ "Koreksi awal"
+      assert html =~ "Nomor tidak aktif"
+    end
+
     test "a blank reason keeps the popup open", ctx do
       socket = ServiceLive.History |> mount_live(ctx.admin) |> corrected(ctx.success.id, "  ")
 
