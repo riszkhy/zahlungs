@@ -70,6 +70,7 @@ Aturan akses berlapis (router):
     │     └── /admin/services/commission    Komisi kasir per kategori: persen dari margin atau rupiah per transaksi
     ├── /admin/deposits         Akun deposit: perkiraan saldo, isi ulang, pencocokan
     │                           (+ /new, /:id, /:id/edit)
+    │     └── /admin/deposits/:id/reconcile   Rekonsiliasi per tanggal dengan riwayat SBI (akun api)
     ├── /reports/sales          Laporan penjualan (ringkasan, harian, per kasir,
     │                           per kategori, produk terlaris)
     ├── /reports/stock          Laporan stok (nilai persediaan, stok rendah/habis)
@@ -402,6 +403,14 @@ Berlaku bila akun deposit toko bermode **API** (diatur di `/admin/deposits`).
 - **/admin/deposits** (penyedia SBI): Member ID, PIN, Password (tidak pernah
   ditampilkan lagi); URL callback `…/api/ppob/callback` untuk didaftarkan di
   SBI; Tes koneksi dan Ambil saldo memakai saldo SBI.
+- **/admin/deposits/:id/reconcile** (admin saja, akun api SBI): pilih tanggal
+  lalu **Cocokkan**; riwayat SBI hari itu baru diambil saat tombol ditekan.
+  Golongan: Ikuti SBI, Bertentangan, Belum final di SBI, Hanya di Zahlungs,
+  Selisih modal, Hanya di SBI, Cocok (yang cocok disembunyikan, bisa dibuka).
+  Ringkasan: jumlah per golongan, total selisih modal, potongan tanpa transaksi
+  Zahlungs. Tombol **Ikuti SBI** / **Tinjau** / **Cek status** menanyakan status
+  ke SBI untuk satu layanan, tidak pernah mengirim pembayaran; yang bertentangan
+  masuk Perlu ditinjau dan diputuskan di halaman akun deposit.
 - **/admin/services**: **Cari di daftar SBI** di form produk (mengisi kode,
   nama, modal, kategori; semua item grup "PPOB" SBI disarankan sebagai
   kategori Tagihan, dengan admin dan komisi SBI); kolom **Biaya tambahan toko

@@ -46,6 +46,41 @@ defmodule Zahlungs.Services.Provider.Sbi.Reply do
 
   def transaction(_answer), do: {:error, :not_found}
 
+  @doc """
+  One row of SBI's transaction history (`/api/history`), read with the rules
+  of `transaction/1`: its ref (`ref_1`), status, what SBI charged (`cost`, on
+  a success), and the time it was made, from SBI's local time (taken as the
+  default zone, WIB) to UTC. An inquiry row ("INQ …", "… CEK TAGIHAN …") is
+  marked `inquiry?`. Blank or unreadable fields are `nil`.
+  """
+  def history_row(row) when is_map(row) do
+    {:ok, result} = transaction(row)
+
+    %{
+      ref: trimmed(row["ref_1"]),
+      status: result.status,
+      inquiry?: inquiry_row?(text(row["msg"])),
+      cost: Map.get(result, :actual_cost),
+      product_code: trimmed(row["product_code"]),
+      customer_id: trimmed(row["customer_id"]),
+      at: utc_time(row["created_at"])
+    }
+  end
+
+  defp utc_time(value) when is_binary(value) do
+    case NaiveDateTime.from_iso8601(String.trim(value)) do
+      {:ok, local} ->
+        local
+        |> NaiveDateTime.add(-Zahlungs.LocalTime.offset_seconds(), :second)
+        |> NaiveDateTime.truncate(:second)
+
+      _ ->
+        nil
+    end
+  end
+
+  defp utc_time(_value), do: nil
+
   # A bill is paid with its inquiry's ref_1, so SBI may answer a status check
   # (during a slow payment) with the inquiry itself — successful, but not a
   # payment. It says so in its message: "INQ …" or "… CEK TAGIHAN …".

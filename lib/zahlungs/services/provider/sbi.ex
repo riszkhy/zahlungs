@@ -13,6 +13,7 @@ defmodule Zahlungs.Services.Provider.Sbi do
   | Cek status | `status` |
   | Tes koneksi, Ambil saldo | `balance` |
   | Perbarui dari SBI | `price` per code |
+  | Rekonsiliasi | `history` (header `rqid`, without `sign`) |
 
   No answer, a server error or a page that isn't JSON on `pay` is
   `{:error, :timeout}`: the service stays pending. `status` gives a result only
@@ -103,6 +104,65 @@ defmodule Zahlungs.Services.Provider.Sbi do
         {:error, :timeout}
     end
   end
+
+  @history_timeout 15_000
+  @history_per_page 1000
+
+  @doc """
+  One page of SBI's transaction history for a day: every status, at most 1000
+  rows. SBI asks for the member's password in `rqid` here, not a `sign`. An
+  answer without `meta`, or a bare list of rows, is one page; no answer is `{:error, :timeout}`, and
+  any other answer that isn't a list of rows `{:error, :unavailable}`.
+  """
+  @impl true
+  def history(credentials, %Date{} = date, page) do
+    body = %{
+      "mmid" => credentials["member_id"],
+      "date" => Date.to_iso8601(date),
+      "page" => page,
+      "per_page" => @history_per_page,
+      "status" => ""
+    }
+
+    headers = [{"rqid", credentials["password"]}, {"content-type", "application/json"}]
+
+    case client().post("history", body, headers, @history_timeout) do
+      {:ok, status, %{"data" => rows}} when status < 500 and is_list(rows) ->
+        history_page({:data, %{"data" => rows}})
+
+      {:ok, status, answer} ->
+        history_page(Reply.envelope(status, answer))
+
+      {:error, :timeout} ->
+        {:error, :timeout}
+
+      {:error, _reason} ->
+        {:error, :unavailable}
+    end
+  end
+
+  defp history_page({:data, %{"data" => rows} = data}) when is_list(rows) do
+    with {:ok, last} <- last_page(data["meta"]) do
+      {:ok, %{rows: for(%{} = row <- rows, do: Reply.history_row(row)), last_page: last}}
+    end
+  end
+
+  defp history_page(_answer), do: {:error, :unavailable}
+
+  # No meta (or no last page in it) is one page; a last page that isn't a
+  # whole number is an answer Zahlungs can't read.
+  defp last_page(%{"last_page" => last}) when is_integer(last) and last >= 1, do: {:ok, last}
+
+  defp last_page(%{"last_page" => last}) when is_binary(last) do
+    case Integer.parse(String.trim(last)) do
+      {n, ""} when n >= 1 -> {:ok, n}
+      _ -> {:error, :unavailable}
+    end
+  end
+
+  defp last_page(%{"last_page" => nil}), do: {:ok, 1}
+  defp last_page(%{"last_page" => _other}), do: {:error, :unavailable}
+  defp last_page(_meta), do: {:ok, 1}
 
   defp transaction_answer({:ok, status, answer}) do
     case Reply.envelope(status, answer) do

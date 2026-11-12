@@ -77,7 +77,28 @@ defmodule Zahlungs.Services.Provider do
   @doc "The ref a callback is about, for callbacks without a token in the URL."
   @callback callback_ref(params :: map) :: {:ok, String.t()} | :error
 
-  @optional_callbacks balance: 1, catalog: 1, prices: 2, callback_ref: 1, public_credentials: 0
+  @typedoc "One row of the vendor's transaction history (`history/3`)."
+  @type history_row :: %{
+          ref: String.t() | nil,
+          status: :success | :failed | :refunded | :pending,
+          inquiry?: boolean,
+          cost: Decimal.t() | nil,
+          product_code: String.t() | nil,
+          customer_id: String.t() | nil,
+          at: NaiveDateTime.t() | nil
+        }
+
+  @doc "One page of the vendor's transactions on a day, for reconciliation."
+  @callback history(credentials, Date.t(), page :: pos_integer) ::
+              {:ok, %{rows: [history_row], last_page: pos_integer}}
+              | {:error, :timeout | :unavailable}
+
+  @optional_callbacks balance: 1,
+                      catalog: 1,
+                      prices: 2,
+                      callback_ref: 1,
+                      public_credentials: 0,
+                      history: 3
 
   @adapters %{"fake" => Zahlungs.Services.Provider.Fake}
 

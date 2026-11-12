@@ -154,6 +154,7 @@ defmodule ZahlungsWeb.Router do
       live "/admin/deposits/new", DepositLive.Index, :new
       live "/admin/deposits/:id", DepositLive.Index, :show
       live "/admin/deposits/:id/edit", DepositLive.Index, :edit
+      live "/admin/deposits/:id/reconcile", DepositLive.Reconcile, :index
 
       live "/reports/sales", ReportLive.Index, :index
       live "/reports/stock", ReportLive.Stock, :index

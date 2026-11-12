@@ -271,6 +271,9 @@ defmodule ZahlungsWeb.DepositLive.Index do
         <button type="button" phx-click="fetch_balance" phx-disable-with="Mengambil..." class="chip">
           Ambil saldo dari penyedia
         </button>
+        <.link navigate={~p"/admin/deposits/#{@account}/reconcile"} class="chip">
+          Rekonsiliasi per tanggal
+        </.link>
       </div>
 
       <div class="mt-4 grid gap-6 md:grid-cols-2">

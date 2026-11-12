@@ -29,11 +29,11 @@ defmodule Zahlungs.Services do
   alias Zahlungs.Repo
 
   alias Zahlungs.Accounts.User
-  alias Zahlungs.{Deposits, LocalTime, Scope, Shifts, Stores}
+  alias Zahlungs.{Accounts, Deposits, LocalTime, Scope, Shifts, Stores}
   alias Zahlungs.Shifts.Shift
   alias Zahlungs.Services.{Brand, BrandPrefix, CatalogCache, Commissions, Dispatcher, Inquiry}
   alias Zahlungs.Services.Product
-  alias Zahlungs.Services.{Provider, Ref, Transaction}
+  alias Zahlungs.Services.{Provider, Reconciliation, Ref, Transaction}
 
   @category_labels [
     {"pulsa", "Pulsa"},
@@ -57,6 +57,20 @@ defmodule Zahlungs.Services do
   defdelegate commission_details(scope, user_id, date_from, date_to),
     to: Commissions,
     as: :details
+
+  ## Reconciliation with the provider (see `Zahlungs.Services.Reconciliation`)
+
+  @doc """
+  Matches `account`'s api services with the provider's history of `date` (a
+  day in the default zone): `{:ok, %{rows: rows, summary: summary, date:
+  date}}`, or `{:error, :not_admin | :future_date | :unsupported |
+  :credentials | :unavailable}`, refused before the provider is asked where
+  it can be. Nothing is stored and no service changes.
+  """
+  def reconcile(admin, account, date, today \\ LocalTime.today()),
+    do: Reconciliation.run(admin, account, date, today)
+
+  defdelegate reconciliation_summary(rows), to: Reconciliation, as: :summarize
 
   ## Products
 
@@ -765,32 +779,90 @@ defmodule Zahlungs.Services do
   end
 
   defp ask_status(transaction) do
+    apply_result(transaction.id, provider_status(transaction))
+  end
+
+  # What the provider says about a sent service now; no answer is pending.
+  defp provider_status(transaction) do
     enter_store_organization(transaction)
     account = Deposits.get_account!(transaction.deposit_account_id)
 
-    result =
-      with {:ok, adapter, credentials} <- Deposits.connection(account),
-           {:ok, result} <- adapter.status(credentials, provider_request(transaction)) do
-        result
-      else
-        {:error, :not_found} ->
-          %{
-            status: :pending,
-            message: "Penyedia tidak mengenal transaksi ini. Periksa di aplikasi penyedia."
-          }
+    with {:ok, adapter, credentials} <- Deposits.connection(account),
+         {:ok, result} <- adapter.status(credentials, provider_request(transaction)) do
+      result
+    else
+      {:error, :not_found} ->
+        %{
+          status: :pending,
+          message: "Penyedia tidak mengenal transaksi ini. Periksa di aplikasi penyedia."
+        }
 
-        {:error, :credentials} ->
-          %{
-            status: :pending,
-            message: "Kredensial penyedia tidak bisa dibaca. Minta admin mengisinya ulang."
-          }
+      {:error, :credentials} ->
+        %{
+          status: :pending,
+          message: "Kredensial penyedia tidak bisa dibaca. Minta admin mengisinya ulang."
+        }
 
-        {:error, _} ->
-          %{status: :pending, message: "Belum ada jawaban penyedia"}
-      end
-
-    apply_result(transaction.id, result)
+      {:error, _} ->
+        %{status: :pending, message: "Belum ada jawaban penyedia"}
+    end
   end
+
+  @doc """
+  The reconciliation page's fix for one row (`Services.Reconciliation`): asks
+  the provider about the row's service again, whatever its status, and hands
+  the answer to `apply_result/2` — a processing service is settled, a final
+  one that the answer contradicts only goes to review. Unlike
+  `check_status/1` it **never sends** a payment: a service never sent is
+  `{:error, :not_sent}`.
+
+  Returns the row worked out again from the service as it is now and the
+  history row it had, or, when the provider's answer is final, that answer in
+  its place (the history is not read again). Only for an admin (the role read from the
+  database); a service outside the admin's organization raises
+  `Ecto.NoResultsError`.
+  """
+  def recheck_row(%User{} = admin, %{ours: %Transaction{id: id}, theirs: theirs}) do
+    if Accounts.admin?(Accounts.get_user!(admin.id)) do
+      transaction =
+        Repo.one!(from t in Transaction, where: t.id == ^id and t.store_id in ^Stores.store_ids())
+
+      cond do
+        transaction.channel != "api" ->
+          {:error, :not_api}
+
+        is_nil(transaction.sent_at) ->
+          {:error, :not_sent}
+
+        true ->
+          result = provider_status(transaction)
+          apply_result(transaction.id, result)
+          theirs = answered_row(theirs, transaction, result)
+          {:ok, Reconciliation.classify(Repo.get!(Transaction, id), theirs)}
+      end
+    else
+      {:error, :not_admin}
+    end
+  end
+
+  # The provider's final answer stands for its history row; a pending one
+  # leaves the row as it was.
+  defp answered_row(theirs, transaction, %{status: status} = result)
+       when status in [:success, :failed, :refunded] do
+    row =
+      theirs ||
+        %{
+          ref: transaction.ref_id,
+          inquiry?: false,
+          product_code: transaction.provider_code,
+          customer_id: transaction.customer_ref,
+          at: nil
+        }
+
+    Map.merge(row, %{status: status, cost: Map.get(result, :actual_cost)})
+  end
+
+  defp answered_row(theirs, _transaction, _pending), do: theirs
 
   @doc """
   One round of the status checker: every api service still processing, in
