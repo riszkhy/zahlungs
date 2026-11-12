@@ -1396,12 +1396,7 @@ defmodule Zahlungs.Services do
            ),
          {:ok, reason} <- correction_reason(reason),
          {:ok, token_sn} <- correction_token_sn(opts[:token_sn]) do
-      fn ->
-        case correct(lock_transaction(id), admin, to, reason, token_sn) do
-          {:ok, transaction} -> transaction
-          {:error, error} -> Repo.rollback(error)
-        end
-      end
+      fn -> correct_locked(id, admin, to, reason, token_sn) end
       |> Repo.transaction()
       |> tap(fn
         {:ok, transaction} -> broadcast(transaction)
@@ -1414,6 +1409,13 @@ defmodule Zahlungs.Services do
   def correctable?(%Transaction{review_reason: reason}) when is_binary(reason), do: false
   def correctable?(%Transaction{status: "success"}), do: true
   def correctable?(%Transaction{} = transaction), do: Transaction.awaiting_refund?(transaction)
+
+  defp correct_locked(id, admin, to, reason, token_sn) do
+    case correct(lock_transaction(id), admin, to, reason, token_sn) do
+      {:ok, transaction} -> transaction
+      {:error, error} -> Repo.rollback(error)
+    end
+  end
 
   defp check_correcting_admin(admin) do
     if Accounts.admin?(Accounts.get_user!(admin.id)), do: :ok, else: {:error, :not_admin}
