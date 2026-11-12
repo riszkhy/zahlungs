@@ -216,4 +216,47 @@ defmodule ZahlungsWeb.DepositLive.ReconcileTest do
       assert for({"status", _, _} <- StubClient.requests(), do: :status) == []
     end
   end
+
+  describe "correcting from the report" do
+    defp conflict(ctx, attrs \\ []) do
+      service = service!(ctx, Keyword.merge([status: "success"], attrs))
+      StubClient.expect("history", page([sbi_row(service.ref_id, 11)]))
+      {service, ctx |> open() |> reconcile()}
+    end
+
+    test "a conflict corrected to match SBI", ctx do
+      {service, socket} = conflict(ctx)
+      assert html(socket) =~ "Koreksi status"
+
+      socket =
+        socket
+        |> event("review_correction", %{"index" => 0})
+        |> event("confirm_correction", %{"reason" => "Gagal di SBI", "token_sn" => ""})
+
+      assert flash(socket, :info) ==
+               "Status dikoreksi menjadi Gagal. Uang menunggu dikembalikan kasir."
+
+      assert html(socket) =~ "Lihat yang cocok (1)"
+      assert Repo.reload!(service).status == "failed"
+      assert [{"history", _, _}] = StubClient.requests()
+    end
+
+    test "index as text", ctx do
+      {_service, socket} = conflict(ctx)
+      assert event(socket, "review_correction", %{"index" => "0"}).assigns.correcting
+    end
+
+    test "no button for a row in review", ctx do
+      {_service, socket} = conflict(ctx, review_reason: "Uji")
+      refute html(socket) =~ "Koreksi status"
+    end
+
+    test "an index that isn't a row", ctx do
+      {_service, socket} = conflict(ctx)
+
+      for index <- ["abc", 99] do
+        refute event(socket, "review_correction", %{"index" => index}).assigns.correcting
+      end
+    end
+  end
 end
