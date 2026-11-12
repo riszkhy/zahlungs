@@ -75,14 +75,14 @@ defmodule ZahlungsWeb.DepositLive.Reconcile do
      |> assign(:account, Deposits.get_account!(id))
      |> assign(:date, Date.to_iso8601(Date.add(LocalTime.today(), -1)))
      |> assign(:max_date, Date.to_iso8601(LocalTime.today()))
-     |> assign(rows: nil, summary: nil, error: nil, show_matched: false)
+     |> assign(rows: nil, summary: nil, error: nil, kind_filter: nil)
      |> close_correction()}
   end
 
   @impl true
   def handle_event("reconcile", %{"date" => text}, socket) do
     admin = socket.assigns.current_user
-    socket = assign(socket, date: text, rows: nil, summary: nil, error: nil, show_matched: false)
+    socket = assign(socket, date: text, rows: nil, summary: nil, error: nil, kind_filter: nil)
 
     result =
       case Date.from_iso8601(to_string(text)) do
@@ -99,8 +99,18 @@ defmodule ZahlungsWeb.DepositLive.Reconcile do
     end
   end
 
-  def handle_event("toggle_matched", _params, socket),
-    do: {:noreply, update(socket, :show_matched, &(not &1))}
+  # A chip shows its kind only; the active chip again shows every row that
+  # needs a hand. Only a known kind with rows counts.
+  def handle_event("filter_kind", %{"kind" => text}, socket) do
+    with {kind, _ui} <- Enum.find(@kinds_ui, fn {kind, _ui} -> Atom.to_string(kind) == text end),
+         %{counts: counts} <- socket.assigns.summary,
+         true <- Map.get(counts, kind, 0) > 0 do
+      {:noreply,
+       update(socket, :kind_filter, fn current -> if current == kind, do: nil, else: kind end)}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
 
   def handle_event("review_correction", %{"index" => index}, socket) do
     with rows when is_list(rows) <- socket.assigns.rows,
@@ -217,7 +227,7 @@ defmodule ZahlungsWeb.DepositLive.Reconcile do
   def render(assigns) do
     assigns =
       assign(assigns,
-        indexed: indexed(assigns.rows),
+        visible: assigns.rows |> indexed() |> visible(assigns.kind_filter),
         kinds_ui: @kinds_ui
       )
 
@@ -242,16 +252,22 @@ defmodule ZahlungsWeb.DepositLive.Reconcile do
 
     <section :if={@rows} class="mt-6 space-y-4">
       <div class="flex flex-wrap gap-2 text-sm">
-        <span
+        <button
           :for={{kind, ui} <- @kinds_ui}
+          type="button"
+          phx-click="filter_kind"
+          phx-value-kind={kind}
+          disabled={@summary.counts[kind] == 0}
+          aria-pressed={to_string(@kind_filter == kind)}
           class={[
             "rounded-full border px-3 py-1",
             tone_classes(ui.tone),
-            @summary.counts[kind] == 0 && "opacity-50"
+            @summary.counts[kind] == 0 && "opacity-50",
+            @kind_filter == kind && "ring-2 ring-offset-1"
           ]}
         >
           {ui.label} <strong>{@summary.counts[kind]}</strong>
-        </span>
+        </button>
       </div>
       <dl class="flex flex-wrap gap-x-6 gap-y-1 text-sm">
         <div><dt class="inline text-gray-600">Selisih modal</dt> <dd class="inline font-medium">{format_price(@summary.cost_difference)}</dd></div>
@@ -260,20 +276,13 @@ defmodule ZahlungsWeb.DepositLive.Reconcile do
 
       <p :if={@rows == []} class="text-sm text-gray-600">Tidak ada transaksi pada tanggal ini.</p>
 
-      <ul class="space-y-3">
-        <.row_card :for={{row, index} <- @indexed} :if={row.kind != :matched} row={row} index={index} user={@current_user} />
-      </ul>
+      <p :if={@rows != [] and @visible == [] and is_nil(@kind_filter)} class="text-sm text-gray-600">
+        Semua transaksi cocok dengan SBI.
+      </p>
 
-      <div :if={@summary.counts.matched > 0}>
-        <button type="button" phx-click="toggle_matched" class="chip">
-          {if @show_matched,
-            do: "Sembunyikan yang cocok",
-            else: "Lihat yang cocok (#{@summary.counts.matched})"}
-        </button>
-        <ul :if={@show_matched} class="mt-3 space-y-3">
-          <.row_card :for={{row, index} <- @indexed} :if={row.kind == :matched} row={row} index={index} user={@current_user} />
-        </ul>
-      </div>
+      <ul class="space-y-3">
+        <.row_card :for={{row, index} <- @visible} row={row} index={index} user={@current_user} />
+      </ul>
     </section>
 
     <ServiceCorrection.popup
@@ -362,6 +371,10 @@ defmodule ZahlungsWeb.DepositLive.Reconcile do
 
   defp indexed(rows),
     do: rows |> Enum.with_index() |> Enum.sort_by(fn {row, i} -> {@kind_order[row.kind], i} end)
+
+  # No filter: every row that needs a hand; a filter: that kind's rows only.
+  defp visible(indexed, nil), do: Enum.reject(indexed, fn {row, _i} -> row.kind == :matched end)
+  defp visible(indexed, kind), do: Enum.filter(indexed, fn {row, _i} -> row.kind == kind end)
 
   defp tone_classes(:red), do: "border-red-300 bg-red-50 text-red-800"
   defp tone_classes(:amber), do: "border-amber-300 bg-amber-50 text-amber-800"

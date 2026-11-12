@@ -405,13 +405,18 @@ Berlaku bila akun deposit toko bermode **API** (diatur di `/admin/deposits`).
   SBI; Tes koneksi dan Ambil saldo memakai saldo SBI.
 - **/admin/deposits/:id/reconcile** (admin saja, akun api SBI): pilih tanggal
   lalu **Cocokkan**; riwayat SBI hari itu baru diambil saat tombol ditekan.
-  Golongan: Ikuti SBI, Bertentangan, Belum final di SBI, Hanya di Zahlungs,
-  Selisih modal, Hanya di SBI, Cocok (yang cocok disembunyikan, bisa dibuka).
-  Ringkasan: jumlah per golongan, total selisih modal, potongan tanpa transaksi
-  Zahlungs. Tombol **Ikuti SBI** / **Tinjau** / **Cek status** menanyakan status
-  ke SBI untuk satu layanan, tidak pernah mengirim pembayaran; yang bertentangan
-  masuk Perlu ditinjau dan diputuskan di halaman akun deposit. Admin juga bisa
-  **Koreksi status** dari baris itu, tanpa menanyai SBI.
+  Golongan, yang berbahaya dulu: Bertentangan dan Hanya di SBI (merah); Belum
+  final di Zahlungs, Hanya di Zahlungs, Belum final di SBI dan Selisih modal
+  (kuning); Cocok (hijau). Chip golongan menyaring daftar (awalnya semua yang
+  perlu tindakan; chip Cocok menampilkan yang cocok; chip berjumlah 0 tidak bisa
+  diklik). Ringkasan: jumlah per golongan, total selisih modal, potongan tanpa
+  transaksi Zahlungs. Setiap baris punya petunjuk, sorotan status yang berbeda,
+  "selisih ±Rp" bila modal berbeda, dan satu tombol utama: **Ikuti SBI** /
+  **Cek status** menanyakan status ke SBI untuk satu layanan, tidak pernah
+  mengirim pembayaran; pada baris Bertentangan tombol utamanya **Koreksi status**
+  (tanpa menanyai SBI) dan **Cek status SBI** di sebelahnya (jawaban yang
+  bertentangan masuk Perlu ditinjau di halaman akun deposit). Admin juga bisa
+  **Koreksi status** dari baris lain.
 - **Koreksi status** (admin, di Riwayat layanan dan Rekonsiliasi): status final
   berhasil → gagal (uang masuk Perlu dikembalikan, juga untuk layanan manual)
   atau gagal → berhasil (hanya bila uangnya belum dikembalikan; SN opsional).

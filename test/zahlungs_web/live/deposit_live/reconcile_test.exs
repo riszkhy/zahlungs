@@ -129,7 +129,7 @@ defmodule ZahlungsWeb.DepositLive.ReconcileTest do
 
       assert html =~ ctx.account.name
       assert html =~ "Cocokkan"
-      refute html =~ "Lihat yang cocok"
+      refute html =~ "filter_kind"
       assert StubClient.requests() == []
     end
 
@@ -143,12 +143,11 @@ defmodule ZahlungsWeb.DepositLive.ReconcileTest do
 
       assert html =~ follow.code
       assert html =~ "Ikuti SBI"
-      assert html =~ "Lihat yang cocok (1)"
+      assert html =~ ~r/phx-value-kind="matched"[^>]*>\s*Cocok\s*<strong>1<\/strong>/
       refute html =~ matched.code
 
-      html = socket |> event("toggle_matched") |> html()
+      html = socket |> event("filter_kind", %{"kind" => "matched"}) |> html()
       assert html =~ matched.code
-      assert html =~ "Sembunyikan yang cocok"
     end
 
     test "an empty day", ctx do
@@ -163,7 +162,7 @@ defmodule ZahlungsWeb.DepositLive.ReconcileTest do
 
       html = ctx |> open() |> reconcile() |> html()
       assert html =~ "Riwayat SBI belum bisa diambil, coba lagi."
-      refute html =~ "Lihat yang cocok"
+      refute html =~ "filter_kind"
     end
 
     test "a manual account", ctx do
@@ -196,7 +195,7 @@ defmodule ZahlungsWeb.DepositLive.ReconcileTest do
       socket = event(socket, "recheck", %{"index" => index})
 
       assert flash(socket, :info) == "Sudah cocok dengan SBI."
-      assert html(socket) =~ "Lihat yang cocok (1)"
+      assert html(socket) =~ ~r/phx-value-kind="matched"[^>]*>\s*Cocok\s*<strong>1<\/strong>/
       refute html(socket) =~ ">Ikuti SBI<"
       assert length(history_requests()) == 1
     end
@@ -317,6 +316,76 @@ defmodule ZahlungsWeb.DepositLive.ReconcileTest do
     end
   end
 
+  describe "filter" do
+    test "a chip filters, a second click shows all again", ctx do
+      follow = service!(ctx, status: "processing")
+      conflict = service!(ctx, status: "success")
+
+      StubClient.expect(
+        "history",
+        page([sbi_row(follow.ref_id, 1), sbi_row(conflict.ref_id, 11)])
+      )
+
+      socket = ctx |> open() |> reconcile() |> event("filter_kind", %{"kind" => "conflict"})
+
+      assert html(socket) =~ conflict.code
+      refute html(socket) =~ follow.code
+      assert html(socket) =~ ~r/aria-pressed="true"[^>]*>\s*Bertentangan/
+
+      socket = event(socket, "filter_kind", %{"kind" => "conflict"})
+      assert html(socket) =~ follow.code
+      assert socket.assigns.kind_filter == nil
+    end
+
+    test "a chip of nothing, or an unknown kind, changes nothing", ctx do
+      service = service!(ctx, status: "processing")
+      StubClient.expect("history", page([sbi_row(service.ref_id, 1)]))
+      socket = ctx |> open() |> reconcile()
+
+      assert html(socket) =~ ~r/phx-value-kind="theirs_only"[^>]*disabled/
+
+      for kind <- ["theirs_only", "nope", 1, nil] do
+        assert event(socket, "filter_kind", %{"kind" => kind}).assigns.kind_filter == nil
+      end
+    end
+
+    test "Cocokkan again shows all", ctx do
+      service = service!(ctx, status: "processing")
+      StubClient.expect("history", page([sbi_row(service.ref_id, 1)]))
+      StubClient.expect("history", page([sbi_row(service.ref_id, 1)]))
+
+      socket = ctx |> open() |> reconcile() |> event("filter_kind", %{"kind" => "follow"})
+      assert socket.assigns.kind_filter == :follow
+      assert (socket |> reconcile()).assigns.kind_filter == nil
+    end
+
+    test "everything matched", ctx do
+      service = service!(ctx, status: "success")
+      StubClient.expect("history", page([sbi_row(service.ref_id, 1)]))
+      html = ctx |> open() |> reconcile() |> html()
+
+      assert html =~ "Semua transaksi cocok dengan SBI."
+      refute html =~ service.code
+    end
+
+    test "a filter stays after a button", ctx do
+      service = service!(ctx, status: "processing")
+      StubClient.expect("history", page([sbi_row(service.ref_id, 1)]))
+      StubClient.expect("status", {:ok, 200, %{"data" => sbi_row(service.ref_id, 1)}})
+
+      socket =
+        ctx
+        |> open()
+        |> reconcile()
+        |> event("filter_kind", %{"kind" => "follow"})
+        |> event("recheck", %{"index" => 0})
+
+      assert socket.assigns.kind_filter == :follow
+      refute html(socket) =~ service.code
+      assert html(socket) =~ ~r/phx-value-kind="matched"[^>]*>\s*Cocok\s*<strong>1<\/strong>/
+    end
+  end
+
   describe "correcting from the report" do
     defp conflict(ctx, attrs \\ []) do
       service = service!(ctx, Keyword.merge([status: "success"], attrs))
@@ -336,7 +405,7 @@ defmodule ZahlungsWeb.DepositLive.ReconcileTest do
       assert flash(socket, :info) ==
                "Status dikoreksi menjadi Gagal. Uang menunggu dikembalikan kasir."
 
-      assert html(socket) =~ "Lihat yang cocok (1)"
+      assert html(socket) =~ ~r/phx-value-kind="matched"[^>]*>\s*Cocok\s*<strong>1<\/strong>/
       assert Repo.reload!(service).status == "failed"
       assert [{"history", _, _}] = StubClient.requests()
     end
