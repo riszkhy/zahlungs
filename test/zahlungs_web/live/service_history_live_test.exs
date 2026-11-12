@@ -277,6 +277,24 @@ defmodule ZahlungsWeb.ServiceHistoryLiveTest do
       assert status_of(ctx.success) == "success"
     end
 
+    test "an id that isn't a service of the scope opens nothing", ctx do
+      socket = mount_live(ServiceLive.History, ctx.admin)
+
+      for id <- ["abc", "12abc", 0, ctx.success.id + 1_000_000, nil] do
+        refute event(socket, "review_correction", %{"id" => id}).assigns.correcting
+      end
+    end
+
+    test "Batal doesn't sit under the popup's close mark", ctx do
+      html =
+        ServiceLive.History
+        |> mount_live(ctx.admin)
+        |> event("review_correction", %{"id" => ctx.success.id})
+        |> html()
+
+      assert html =~ ~r/class="[^"]*\bpr-10\b[^"]*">\s*<h3/
+    end
+
     test "a blank reason keeps the popup open", ctx do
       socket = ServiceLive.History |> mount_live(ctx.admin) |> corrected(ctx.success.id, "  ")
 

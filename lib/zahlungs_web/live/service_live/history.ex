@@ -52,7 +52,8 @@ defmodule ZahlungsWeb.ServiceLive.History do
 
   def handle_event("review_correction", %{"id" => id}, socket) do
     with {id, ""} <- Integer.parse(to_string(id)),
-         transaction = Services.get_transaction!(socket.assigns.current_scope, id),
+         transaction when not is_nil(transaction) <-
+           Services.get_transaction(socket.assigns.current_scope, id),
          true <- ServiceCorrection.button?(socket.assigns.current_user, transaction) do
       {:noreply, socket |> close_correction() |> assign(:correcting, transaction)}
     else
