@@ -73,11 +73,11 @@ defmodule ZahlungsWeb.DepositLive.ReconcileTest do
     )
   end
 
-  defp sbi_row(ref, status) do
+  defp sbi_row(ref, status, cost \\ "5150") do
     %{
       "ref_1" => ref,
       "status" => status,
-      "total_payment" => "5150",
+      "total_payment" => cost,
       "msg" => "TRX T5.089900001111 SUKSES, HRG:5150 SN:1 REFID:#{ref}."
     }
   end
@@ -214,6 +214,106 @@ defmodule ZahlungsWeb.DepositLive.ReconcileTest do
       end
 
       assert for({"status", _, _} <- StubClient.requests(), do: :status) == []
+    end
+  end
+
+  describe "rows" do
+    defp follow_and_conflict(ctx) do
+      follow = service!(ctx, status: "processing")
+      conflict = service!(ctx, status: "success")
+
+      StubClient.expect(
+        "history",
+        page([sbi_row(follow.ref_id, 1), sbi_row(conflict.ref_id, 11)])
+      )
+
+      {follow, conflict, ctx |> open() |> reconcile()}
+    end
+
+    test "a dangerous row comes first", ctx do
+      {follow, conflict, socket} = follow_and_conflict(ctx)
+      html = html(socket)
+      # "<" ends the code, so LYT-5 never matches inside LYT-56
+      {c, _} = :binary.match(html, conflict.code <> "<")
+      {f, _} = :binary.match(html, follow.code <> "<")
+      assert c < f
+    end
+
+    test "buttons keep their row after reordering", ctx do
+      {_follow, conflict, socket} = follow_and_conflict(ctx)
+      index = Enum.find_index(socket.assigns.rows, &(&1.kind == :conflict))
+
+      assert event(socket, "review_correction", %{"index" => index}).assigns.correcting.transaction.id ==
+               conflict.id
+
+      assert html(socket) =~ ~r/phx-value-index="#{index}"[^>]*>\s*Koreksi status/
+    end
+
+    test "labels and hints", ctx do
+      service = service!(ctx, status: "processing")
+      StubClient.expect("history", page([sbi_row(service.ref_id, 1)]))
+      html = ctx |> open() |> reconcile() |> html()
+
+      assert html =~ "Belum final di Zahlungs"
+      assert html =~ "SBI sudah final, Zahlungs masih Diproses."
+      assert html =~ ~r/<button[^>]*phx-click="recheck"[^>]*>\s*Ikuti SBI/
+    end
+
+    test "a conflict: Koreksi status first, Cek status SBI second", ctx do
+      {_follow, _conflict, socket} = follow_and_conflict(ctx)
+      html = html(socket)
+
+      assert html =~ ~r/>\s*Koreksi status\s*<.*>\s*Cek status SBI\s*</s
+      refute html =~ "Tinjau"
+      assert html =~ "Zahlungs dan SBI sama-sama final tapi berbeda."
+    end
+
+    test "a row only at SBI has no button", ctx do
+      StubClient.expect("history", page([sbi_row("ZUNKNOWN1", 1)]))
+      html = ctx |> open() |> reconcile() |> html()
+
+      assert html =~
+               "SBI memotong saldo, tapi transaksinya tidak ada di akun ini. Tanyakan ke SBI."
+
+      refute html =~ ~r/phx-click="recheck"/
+    end
+
+    test "a cost difference is written out", ctx do
+      service = service!(ctx, status: "success")
+      StubClient.expect("history", page([sbi_row(service.ref_id, 1, "5300")]))
+
+      assert ctx |> open() |> reconcile() |> html() =~ "selisih +Rp 150"
+    end
+
+    test "a different status is highlighted", ctx do
+      {_follow, _conflict, socket} = follow_and_conflict(ctx)
+      html = html(socket)
+
+      assert html =~ ~r/font-semibold text-red-700[^>]*>\s*Berhasil/
+      assert html =~ ~r/font-semibold text-red-700[^>]*>\s*Gagal/
+    end
+
+    test "same_status?/2" do
+      t = &%Transaction{status: &1}
+      assert DepositLive.Reconcile.same_status?(t.("failed"), %{status: :refunded})
+      assert DepositLive.Reconcile.same_status?(t.("processing"), %{status: :pending})
+      refute DepositLive.Reconcile.same_status?(t.("success"), %{status: :failed})
+      refute DepositLive.Reconcile.same_status?(t.("success"), nil)
+      refute DepositLive.Reconcile.same_status?(nil, %{status: :success})
+    end
+
+    test "cost_note/1" do
+      row = fn ours, theirs ->
+        %{
+          ours: ours && %{cost: Decimal.new(ours)},
+          theirs: theirs && %{cost: Decimal.new(theirs)}
+        }
+      end
+
+      assert DepositLive.Reconcile.cost_note(row.(5150, 5300)) == "selisih +Rp 150"
+      assert DepositLive.Reconcile.cost_note(row.(5300, 5150)) == "selisih −Rp 150"
+      assert DepositLive.Reconcile.cost_note(row.(5150, 5150)) == nil
+      assert DepositLive.Reconcile.cost_note(row.(5150, nil)) == nil
     end
   end
 

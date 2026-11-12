@@ -13,22 +13,51 @@ defmodule ZahlungsWeb.DepositLive.Reconcile do
   alias Zahlungs.Services.Reconciliation
   alias ZahlungsWeb.ServiceCorrection
 
-  @kind_labels %{
-    follow: "Ikuti SBI",
-    conflict: "Bertentangan",
-    pending_there: "Belum final di SBI",
-    ours_only: "Hanya di Zahlungs",
-    cost_diff: "Selisih modal",
-    theirs_only: "Hanya di SBI",
-    matched: "Cocok"
-  }
+  # Each kind as the admin sees it, most dangerous first: the order of the
+  # chips and the rows. `button` is the row's main button (asks SBI again);
+  # a conflict's main button is Koreksi status instead (see `row_card/1`).
+  @kinds_ui [
+    conflict: %{
+      label: "Bertentangan",
+      tone: :red,
+      hint:
+        "Zahlungs dan SBI sama-sama final tapi berbeda. Samakan dengan SBI; cek status dulu bila ragu.",
+      button: nil
+    },
+    theirs_only: %{
+      label: "Hanya di SBI",
+      tone: :red,
+      hint: "SBI memotong saldo, tapi transaksinya tidak ada di akun ini. Tanyakan ke SBI.",
+      button: nil
+    },
+    follow: %{
+      label: "Belum final di Zahlungs",
+      tone: :amber,
+      hint: "SBI sudah final, Zahlungs masih Diproses.",
+      button: "Ikuti SBI"
+    },
+    ours_only: %{
+      label: "Hanya di Zahlungs",
+      tone: :amber,
+      hint: "Terkirim, tapi tidak ada di riwayat SBI.",
+      button: "Cek status"
+    },
+    pending_there: %{
+      label: "Belum final di SBI",
+      tone: :amber,
+      hint: "SBI belum memberi status akhir.",
+      button: "Cek status"
+    },
+    cost_diff: %{
+      label: "Selisih modal",
+      tone: :amber,
+      hint: "Status sama, modal Zahlungs beda dengan potongan SBI.",
+      button: nil
+    },
+    matched: %{label: "Cocok", tone: :green, hint: nil, button: nil}
+  ]
 
-  @buttons %{
-    follow: "Ikuti SBI",
-    conflict: "Tinjau",
-    pending_there: "Cek status",
-    ours_only: "Cek status"
-  }
+  @kind_order @kinds_ui |> Keyword.keys() |> Enum.with_index() |> Map.new()
 
   @errors %{
     unsupported: "Rekonsiliasi hanya untuk akun api SBI.",
@@ -188,9 +217,8 @@ defmodule ZahlungsWeb.DepositLive.Reconcile do
   def render(assigns) do
     assigns =
       assign(assigns,
-        indexed: if(assigns.rows, do: Enum.with_index(assigns.rows), else: []),
-        kinds: Services.Reconciliation.kinds(),
-        kind_labels: @kind_labels
+        indexed: indexed(assigns.rows),
+        kinds_ui: @kinds_ui
       )
 
     ~H"""
@@ -214,8 +242,15 @@ defmodule ZahlungsWeb.DepositLive.Reconcile do
 
     <section :if={@rows} class="mt-6 space-y-4">
       <div class="flex flex-wrap gap-2 text-sm">
-        <span :for={kind <- @kinds} class="rounded-full border border-gray-200 px-3 py-1">
-          {@kind_labels[kind]} <strong>{@summary.counts[kind]}</strong>
+        <span
+          :for={{kind, ui} <- @kinds_ui}
+          class={[
+            "rounded-full border px-3 py-1",
+            tone_classes(ui.tone),
+            @summary.counts[kind] == 0 && "opacity-50"
+          ]}
+        >
+          {ui.label} <strong>{@summary.counts[kind]}</strong>
         </span>
       </div>
       <dl class="flex flex-wrap gap-x-6 gap-y-1 text-sm">
@@ -256,17 +291,32 @@ defmodule ZahlungsWeb.DepositLive.Reconcile do
   attr :user, :map, required: true
 
   defp row_card(assigns) do
+    row = assigns.row
+    ui = Keyword.fetch!(@kinds_ui, row.kind)
+    actionable? = row.ours != nil and not row.in_review?
+    correct? = row.ours != nil and ServiceCorrection.button?(assigns.user, row.ours)
+
     assigns =
       assign(assigns,
-        label: @kind_labels[assigns.row.kind],
-        button: if(assigns.row.ours && not assigns.row.in_review?, do: @buttons[assigns.row.kind])
+        ui: ui,
+        conflict?: row.kind == :conflict,
+        recheck: if(actionable?, do: ui.button),
+        correct?: correct?,
+        check_sbi?: actionable? and row.kind == :conflict,
+        differs?: not same_status?(row.ours, row.theirs),
+        cost_note: cost_note(row)
       )
 
     ~H"""
-    <li id={"reconcile-row-#{@index}"} class="rounded-lg border border-gray-200 p-4">
+    <li
+      id={"reconcile-row-#{@index}"}
+      class={["rounded-lg border border-l-4 border-gray-200 p-4", edge_class(@ui.tone)]}
+    >
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div class="flex flex-wrap items-center gap-2">
-          <span class="rounded bg-gray-100 px-2 py-0.5 text-xs font-medium">{@label}</span>
+          <span class={["rounded border px-2 py-0.5 text-xs font-medium", tone_classes(@ui.tone)]}>
+            {@ui.label}
+          </span>
           <span :if={@row.in_review?} class="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Sedang ditinjau</span>
         </div>
         <span class="text-sm text-gray-500">{time(@row)}</span>
@@ -274,25 +324,82 @@ defmodule ZahlungsWeb.DepositLive.Reconcile do
       <p class="mt-2 min-w-0 break-words font-medium">{(@row.ours && @row.ours.code) || @row.ref || "Tanpa ref"}</p>
       <p :if={@row.ours && @row.ref} class="min-w-0 break-words text-xs text-gray-500">{@row.ref}</p>
       <p class="min-w-0 break-words text-sm text-gray-600">{product(@row)} · {customer(@row)}</p>
+      <p :if={@ui.hint} class="mt-1 text-sm">{@ui.hint}</p>
       <dl class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-        <div class="min-w-0"><dt class="text-gray-500">Di Zahlungs</dt><dd>{ours_status(@row.ours)}</dd></div>
-        <div class="min-w-0"><dt class="text-gray-500">Di SBI</dt><dd>{theirs_status(@row.theirs)}</dd></div>
+        <div class="min-w-0"><dt class="text-gray-500">Di Zahlungs</dt><dd class={@differs? && "font-semibold text-red-700"}>{ours_status(@row.ours)}</dd></div>
+        <div class="min-w-0"><dt class="text-gray-500">Di SBI</dt><dd class={@differs? && "font-semibold text-red-700"}>{theirs_status(@row.theirs)}</dd></div>
         <div class="min-w-0"><dt class="text-gray-500">Modal</dt><dd>{money(@row.ours && @row.ours.cost)}</dd></div>
-        <div class="min-w-0"><dt class="text-gray-500">Potongan SBI</dt><dd>{money(@row.theirs && @row.theirs.cost)}</dd></div>
+        <div class="min-w-0">
+          <dt class="text-gray-500">Potongan SBI</dt>
+          <dd>{money(@row.theirs && @row.theirs.cost)}</dd>
+          <dd :if={@cost_note} class="text-xs text-red-700">{@cost_note}</dd>
+        </div>
       </dl>
-      <button :if={@button} type="button" phx-click="recheck" phx-value-index={@index} phx-disable-with="Menanyakan SBI..." class="chip mt-3">{@button}</button>
-      <button
-        :if={@row.ours && ServiceCorrection.button?(@user, @row.ours)}
-        type="button"
-        phx-click="review_correction"
-        phx-value-index={@index}
-        class="chip mt-3"
-      >
-        Koreksi status
-      </button>
+      <div :if={@recheck || @correct? || @check_sbi?} class="mt-3 flex flex-wrap gap-2">
+        <%= if @conflict? do %>
+          <.button :if={@correct?} type="button" phx-click="review_correction" phx-value-index={@index}>
+            Koreksi status
+          </.button>
+          <button :if={@check_sbi?} type="button" phx-click="recheck" phx-value-index={@index} phx-disable-with="Menanyakan SBI..." class="chip">
+            Cek status SBI
+          </button>
+        <% else %>
+          <.button :if={@recheck} type="button" phx-click="recheck" phx-value-index={@index} phx-disable-with="Menanyakan SBI...">
+            {@recheck}
+          </.button>
+          <button :if={@correct?} type="button" phx-click="review_correction" phx-value-index={@index} class="chip">
+            Koreksi status
+          </button>
+        <% end %>
+      </div>
     </li>
     """
   end
+
+  # The rows with their index in `@rows` (what the buttons send), most
+  # dangerous kind first; within a kind, the order `Services.reconcile` gave.
+  defp indexed(nil), do: []
+
+  defp indexed(rows),
+    do: rows |> Enum.with_index() |> Enum.sort_by(fn {row, i} -> {@kind_order[row.kind], i} end)
+
+  defp tone_classes(:red), do: "border-red-300 bg-red-50 text-red-800"
+  defp tone_classes(:amber), do: "border-amber-300 bg-amber-50 text-amber-800"
+  defp tone_classes(:green), do: "border-green-300 bg-green-50 text-green-800"
+
+  defp edge_class(:red), do: "border-l-red-400"
+  defp edge_class(:amber), do: "border-l-amber-400"
+  defp edge_class(:green), do: "border-l-green-400"
+
+  @doc false
+  # Whether Zahlungs and SBI say the same: a refund at SBI is a failure, and
+  # a side with no record never matches.
+  def same_status?(nil, _theirs), do: false
+  def same_status?(_ours, nil), do: false
+
+  def same_status?(%{status: ours}, %{status: theirs}),
+    do:
+      {ours, theirs} in [
+        {"success", :success},
+        {"failed", :failed},
+        {"failed", :refunded},
+        {"processing", :pending}
+      ]
+
+  @doc false
+  # "selisih +Rp 150": what SBI charged above (or below, with U+2212) the cost
+  # recorded here; nil when a side has no cost or they agree.
+  def cost_note(%{ours: %{cost: %Decimal{} = ours}, theirs: %{cost: %Decimal{} = theirs}}) do
+    diff = Decimal.sub(theirs, ours)
+
+    case Decimal.compare(diff, 0) do
+      :eq -> nil
+      :gt -> "selisih +" <> format_price(diff)
+      :lt -> "selisih −" <> format_price(Decimal.abs(diff))
+    end
+  end
+
+  def cost_note(_row), do: nil
 
   defp time(row) do
     case (row.ours && row.ours.inserted_at) || (row.theirs && row.theirs.at) do
