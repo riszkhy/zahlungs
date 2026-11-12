@@ -384,6 +384,30 @@ defmodule ZahlungsWeb.DepositLive.ReconcileTest do
       refute html(socket) =~ service.code
       assert html(socket) =~ ~r/phx-value-kind="matched"[^>]*>\s*Cocok\s*<strong>1<\/strong>/
     end
+
+    test "a filter whose rows are gone says so, and its chip still shows all", ctx do
+      service = service!(ctx, status: "processing")
+      StubClient.expect("history", page([sbi_row(service.ref_id, 1)]))
+      StubClient.expect("status", {:ok, 200, %{"data" => sbi_row(service.ref_id, 1)}})
+
+      socket =
+        ctx
+        |> open()
+        |> reconcile()
+        |> event("filter_kind", %{"kind" => "follow"})
+        |> event("recheck", %{"index" => 0})
+
+      assert html(socket) =~ "Tidak ada lagi baris Belum final di Zahlungs."
+      refute html(socket) =~ ~r/phx-value-kind="follow"[^>]*disabled/
+
+      socket = event(socket, "filter_kind", %{"kind" => "follow"})
+      assert socket.assigns.kind_filter == nil
+    end
+
+    test "an event without a kind changes nothing", ctx do
+      socket = open(ctx)
+      assert event(socket, "filter_kind", %{}).assigns.kind_filter == nil
+    end
   end
 
   describe "correcting from the report" do

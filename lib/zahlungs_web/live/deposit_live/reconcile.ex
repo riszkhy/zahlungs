@@ -101,16 +101,21 @@ defmodule ZahlungsWeb.DepositLive.Reconcile do
 
   # A chip shows its kind only; the active chip again shows every row that
   # needs a hand. Only a known kind with rows counts.
+  # The active chip always clears, even once its rows have moved on.
   def handle_event("filter_kind", %{"kind" => text}, socket) do
     with {kind, _ui} <- Enum.find(@kinds_ui, fn {kind, _ui} -> Atom.to_string(kind) == text end),
-         %{counts: counts} <- socket.assigns.summary,
-         true <- Map.get(counts, kind, 0) > 0 do
-      {:noreply,
-       update(socket, :kind_filter, fn current -> if current == kind, do: nil, else: kind end)}
+         %{counts: counts} <- socket.assigns.summary do
+      cond do
+        socket.assigns.kind_filter == kind -> {:noreply, assign(socket, :kind_filter, nil)}
+        Map.get(counts, kind, 0) > 0 -> {:noreply, assign(socket, :kind_filter, kind)}
+        true -> {:noreply, socket}
+      end
     else
       _ -> {:noreply, socket}
     end
   end
+
+  def handle_event("filter_kind", _params, socket), do: {:noreply, socket}
 
   def handle_event("review_correction", %{"index" => index}, socket) do
     with rows when is_list(rows) <- socket.assigns.rows,
@@ -257,7 +262,7 @@ defmodule ZahlungsWeb.DepositLive.Reconcile do
           type="button"
           phx-click="filter_kind"
           phx-value-kind={kind}
-          disabled={@summary.counts[kind] == 0}
+          disabled={@summary.counts[kind] == 0 and @kind_filter != kind}
           aria-pressed={to_string(@kind_filter == kind)}
           class={[
             "rounded-full border px-3 py-1",
@@ -278,6 +283,9 @@ defmodule ZahlungsWeb.DepositLive.Reconcile do
 
       <p :if={@rows != [] and @visible == [] and is_nil(@kind_filter)} class="text-sm text-gray-600">
         Semua transaksi cocok dengan SBI.
+      </p>
+      <p :if={@kind_filter && @visible == []} class="text-sm text-gray-600">
+        Tidak ada lagi baris {Keyword.fetch!(@kinds_ui, @kind_filter).label}.
       </p>
 
       <ul class="space-y-3">
