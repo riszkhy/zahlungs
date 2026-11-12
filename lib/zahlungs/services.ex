@@ -1492,11 +1492,13 @@ defmodule Zahlungs.Services do
   ## Reading
 
   @doc "Gets a service of the scope's store(s); another store's raises `Ecto.NoResultsError`."
-  def get_transaction!(%Scope{} = scope, id) do
-    Repo.one!(
-      from t in for_store(Transaction, scope), where: t.id == ^id, preload: [:store, :user]
-    )
-  end
+  def get_transaction!(%Scope{} = scope, id), do: Repo.one!(transaction_query(scope, id))
+
+  @doc "Like `get_transaction!/2`, but `nil` for a service the scope can't see."
+  def get_transaction(%Scope{} = scope, id), do: Repo.one(transaction_query(scope, id))
+
+  defp transaction_query(scope, id),
+    do: from(t in for_store(Transaction, scope), where: t.id == ^id, preload: [:store, :user])
 
   @doc """
   The services of the scope's store(s), whoever recorded them and whatever

@@ -53,7 +53,7 @@ defmodule ZahlungsWeb.ServiceCorrection do
 
     ~H"""
     <.modal id="correct-service" show on_cancel={JS.push("cancel_correction")}>
-      <div class="flex flex-wrap items-start justify-between gap-2">
+      <div class="flex flex-wrap items-start justify-between gap-2 pr-10">
         <h3 class="text-lg font-semibold">
           {if @to == "failed", do: "Jadikan gagal", else: "Jadikan berhasil"}
         </h3>
