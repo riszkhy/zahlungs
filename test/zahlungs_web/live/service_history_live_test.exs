@@ -244,4 +244,98 @@ defmodule ZahlungsWeb.ServiceHistoryLiveTest do
       assert socket.assigns.page == 2
     end
   end
+
+  describe "correcting a status" do
+    setup %{cashier: cashier, pulsa: pulsa} do
+      {:ok, success} = Services.mark_success(service_fixture(cashier, pulsa), cashier, "SN-1")
+      %{admin: admin_fixture(), success: success}
+    end
+
+    defp status_of(tx), do: Zahlungs.Repo.reload!(tx).status
+
+    defp corrected(socket, id, reason) do
+      socket
+      |> event("review_correction", %{"id" => id})
+      |> event("confirm_correction", %{"reason" => reason, "token_sn" => ""})
+    end
+
+    test "an admin sees the button, a cashier doesn't", ctx do
+      assert ServiceLive.History |> mount_live(ctx.admin) |> html() =~ "Koreksi status"
+      refute ServiceLive.History |> mount_live(ctx.cashier) |> html() =~ "Koreksi status"
+    end
+
+    test "a cashier's event is refused", ctx do
+      ServiceLive.History |> mount_live(ctx.cashier) |> corrected(ctx.success.id, "Tidak masuk")
+      assert status_of(ctx.success) == "success"
+    end
+
+    test "saving needs the popup open", ctx do
+      ServiceLive.History
+      |> mount_live(ctx.admin)
+      |> event("confirm_correction", %{"reason" => "Tidak masuk", "token_sn" => ""})
+
+      assert status_of(ctx.success) == "success"
+    end
+
+    test "a blank reason keeps the popup open", ctx do
+      socket = ServiceLive.History |> mount_live(ctx.admin) |> corrected(ctx.success.id, "  ")
+
+      assert socket.assigns.correcting
+      assert html(socket) =~ "Alasan wajib diisi (maks. 200 karakter)."
+      assert status_of(ctx.success) == "success"
+    end
+
+    test "a saved correction (id as a number)", ctx do
+      socket =
+        ServiceLive.History
+        |> mount_live(ctx.admin)
+        |> corrected(ctx.success.id, "Pulsa tidak masuk")
+
+      assert flash(socket, :info) ==
+               "Status dikoreksi menjadi Gagal. Uang menunggu dikembalikan kasir."
+
+      refute socket.assigns.correcting
+      assert html(socket) =~ "Dikoreksi"
+      assert html(socket) =~ "Pulsa tidak masuk"
+      assert status_of(ctx.success) == "failed"
+    end
+
+    test "a saved correction (id as text)", ctx do
+      ServiceLive.History
+      |> mount_live(ctx.admin)
+      |> corrected("#{ctx.success.id}", "Tidak masuk")
+
+      assert status_of(ctx.success) == "failed"
+    end
+
+    test "all stores", ctx do
+      store = store_fixture()
+      assign_account(store, deposit_account_fixture())
+      there = user_on_shift_fixture(store_id: store.id)
+      {:ok, far} = Services.mark_success(service_fixture(there, ctx.pulsa), there, "SN-2")
+
+      ServiceLive.History
+      |> mount_live(ctx.admin, store: "all")
+      |> corrected(far.id, "Tidak masuk")
+
+      assert status_of(far) == "failed"
+    end
+
+    test "a popup over a changed service", ctx do
+      socket =
+        ServiceLive.History
+        |> mount_live(ctx.admin)
+        |> event("review_correction", %{"id" => ctx.success.id})
+
+      {:ok, _} = Services.correct_status(ctx.admin, ctx.success, "failed", "Tab lain")
+
+      socket =
+        socket
+        |> info({:service_changed, ctx.success.id})
+        |> event("confirm_correction", %{"reason" => "Tidak masuk", "token_sn" => ""})
+
+      assert flash(socket, :error) == "Status transaksi sudah berubah. Muat ulang."
+      assert Zahlungs.Repo.reload!(ctx.success).correction_reason == "Tab lain"
+    end
+  end
 end

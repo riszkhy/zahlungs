@@ -1509,7 +1509,7 @@ defmodule Zahlungs.Services do
     |> transactions_query(opts)
     |> order_by([t], desc: t.inserted_at, desc: t.id)
     |> page(opts[:limit], opts[:offset])
-    |> preload([:store, :user])
+    |> preload([:store, :user, :corrected_by])
     |> Repo.all()
   end
 
