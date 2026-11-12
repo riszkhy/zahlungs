@@ -4,11 +4,13 @@ defmodule ZahlungsWeb.ServiceLive.History do
   paged, by date, status, category, number or code. A cashier sees their
   store's, so a colleague's sale can be found when the customer comes back; an
   admin those of the store picked in the navbar. Only to look: services are
-  marked and refunded on the Layanan screen.
+  marked and refunded on the Layanan screen. An admin may correct a final
+  status here (`ZahlungsWeb.ServiceCorrection`).
   """
   use ZahlungsWeb, :live_view
 
   alias Zahlungs.{LocalTime, Scope, Services, Stores}
+  alias ZahlungsWeb.ServiceCorrection
   alias ZahlungsWeb.ServiceLive.Index, as: Layanan
 
   @per_page 25
@@ -25,6 +27,7 @@ defmodule ZahlungsWeb.ServiceLive.History do
      |> assign(page_title: "Riwayat layanan", page: 1, per_page: @per_page)
      |> assign(from: Date.to_iso8601(Date.beginning_of_month(today)), to: Date.to_iso8601(today))
      |> assign(status: "", category: "", q: "")
+     |> close_correction()
      |> load_transactions()}
   end
 
@@ -47,8 +50,68 @@ defmodule ZahlungsWeb.ServiceLive.History do
     {:noreply, socket |> assign(:page, max(1, to_int(to))) |> load_transactions()}
   end
 
+  def handle_event("review_correction", %{"id" => id}, socket) do
+    with {id, ""} <- Integer.parse(to_string(id)),
+         transaction = Services.get_transaction!(socket.assigns.current_scope, id),
+         true <- ServiceCorrection.button?(socket.assigns.current_user, transaction) do
+      {:noreply, socket |> close_correction() |> assign(:correcting, transaction)}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("cancel_correction", _params, socket),
+    do: {:noreply, close_correction(socket)}
+
+  # Only while the popup is open: a second click on the way does nothing.
+  def handle_event("confirm_correction", _params, %{assigns: %{correcting: nil}} = socket),
+    do: {:noreply, socket}
+
+  def handle_event("confirm_correction", params, socket) do
+    transaction = socket.assigns.correcting
+    reason = params["reason"] || ""
+    token_sn = params["token_sn"] || ""
+
+    result =
+      Services.correct_status(
+        socket.assigns.current_user,
+        transaction,
+        ServiceCorrection.target(transaction),
+        reason,
+        token_sn: token_sn
+      )
+
+    {kind, text} = ServiceCorrection.message(result)
+
+    case result do
+      {:error, error} ->
+        if ServiceCorrection.keep_open?(error) do
+          {:noreply,
+           assign(socket,
+             correction_error: text,
+             correction_reason: reason,
+             correction_token_sn: token_sn
+           )}
+        else
+          {:noreply, socket |> close_correction() |> put_flash(kind, text)}
+        end
+
+      {:ok, _transaction} ->
+        {:noreply, socket |> close_correction() |> put_flash(kind, text) |> load_transactions()}
+    end
+  end
+
   @impl true
   def handle_info({:service_changed, _id}, socket), do: {:noreply, load_transactions(socket)}
+
+  defp close_correction(socket),
+    do:
+      assign(socket,
+        correcting: nil,
+        correction_error: nil,
+        correction_reason: "",
+        correction_token_sn: ""
+      )
 
   defp store_ids(scope) do
     case Scope.store_id(scope) do
@@ -109,6 +172,15 @@ defmodule ZahlungsWeb.ServiceLive.History do
 
   defp cashier(%{user: user}), do: user.name || user.email
 
+  defp corrector(%{corrected_by: %{} = admin}), do: admin.name || admin.email
+  defp corrector(_transaction), do: "admin"
+
+  defp corrected_time(transaction) do
+    transaction.corrected_at
+    |> LocalTime.to_local(transaction.store)
+    |> Calendar.strftime("%d %b %Y %H:%M")
+  end
+
   defp status_label("success"), do: "Berhasil"
   defp status_label("failed"), do: "Gagal"
   defp status_label(_), do: "Diproses"
@@ -129,11 +201,31 @@ defmodule ZahlungsWeb.ServiceLive.History do
   end
 
   attr :transaction, :map, required: true
+  attr :user, :map, required: true
+
+  defp correct_button(assigns) do
+    ~H"""
+    <button
+      :if={ServiceCorrection.button?(@user, @transaction)}
+      type="button"
+      phx-click="review_correction"
+      phx-value-id={@transaction.id}
+      class="mt-1 block text-xs text-blue-600 hover:underline"
+    >
+      Koreksi status
+    </button>
+    """
+  end
+
+  attr :transaction, :map, required: true
 
   defp outcome(assigns) do
     ~H"""
     <span :if={@transaction.token_sn} class="block break-words text-xs text-gray-500">
       Token / SN: {Layanan.token_text(@transaction.token_sn)}
+    </span>
+    <span :if={@transaction.corrected_at} class="block break-words text-xs text-gray-600">
+      Dikoreksi {corrector(@transaction)}, {corrected_time(@transaction)}: {@transaction.correction_reason}
     </span>
     <span :if={@transaction.review_reason} class="block text-xs font-medium text-amber-700">
       Perlu ditinjau — admin akan meninjau
@@ -218,6 +310,7 @@ defmodule ZahlungsWeb.ServiceLive.History do
         <span class="text-right">
           <span class="block font-semibold">{format_price(tx.price)}</span>
           <.status_badge transaction={tx} />
+          <.correct_button transaction={tx} user={@current_user} />
         </span>
       </div>
     </div>
@@ -234,11 +327,20 @@ defmodule ZahlungsWeb.ServiceLive.History do
         <:col :let={tx} label="Status">
           <.status_badge transaction={tx} />
           <.outcome transaction={tx} />
+          <.correct_button transaction={tx} user={@current_user} />
         </:col>
       </.table>
     </div>
 
     <.pagination page={@page} per_page={@per_page} total={@total} noun="transaksi" />
+
+    <ServiceCorrection.popup
+      :if={@correcting}
+      transaction={@correcting}
+      error={@correction_error}
+      reason={@correction_reason}
+      token_sn={@correction_token_sn}
+    />
     """
   end
 end

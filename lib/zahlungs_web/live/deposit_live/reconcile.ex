@@ -4,11 +4,14 @@ defmodule ZahlungsWeb.DepositLive.Reconcile do
   history for one day (`Services.reconcile/3`), admin only. SBI is asked only
   when the admin presses Cocokkan, never on opening the page. A row's button
   asks SBI about that service again (`Services.recheck_row/2`, which never
-  sends a payment) and updates that row only.
+  sends a payment) and updates that row only. An admin may also correct a
+  row's service by hand (`ZahlungsWeb.ServiceCorrection`), without asking SBI.
   """
   use ZahlungsWeb, :live_view
 
   alias Zahlungs.{Deposits, LocalTime, Services}
+  alias Zahlungs.Services.Reconciliation
+  alias ZahlungsWeb.ServiceCorrection
 
   @kind_labels %{
     follow: "Ikuti SBI",
@@ -43,7 +46,8 @@ defmodule ZahlungsWeb.DepositLive.Reconcile do
      |> assign(:account, Deposits.get_account!(id))
      |> assign(:date, Date.to_iso8601(Date.add(LocalTime.today(), -1)))
      |> assign(:max_date, Date.to_iso8601(LocalTime.today()))
-     |> assign(rows: nil, summary: nil, error: nil, show_matched: false)}
+     |> assign(rows: nil, summary: nil, error: nil, show_matched: false)
+     |> close_correction()}
   end
 
   @impl true
@@ -69,6 +73,68 @@ defmodule ZahlungsWeb.DepositLive.Reconcile do
   def handle_event("toggle_matched", _params, socket),
     do: {:noreply, update(socket, :show_matched, &(not &1))}
 
+  def handle_event("review_correction", %{"index" => index}, socket) do
+    with rows when is_list(rows) <- socket.assigns.rows,
+         {:ok, i} <- parse_index(index, length(rows)),
+         %{ours: %{} = transaction} <- Enum.at(rows, i),
+         true <- ServiceCorrection.button?(socket.assigns.current_user, transaction) do
+      {:noreply,
+       socket |> close_correction() |> assign(:correcting, %{index: i, transaction: transaction})}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("cancel_correction", _params, socket),
+    do: {:noreply, close_correction(socket)}
+
+  # Only while the popup is open: a second click on the way does nothing.
+  def handle_event("confirm_correction", _params, %{assigns: %{correcting: nil}} = socket),
+    do: {:noreply, socket}
+
+  def handle_event("confirm_correction", params, socket) do
+    %{index: i, transaction: transaction} = socket.assigns.correcting
+    reason = params["reason"] || ""
+    token_sn = params["token_sn"] || ""
+
+    result =
+      Services.correct_status(
+        socket.assigns.current_user,
+        transaction,
+        ServiceCorrection.target(transaction),
+        reason,
+        token_sn: token_sn
+      )
+
+    {kind, text} = ServiceCorrection.message(result)
+
+    case result do
+      {:ok, corrected} ->
+        rows = socket.assigns.rows
+
+        rows =
+          List.replace_at(rows, i, Reconciliation.classify(corrected, Enum.at(rows, i).theirs))
+
+        {:noreply,
+         socket
+         |> close_correction()
+         |> assign(rows: rows, summary: Services.reconciliation_summary(rows))
+         |> put_flash(kind, text)}
+
+      {:error, error} ->
+        if ServiceCorrection.keep_open?(error) do
+          {:noreply,
+           assign(socket,
+             correction_error: text,
+             correction_reason: reason,
+             correction_token_sn: token_sn
+           )}
+        else
+          {:noreply, socket |> close_correction() |> put_flash(kind, text)}
+        end
+    end
+  end
+
   def handle_event("recheck", %{"index" => index}, socket) do
     with rows when is_list(rows) <- socket.assigns.rows,
          {:ok, i} <- parse_index(index, length(rows)),
@@ -89,6 +155,15 @@ defmodule ZahlungsWeb.DepositLive.Reconcile do
       _ -> {:noreply, socket}
     end
   end
+
+  defp close_correction(socket),
+    do:
+      assign(socket,
+        correcting: nil,
+        correction_error: nil,
+        correction_reason: "",
+        correction_token_sn: ""
+      )
 
   defp parse_index(index, count) when is_integer(index) and index >= 0 and index < count,
     do: {:ok, index}
@@ -151,7 +226,7 @@ defmodule ZahlungsWeb.DepositLive.Reconcile do
       <p :if={@rows == []} class="text-sm text-gray-600">Tidak ada transaksi pada tanggal ini.</p>
 
       <ul class="space-y-3">
-        <.row_card :for={{row, index} <- @indexed} :if={row.kind != :matched} row={row} index={index} />
+        <.row_card :for={{row, index} <- @indexed} :if={row.kind != :matched} row={row} index={index} user={@current_user} />
       </ul>
 
       <div :if={@summary.counts.matched > 0}>
@@ -161,15 +236,24 @@ defmodule ZahlungsWeb.DepositLive.Reconcile do
             else: "Lihat yang cocok (#{@summary.counts.matched})"}
         </button>
         <ul :if={@show_matched} class="mt-3 space-y-3">
-          <.row_card :for={{row, index} <- @indexed} :if={row.kind == :matched} row={row} index={index} />
+          <.row_card :for={{row, index} <- @indexed} :if={row.kind == :matched} row={row} index={index} user={@current_user} />
         </ul>
       </div>
     </section>
+
+    <ServiceCorrection.popup
+      :if={@correcting}
+      transaction={@correcting.transaction}
+      error={@correction_error}
+      reason={@correction_reason}
+      token_sn={@correction_token_sn}
+    />
     """
   end
 
   attr :row, :map, required: true
   attr :index, :integer, required: true
+  attr :user, :map, required: true
 
   defp row_card(assigns) do
     assigns =
@@ -197,6 +281,15 @@ defmodule ZahlungsWeb.DepositLive.Reconcile do
         <div class="min-w-0"><dt class="text-gray-500">Potongan SBI</dt><dd>{money(@row.theirs && @row.theirs.cost)}</dd></div>
       </dl>
       <button :if={@button} type="button" phx-click="recheck" phx-value-index={@index} phx-disable-with="Menanyakan SBI..." class="chip mt-3">{@button}</button>
+      <button
+        :if={@row.ours && ServiceCorrection.button?(@user, @row.ours)}
+        type="button"
+        phx-click="review_correction"
+        phx-value-index={@index}
+        class="chip mt-3"
+      >
+        Koreksi status
+      </button>
     </li>
     """
   end

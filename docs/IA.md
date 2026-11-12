@@ -40,7 +40,7 @@ Aturan akses berlapis (router):
 │   ├── /services               Layanan PPOB: catat pulsa/paket/token/tagihan (PLN, BPJS, PDAM…),
 │   │     │                     lalu tandai berhasil (token/SN) atau gagal
 │   │     ├── /services/history       Riwayat layanan: semua transaksi cabang (filter tanggal, status,
-│   │     │                           kategori, cari nomor/kode, paginasi)
+│   │     │                           kategori, cari nomor/kode, paginasi); admin: Koreksi status
 │   │     └── /services/:id/receipt   Struk layanan versi cetak
 │   ├── /commissions            Komisi saya (kasir): komisi layanan sukses yang dicatat sendiri
 │   ├── /catalog                Katalog produk (browse, cari, filter, paginasi)
@@ -410,7 +410,14 @@ Berlaku bila akun deposit toko bermode **API** (diatur di `/admin/deposits`).
   Ringkasan: jumlah per golongan, total selisih modal, potongan tanpa transaksi
   Zahlungs. Tombol **Ikuti SBI** / **Tinjau** / **Cek status** menanyakan status
   ke SBI untuk satu layanan, tidak pernah mengirim pembayaran; yang bertentangan
-  masuk Perlu ditinjau dan diputuskan di halaman akun deposit.
+  masuk Perlu ditinjau dan diputuskan di halaman akun deposit. Admin juga bisa
+  **Koreksi status** dari baris itu, tanpa menanyai SBI.
+- **Koreksi status** (admin, di Riwayat layanan dan Rekonsiliasi): status final
+  berhasil → gagal (uang masuk Perlu dikembalikan, juga untuk layanan manual)
+  atau gagal → berhasil (hanya bila uangnya belum dikembalikan; SN opsional).
+  Alasan wajib (maks. 200 karakter); kartu riwayat menampilkan "Dikoreksi
+  {admin}, {waktu}: {alasan}". SBI tidak ditanya; jawaban SBI yang bertentangan
+  sesudahnya masuk Perlu ditinjau.
 - **/admin/services**: **Cari di daftar SBI** di form produk (mengisi kode,
   nama, modal, kategori; semua item grup "PPOB" SBI disarankan sebagai
   kategori Tagihan, dengan admin dan komisi SBI); kolom **Biaya tambahan toko

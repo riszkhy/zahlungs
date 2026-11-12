@@ -79,6 +79,7 @@ defmodule Zahlungs.MonitoringTest do
       channel: Map.get(attrs, :channel, "manual"),
       refunded_at: attrs[:refunded_at],
       review_reason: attrs[:review_reason],
+      corrected_at: attrs[:corrected_at],
       inserted_at: attrs.at,
       updated_at: attrs.at
     })
@@ -311,6 +312,13 @@ defmodule Zahlungs.MonitoringTest do
       assert row.stuck == 1
       assert hd(row.stores).stuck == 1
       assert row.problem?
+    end
+
+    test "a manual service failed by a correction is due a refund too" do
+      a = shop()
+      service!(a, channel: "manual", status: "failed", corrected_at: ago(60), at: ago(3600))
+
+      assert row_of(overview(), a.org).refunds_due == 1
     end
 
     test "a failed api service is due a refund until refunded, unless in review" do

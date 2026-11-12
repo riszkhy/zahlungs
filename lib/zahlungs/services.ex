@@ -1321,12 +1321,7 @@ defmodule Zahlungs.Services do
        when is_binary(reason) do
     transaction
     |> reviewed(admin)
-    |> Ecto.Changeset.change(
-      status: "failed",
-      failure_reason: reason,
-      resolved_at: now(),
-      failed_after_shift_close: shift_closed?(transaction)
-    )
+    |> Ecto.Changeset.change(fail_changes(transaction, reason))
     |> Repo.update()
   end
 
@@ -1338,13 +1333,7 @@ defmodule Zahlungs.Services do
        when is_binary(reason) do
     transaction
     |> reviewed(admin)
-    |> Ecto.Changeset.change(
-      status: "success",
-      failure_reason: nil,
-      provider_message: nil,
-      failed_after_shift_close: false,
-      resolved_at: now()
-    )
+    |> Ecto.Changeset.change(succeed_changes())
     |> Repo.update()
   end
 
@@ -1356,6 +1345,134 @@ defmodule Zahlungs.Services do
       reviewed_at: now(),
       reviewed_by_id: admin.id
     )
+  end
+
+  # A final status turned round, by a review or an admin's correction. A
+  # failure's money waits to go back (see `Transaction.awaiting_refund?/1`);
+  # on a closed shift it keeps counting there and is refunded from another.
+  defp fail_changes(transaction, reason) do
+    [
+      status: "failed",
+      failure_reason: reason,
+      resolved_at: now(),
+      failed_after_shift_close: shift_closed?(transaction)
+    ]
+  end
+
+  defp succeed_changes do
+    [
+      status: "success",
+      failure_reason: nil,
+      provider_message: nil,
+      failed_after_shift_close: false,
+      resolved_at: now()
+    ]
+  end
+
+  ## Corrections
+
+  @correction_reason_max 200
+
+  @doc """
+  An admin turns a service's final status round: `"failed"` (a success the
+  customer didn't get: its money then waits to go back, as in
+  `Transaction.awaiting_refund?/1`) or `"success"` (a failure that was served,
+  only while its money hasn't gone back; `opts[:token_sn]` fills the SN). The
+  same changes as `resolve_review/3`, plus who corrected it, when and why
+  (`reason`, 1–#{@correction_reason_max} characters). The provider is neither
+  asked nor told. Locks the row and checks it again there.
+
+  The role is read from the database; a service outside the admin's
+  organization raises `Ecto.NoResultsError`. Returns `{:ok, transaction}` or
+  `{:error, :not_admin | :not_final | :same_status | :refunded | :in_review |
+  :reason_required | :invalid_token_sn}`, changing nothing.
+  """
+  def correct_status(%User{} = admin, %Transaction{id: id}, to, reason, opts \\ [])
+      when to in ["failed", "success"] do
+    with :ok <- check_correcting_admin(admin),
+         %Transaction{} <-
+           Repo.one!(
+             from t in Transaction, where: t.id == ^id and t.store_id in ^Stores.store_ids()
+           ),
+         {:ok, reason} <- correction_reason(reason),
+         {:ok, token_sn} <- correction_token_sn(opts[:token_sn]) do
+      fn -> correct_locked(id, admin, to, reason, token_sn) end
+      |> Repo.transaction()
+      |> tap(fn
+        {:ok, transaction} -> broadcast(transaction)
+        _ -> :ok
+      end)
+    end
+  end
+
+  @doc "Whether an admin may correct this service's status now (`correct_status/5`)."
+  def correctable?(%Transaction{review_reason: reason}) when is_binary(reason), do: false
+  def correctable?(%Transaction{status: "success"}), do: true
+  def correctable?(%Transaction{} = transaction), do: Transaction.awaiting_refund?(transaction)
+
+  defp correct_locked(id, admin, to, reason, token_sn) do
+    case correct(lock_transaction(id), admin, to, reason, token_sn) do
+      {:ok, transaction} -> transaction
+      {:error, error} -> Repo.rollback(error)
+    end
+  end
+
+  defp check_correcting_admin(admin) do
+    if Accounts.admin?(Accounts.get_user!(admin.id)), do: :ok, else: {:error, :not_admin}
+  end
+
+  defp correction_reason(reason) when is_binary(reason) do
+    reason = String.trim(reason)
+
+    if reason != "" and String.length(reason) <= @correction_reason_max,
+      do: {:ok, reason},
+      else: {:error, :reason_required}
+  end
+
+  defp correction_reason(_reason), do: {:error, :reason_required}
+
+  defp correction_token_sn(sn) when is_binary(sn) do
+    sn = String.trim(sn)
+
+    cond do
+      sn == "" -> {:ok, nil}
+      String.length(sn) <= 64 -> {:ok, sn}
+      true -> {:error, :invalid_token_sn}
+    end
+  end
+
+  defp correction_token_sn(_sn), do: {:ok, nil}
+
+  defp correct(%Transaction{review_reason: review}, _admin, _to, _reason, _sn)
+       when is_binary(review),
+       do: {:error, :in_review}
+
+  defp correct(%Transaction{status: "processing"}, _admin, _to, _reason, _sn),
+    do: {:error, :not_final}
+
+  defp correct(%Transaction{status: to}, _admin, to, _reason, _sn), do: {:error, :same_status}
+
+  defp correct(%Transaction{status: "success"} = transaction, admin, "failed", reason, _sn),
+    do: corrected(transaction, admin, reason, fail_changes(transaction, reason))
+
+  defp correct(%Transaction{status: "failed"} = transaction, admin, "success", reason, sn) do
+    if Transaction.awaiting_refund?(transaction) do
+      changes = if sn, do: [{:token_sn, sn} | succeed_changes()], else: succeed_changes()
+      corrected(transaction, admin, reason, changes)
+    else
+      {:error, :refunded}
+    end
+  end
+
+  defp corrected(transaction, admin, reason, changes) do
+    transaction
+    |> Ecto.Changeset.change(changes)
+    |> Ecto.Changeset.change(
+      corrected_at: now(),
+      corrected_by_id: admin.id,
+      correction_reason: reason
+    )
+    |> Repo.update()
   end
 
   @doc "A service of a deposit account; another account's raises `Ecto.NoResultsError`."
@@ -1394,7 +1511,7 @@ defmodule Zahlungs.Services do
     |> transactions_query(opts)
     |> order_by([t], desc: t.inserted_at, desc: t.id)
     |> page(opts[:limit], opts[:offset])
-    |> preload([:store, :user])
+    |> preload([:store, :user, :corrected_by])
     |> Repo.all()
   end
 
@@ -1460,15 +1577,19 @@ defmodule Zahlungs.Services do
   a `refund` cash-out there (see `confirm_refund/2`).
   """
   def shift_totals(%Shift{id: shift_id}) do
+    in_drawer =
+      dynamic(
+        [t],
+        t.shift_id == ^shift_id and
+          (t.status in ["processing", "success"] or
+             (t.status == "failed" and t.failed_after_shift_close) or
+             ^Transaction.awaiting_refund())
+      )
+
     row =
       Repo.one(
         from t in Transaction,
-          where:
-            t.shift_id == ^shift_id and
-              (t.status in ["processing", "success"] or
-                 (t.status == "failed" and
-                    (t.failed_after_shift_close or
-                       (t.channel == "api" and is_nil(t.refunded_at))))),
+          where: ^in_drawer,
           select: %{
             count: count(t.id),
             total: coalesce(sum(t.price), 0),
@@ -1568,20 +1689,21 @@ defmodule Zahlungs.Services do
 
   ## Refunds (Fase 1)
 
-  @doc "Failed api services of the scope's store(s) whose money hasn't been handed back yet."
+  @doc """
+  The services of the scope's store(s) whose money is waiting to go back to
+  the customer (`Transaction.awaiting_refund?/1`), except those in review.
+  """
   def list_refunds_due(%Scope{} = scope) do
     Repo.all(
       from t in for_store(Transaction, scope),
-        where:
-          t.channel == "api" and t.status == "failed" and is_nil(t.refunded_at) and
-            is_nil(t.review_reason),
+        where: ^dynamic([t], ^Transaction.awaiting_refund() and is_nil(t.review_reason)),
         order_by: [desc: t.resolved_at, desc: t.id]
     )
   end
 
   @doc """
-  A cashier confirms the money of a failed api service went back to the
-  customer, on their open shift in the service's store. Cash refunded on the
+  A cashier confirms the money of a service waiting for it
+  (`Transaction.awaiting_refund?/1`) went back to the customer, on their open shift in the service's store. Cash refunded on the
   service's own shift simply leaves that drawer (the shift stops counting it).
   Cash refunded on any other shift — a later one, or a colleague's — is booked
   as a `refund` cash-out there, and the service keeps counting in its own
@@ -1611,10 +1733,13 @@ defmodule Zahlungs.Services do
   defp refund(%Transaction{review_reason: reason}, _user) when is_binary(reason),
     do: {:error, :in_review}
 
-  defp refund(
-         %Transaction{channel: "api", status: "failed", refunded_at: nil} = transaction,
-         user
-       ) do
+  defp refund(%Transaction{} = transaction, user) do
+    if Transaction.awaiting_refund?(transaction),
+      do: refund_on_shift(transaction, user),
+      else: {:error, :not_refundable}
+  end
+
+  defp refund_on_shift(transaction, user) do
     with {:ok, shift} <- Shifts.lock_current_shift(user),
          :ok <- same_store(shift, transaction),
          {:ok, changes} <- refund_from_drawer(shift, transaction) do
@@ -1623,8 +1748,6 @@ defmodule Zahlungs.Services do
       |> Repo.update()
     end
   end
-
-  defp refund(_transaction, _user), do: {:error, :not_refundable}
 
   defp same_store(%Shift{store_id: store_id}, %Transaction{store_id: store_id}), do: :ok
   defp same_store(_shift, _transaction), do: {:error, :other_store}
