@@ -1460,15 +1460,19 @@ defmodule Zahlungs.Services do
   a `refund` cash-out there (see `confirm_refund/2`).
   """
   def shift_totals(%Shift{id: shift_id}) do
+    in_drawer =
+      dynamic(
+        [t],
+        t.shift_id == ^shift_id and
+          (t.status in ["processing", "success"] or
+             (t.status == "failed" and t.failed_after_shift_close) or
+             ^Transaction.awaiting_refund())
+      )
+
     row =
       Repo.one(
         from t in Transaction,
-          where:
-            t.shift_id == ^shift_id and
-              (t.status in ["processing", "success"] or
-                 (t.status == "failed" and
-                    (t.failed_after_shift_close or
-                       (t.channel == "api" and is_nil(t.refunded_at))))),
+          where: ^in_drawer,
           select: %{
             count: count(t.id),
             total: coalesce(sum(t.price), 0),
@@ -1568,20 +1572,21 @@ defmodule Zahlungs.Services do
 
   ## Refunds (Fase 1)
 
-  @doc "Failed api services of the scope's store(s) whose money hasn't been handed back yet."
+  @doc """
+  The services of the scope's store(s) whose money is waiting to go back to
+  the customer (`Transaction.awaiting_refund?/1`), except those in review.
+  """
   def list_refunds_due(%Scope{} = scope) do
     Repo.all(
       from t in for_store(Transaction, scope),
-        where:
-          t.channel == "api" and t.status == "failed" and is_nil(t.refunded_at) and
-            is_nil(t.review_reason),
+        where: ^dynamic([t], ^Transaction.awaiting_refund() and is_nil(t.review_reason)),
         order_by: [desc: t.resolved_at, desc: t.id]
     )
   end
 
   @doc """
-  A cashier confirms the money of a failed api service went back to the
-  customer, on their open shift in the service's store. Cash refunded on the
+  A cashier confirms the money of a service waiting for it
+  (`Transaction.awaiting_refund?/1`) went back to the customer, on their open shift in the service's store. Cash refunded on the
   service's own shift simply leaves that drawer (the shift stops counting it).
   Cash refunded on any other shift — a later one, or a colleague's — is booked
   as a `refund` cash-out there, and the service keeps counting in its own
@@ -1611,10 +1616,13 @@ defmodule Zahlungs.Services do
   defp refund(%Transaction{review_reason: reason}, _user) when is_binary(reason),
     do: {:error, :in_review}
 
-  defp refund(
-         %Transaction{channel: "api", status: "failed", refunded_at: nil} = transaction,
-         user
-       ) do
+  defp refund(%Transaction{} = transaction, user) do
+    if Transaction.awaiting_refund?(transaction),
+      do: refund_on_shift(transaction, user),
+      else: {:error, :not_refundable}
+  end
+
+  defp refund_on_shift(transaction, user) do
     with {:ok, shift} <- Shifts.lock_current_shift(user),
          :ok <- same_store(shift, transaction),
          {:ok, changes} <- refund_from_drawer(shift, transaction) do
@@ -1623,8 +1631,6 @@ defmodule Zahlungs.Services do
       |> Repo.update()
     end
   end
-
-  defp refund(_transaction, _user), do: {:error, :not_refundable}
 
   defp same_store(%Shift{store_id: store_id}, %Transaction{store_id: store_id}), do: :ok
   defp same_store(_shift, _transaction), do: {:error, :other_store}

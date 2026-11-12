@@ -9,6 +9,7 @@ defmodule Zahlungs.Services.Transaction do
   """
   use Ecto.Schema
   import Ecto.Changeset
+  import Ecto.Query, only: [dynamic: 2]
 
   @statuses ~w(processing success failed)
 
@@ -52,6 +53,9 @@ defmodule Zahlungs.Services.Transaction do
     # An answer that contradicts the final status, for an admin to decide.
     field :review_reason, :string
     field :reviewed_at, :naive_datetime
+    # An admin's last correction of a final status (`Services.correct_status/5`).
+    field :corrected_at, :naive_datetime
+    field :correction_reason, :string
     # The cashier commission of the category when recorded, a percent or an
     # amount (the other is 0; both 0 when not recorded by a cashier). Never cast;
     # see `Zahlungs.Services.Commissions`.
@@ -61,6 +65,7 @@ defmodule Zahlungs.Services.Transaction do
     belongs_to :service_inquiry, Zahlungs.Services.Inquiry
     belongs_to :refunded_by, Zahlungs.Accounts.User
     belongs_to :reviewed_by, Zahlungs.Accounts.User
+    belongs_to :corrected_by, Zahlungs.Accounts.User
 
     belongs_to :store, Zahlungs.Stores.Store
     belongs_to :shift, Zahlungs.Shifts.Shift
@@ -73,6 +78,26 @@ defmodule Zahlungs.Services.Transaction do
   end
 
   def statuses, do: @statuses
+
+  @doc """
+  Whether a failed service's money is still waiting to go back to the
+  customer (and so still in its drawer): an api failure until a cashier
+  confirms the refund, and a manual one only when an admin's correction failed
+  it. A manual service marked failed was handed back on the spot.
+  """
+  def awaiting_refund?(%__MODULE__{status: "failed", refunded_at: nil} = transaction),
+    do: transaction.channel == "api" or not is_nil(transaction.corrected_at)
+
+  def awaiting_refund?(%__MODULE__{}), do: false
+
+  @doc "`awaiting_refund?/1` as a query condition on the first binding."
+  def awaiting_refund do
+    dynamic(
+      [t],
+      t.status == "failed" and is_nil(t.refunded_at) and
+        (t.channel == "api" or not is_nil(t.corrected_at))
+    )
+  end
 
   @doc """
   Only the customer's number (phone, meter or customer ID) and the payment

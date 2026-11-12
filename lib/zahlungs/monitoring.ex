@@ -283,11 +283,7 @@ defmodule Zahlungs.Monitoring do
 
   # The same rule as `Services.list_refunds_due/1`.
   defp refund_due do
-    dynamic(
-      [t],
-      t.channel == "api" and t.status == "failed" and is_nil(t.refunded_at) and
-        is_nil(t.review_reason)
-    )
+    dynamic([t], ^Transaction.awaiting_refund() and is_nil(t.review_reason))
   end
 
   defp in_review, do: dynamic([t], not is_nil(t.review_reason))
