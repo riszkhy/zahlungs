@@ -726,6 +726,51 @@ defmodule ZahlungsWeb.CashierLiveTest do
     end
   end
 
+  describe "md3 dialogs" do
+    setup do
+      user = user_on_shift_fixture()
+      product = product_fixture(price: Decimal.new("1000"), stock: 10)
+
+      socket =
+        CashierLive
+        |> mount_live(user)
+        |> event("scan", %{"q" => product.sku})
+        |> event("set_amount_paid", %{"value" => "1000"})
+
+      %{socket: socket}
+    end
+
+    test "confirm sale: Batal comes first, inside the dialog content", %{socket: socket} do
+      html = socket |> event("review_checkout") |> html()
+      assert html =~ ~r/id="confirm-sale-content".*cancel_checkout.*Ya, selesaikan/s
+      assert html =~ "rounded-md3-xl"
+    end
+
+    test "receipt: actions at the bottom, New Transaction filled", %{socket: socket} do
+      html = socket |> event("review_checkout") |> event("confirm_checkout") |> html()
+      assert html =~ ~r/id="receipt-modal-content".*Print receipt.*New Transaction/s
+
+      assert html =~
+               ~r/bg-primary[^"]*"[^>]*phx-click="new_sale"|phx-click="new_sale"[^>]*bg-primary/
+    end
+
+    test "close shift: the button is the danger variant", %{socket: socket} do
+      html = socket |> event("toggle_close") |> html()
+      assert html =~ ~r/id="close-shift-modal-content"/
+      assert html =~ ~r/bg-error[^>]*>\s*Close shift/
+    end
+
+    test "movement: the amount keeps its id and hook", %{socket: socket} do
+      html = socket |> event("toggle_movement") |> html()
+      assert html =~ ~r/id="movement-modal-content"/
+
+      assert html =~
+               ~r/id="movement-amount-input"[^>]*phx-hook="MoneyInput"|phx-hook="MoneyInput"[^>]*id="movement-amount-input"/
+
+      assert html =~ ~s(<select name="category")
+    end
+  end
+
   describe "cash movements and closing the shift" do
     setup do
       user = user_fixture()

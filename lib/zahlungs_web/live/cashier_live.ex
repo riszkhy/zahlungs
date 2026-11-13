@@ -1520,17 +1520,17 @@ defmodule ZahlungsWeb.CashierLive do
       </div>
     </div>
 
-    <.modal :if={@confirming_sale} id="confirm-sale" show on_cancel={JS.push("cancel_checkout")}>
-      <h3 class="text-lg font-semibold">Konfirmasi penjualan</h3>
-      <p class="mt-1 text-sm text-gray-500">Periksa barang dan pembayaran sebelum melanjutkan.</p>
+    <.md_dialog :if={@confirming_sale} id="confirm-sale" show on_cancel={JS.push("cancel_checkout")}>
+      <:title>Konfirmasi penjualan</:title>
+      <p class="mt-1 text-body-md text-on-surface-variant">Periksa barang dan pembayaran sebelum melanjutkan.</p>
 
       <div class="mt-3 max-h-60 overflow-y-auto">
-        <table class="w-full text-sm">
-          <tr :for={item <- @priced_cart} class="border-t border-gray-100">
+        <table class="w-full text-body-md">
+          <tr :for={item <- @priced_cart} class="border-t border-outline-variant">
             <td class="py-2">
               <p class="font-medium">{item.name}</p>
-              <p class="text-xs text-gray-500">{item.quantity} × {format_money(item.unit_price)}</p>
-              <p :if={item.promotion_name} class="text-xs text-amber-700">
+              <p class="text-body-sm text-on-surface-variant">{item.quantity} × {format_money(item.unit_price)}</p>
+              <p :if={item.promotion_name} class="text-body-sm text-warning">
                 {item.promotion_name} −{format_money(item.discount)}
               </p>
             </td>
@@ -1539,7 +1539,7 @@ defmodule ZahlungsWeb.CashierLive do
         </table>
       </div>
 
-      <dl class="mt-3 space-y-1 border-t border-gray-200 pt-3 text-sm">
+      <dl class="mt-3 space-y-1 border-t border-outline-variant pt-3 text-body-md">
         <.receipt_row
           :if={Decimal.gt?(@promo_saving, 0)}
           label="Hemat promo"
@@ -1565,149 +1565,155 @@ defmodule ZahlungsWeb.CashierLive do
       </dl>
 
       <%!-- Batal comes first: the popup focuses it, so a scanner's Enter sells nothing. --%>
-      <div class="mt-6 flex justify-end gap-2">
-        <button type="button" phx-click="cancel_checkout" class="chip">Batal</button>
-        <.button phx-click="confirm_checkout" phx-disable-with="Menyimpan...">Ya, selesaikan</.button>
-      </div>
-    </.modal>
+      <:actions>
+        <.md_button variant="text" type="button" phx-click="cancel_checkout">Batal</.md_button>
+        <.md_button type="button" phx-click="confirm_checkout" phx-disable-with="Menyimpan...">
+          Ya, selesaikan
+        </.md_button>
+      </:actions>
+    </.md_dialog>
 
-    <.modal :if={@last_sale} id="receipt-modal" show on_cancel={JS.push("new_sale")}>
-      <h3 class="text-lg font-semibold text-center">Transaction complete</h3>
-      <p class="text-center text-sm text-gray-500">Receipt {@last_sale.code}</p>
+    <.md_dialog :if={@last_sale} id="receipt-modal" show on_cancel={JS.push("new_sale")}>
+      <:title>Transaction complete</:title>
+      <p class="text-body-md text-on-surface-variant">Receipt {@last_sale.code}</p>
 
       <.sale_receipt sale={@last_sale} customer_balance={@last_sale_balance} />
 
-      <div class="mt-6 flex items-center justify-between gap-3">
-        <.link href={~p"/sales/#{@last_sale.id}/receipt"} target="_blank" class="btn btn-sm btn-link">
+      <:actions>
+        <.link
+          href={~p"/sales/#{@last_sale.id}/receipt"}
+          target="_blank"
+          class="md-state inline-flex h-10 items-center rounded-full px-3 text-label-lg text-primary"
+        >
           Print receipt
         </.link>
-        <div class="flex items-center gap-2">
-          <.link navigate={~p"/sales/#{@last_sale.id}"} class="btn btn-sm btn-link text-amber-700">
-            Koreksi / batalkan
-          </.link>
-          <.button phx-click="new_sale">New Transaction</.button>
-        </div>
-      </div>
-    </.modal>
+        <.link
+          navigate={~p"/sales/#{@last_sale.id}"}
+          class="md-state inline-flex h-10 items-center rounded-full px-3 text-label-lg text-warning"
+        >
+          Koreksi / batalkan
+        </.link>
+        <.md_button type="button" phx-click="new_sale">New Transaction</.md_button>
+      </:actions>
+    </.md_dialog>
 
-    <.modal :if={@closing and @summary} id="close-shift-modal" show on_cancel={JS.push("toggle_close")}>
-      <h3 class="text-lg font-semibold">Close shift</h3>
+    <.md_dialog :if={@closing and @summary} id="close-shift-modal" show on_cancel={JS.push("toggle_close")}>
+      <:title>Close shift</:title>
 
-      <p :if={@services_processing > 0} class="mt-3 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+      <p
+        :if={@services_processing > 0}
+        class="mt-3 rounded-md3-md bg-warning-container p-3 text-body-md text-on-warning-container"
+      >
         Masih ada {@services_processing} layanan berstatus diproses. Tandai hasilnya dulu di
         <.link navigate={~p"/services"} class="font-medium underline">Layanan</.link>.
       </p>
 
-      <p :if={@held_count > 0} class="mt-3 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+      <p :if={@held_count > 0} class="mt-3 rounded-md3-md bg-warning-container p-3 text-body-md text-on-warning-container">
         Ada {@held_count} keranjang tertunda di toko ini. Keranjang tetap tersimpan.
       </p>
 
-      <dl class="mt-4 space-y-1 text-sm">
-        <div class="flex justify-between"><dt>Opening cash</dt><dd>{format_money(@summary.opening_cash)}</dd></div>
-        <div class="flex justify-between"><dt>Transactions</dt><dd>{@summary.transactions}</dd></div>
-        <div class="flex justify-between"><dt>Cash sales</dt><dd>{format_money(@summary.cash_total)}</dd></div>
-        <div :if={@summary.service_count > 0} class="flex justify-between">
-          <dt>Layanan tunai</dt>
-          <dd>{format_money(@summary.service_cash_total)}</dd>
-        </div>
-        <div class="flex justify-between text-gray-500">
-          <dt>Non-cash sales (QRIS/kartu/transfer)</dt><dd>{format_money(@summary.noncash_total)}</dd>
-        </div>
-        <div :if={Decimal.gt?(@summary.credit_total, 0)} class="flex justify-between">
-          <dt>Penjualan piutang (uang muka tunai {format_money(@summary.credit_down_payment)})</dt>
-          <dd>{format_money(@summary.credit_total)}</dd>
-        </div>
-        <div
-          :if={Decimal.gt?(Decimal.add(@summary.payments_cash, @summary.payments_noncash), 0)}
-          class="flex justify-between"
-        >
-          <dt>Pelunasan piutang (non-tunai {format_money(@summary.payments_noncash)})</dt>
-          <dd>tunai {format_money(@summary.payments_cash)}</dd>
-        </div>
-        <div :if={not Decimal.equal?(@summary.cash_in, Decimal.new(0))} class="flex justify-between text-green-700">
-          <dt>Cash in (setoran/tambah modal)</dt><dd>+{format_money(@summary.cash_in)}</dd>
-        </div>
-        <div :if={not Decimal.equal?(@summary.cash_out, Decimal.new(0))} class="flex justify-between text-red-600">
-          <dt>Cash out (pengeluaran/bayar konsinyasi)</dt><dd>−{format_money(@summary.cash_out)}</dd>
-        </div>
-        <div class="flex justify-between font-semibold border-t border-gray-200 pt-1">
-          <dt>Expected cash</dt>
-          <dd>{format_money(@summary.expected_cash)}</dd>
-        </div>
-      </dl>
+      <.md_card class="mt-4 !bg-surface-container-highest">
+        <dl class="space-y-1 text-body-md">
+          <div class="flex justify-between"><dt>Opening cash</dt><dd>{format_money(@summary.opening_cash)}</dd></div>
+          <div class="flex justify-between"><dt>Transactions</dt><dd>{@summary.transactions}</dd></div>
+          <div class="flex justify-between"><dt>Cash sales</dt><dd>{format_money(@summary.cash_total)}</dd></div>
+          <div :if={@summary.service_count > 0} class="flex justify-between">
+            <dt>Layanan tunai</dt>
+            <dd>{format_money(@summary.service_cash_total)}</dd>
+          </div>
+          <div class="flex justify-between text-on-surface-variant">
+            <dt>Non-cash sales (QRIS/kartu/transfer)</dt><dd>{format_money(@summary.noncash_total)}</dd>
+          </div>
+          <div :if={Decimal.gt?(@summary.credit_total, 0)} class="flex justify-between">
+            <dt>Penjualan piutang (uang muka tunai {format_money(@summary.credit_down_payment)})</dt>
+            <dd>{format_money(@summary.credit_total)}</dd>
+          </div>
+          <div
+            :if={Decimal.gt?(Decimal.add(@summary.payments_cash, @summary.payments_noncash), 0)}
+            class="flex justify-between"
+          >
+            <dt>Pelunasan piutang (non-tunai {format_money(@summary.payments_noncash)})</dt>
+            <dd>tunai {format_money(@summary.payments_cash)}</dd>
+          </div>
+          <div :if={not Decimal.equal?(@summary.cash_in, Decimal.new(0))} class="flex justify-between text-primary">
+            <dt>Cash in (setoran/tambah modal)</dt><dd>+{format_money(@summary.cash_in)}</dd>
+          </div>
+          <div :if={not Decimal.equal?(@summary.cash_out, Decimal.new(0))} class="flex justify-between text-error">
+            <dt>Cash out (pengeluaran/bayar konsinyasi)</dt><dd>−{format_money(@summary.cash_out)}</dd>
+          </div>
+          <div class="flex justify-between border-t border-outline-variant pt-1 font-medium">
+            <dt>Expected cash</dt>
+            <dd>{format_money(@summary.expected_cash)}</dd>
+          </div>
+        </dl>
+      </.md_card>
 
       <form phx-change="close_change" phx-submit="close_shift" class="mt-4 space-y-3">
-        <label class="block text-sm">
-          Counted cash (hitung fisik)
-          <input type="number" name="counted_cash" value={@counted_cash} min="0" step="1" required class="form-control" />
-        </label>
+        <.md_text_field
+          type="number"
+          name="counted_cash"
+          value={@counted_cash}
+          label="Counted cash (hitung fisik)"
+          min="0"
+          step="1"
+          required
+        />
 
-        <div class="flex justify-between text-sm font-medium">
+        <div class="flex justify-between text-body-md font-medium">
           <span>Variance</span>
           <span class={variance_class(@counted_cash, @summary)}>
             {format_money(preview_variance(@counted_cash, @summary))}
           </span>
         </div>
 
-        <label class="block text-sm">
-          Note (optional)
-          <input type="text" name="note" value={@close_note} class="form-control" />
-        </label>
+        <.md_text_field name="note" value={@close_note} label="Note (optional)" />
 
-        <.button class="w-full !bg-red-600">Close shift</.button>
+        <.md_button variant="danger" class="w-full">Close shift</.md_button>
       </form>
-    </.modal>
+    </.md_dialog>
 
-    <.modal :if={@movement_open and @shift} id="movement-modal" show on_cancel={JS.push("toggle_movement")}>
-      <h3 class="text-lg font-semibold">Catat kas laci</h3>
-      <p class="mt-1 text-sm text-gray-500">
+    <.md_dialog :if={@movement_open and @shift} id="movement-modal" show on_cancel={JS.push("toggle_movement")}>
+      <:title>Catat kas laci</:title>
+      <p class="mt-1 text-body-md text-on-surface-variant">
         Uang masuk/keluar laci di tengah shift (setoran, pengeluaran, bayar konsinyasi).
       </p>
 
       <form phx-change="movement_change" phx-submit="save_movement" class="mt-4 space-y-3">
-        <label class="block text-sm">
-          Tipe
-          <select name="category" class="form-control">
-            <option :for={{value, label} <- movement_category_options()} value={value} selected={@mv_category == value}>
-              {label}
-            </option>
-          </select>
-        </label>
+        <.md_text_field
+          type="select"
+          name="category"
+          label="Tipe"
+          value={@mv_category}
+          options={Enum.map(movement_category_options(), fn {value, label} -> {label, value} end)}
+        />
 
-        <label :if={@mv_category == "consignment_payment"} class="block text-sm">
-          Supplier
-          <select name="supplier_id" class="form-control">
-            <option value="">— pilih supplier —</option>
-            <option :for={{name, id} <- @supplier_options} value={id} selected={to_string(id) == @mv_supplier_id}>
-              {name}
-            </option>
-          </select>
-        </label>
+        <.md_text_field
+          :if={@mv_category == "consignment_payment"}
+          type="select"
+          name="supplier_id"
+          label="Supplier"
+          value={@mv_supplier_id}
+          prompt="— pilih supplier —"
+          options={Enum.map(@supplier_options, fn {name, id} -> {name, to_string(id)} end)}
+        />
 
-        <label class="block text-sm">
-          Jumlah
-          <input
-            type="text"
-            id="movement-amount-input"
-            name="amount"
-            value={@mv_amount}
-            phx-hook="MoneyInput"
-            phx-update="ignore"
-            inputmode="numeric"
-            placeholder="0"
-            required
-            class="form-control"
-          />
-        </label>
+        <.md_text_field
+          id="movement-amount-input"
+          name="amount"
+          value={@mv_amount}
+          label="Jumlah"
+          phx-hook="MoneyInput"
+          phx-update="ignore"
+          inputmode="numeric"
+          placeholder="0"
+          required
+        />
 
-        <label class="block text-sm">
-          Catatan (opsional)
-          <input type="text" name="note" value={@mv_note} class="form-control" />
-        </label>
+        <.md_text_field name="note" value={@mv_note} label="Catatan (opsional)" />
 
-        <.button class="w-full">Simpan</.button>
+        <.md_button class="w-full">Simpan</.md_button>
       </form>
-    </.modal>
+    </.md_dialog>
     """
   end
 
