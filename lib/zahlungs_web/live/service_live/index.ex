@@ -770,133 +770,172 @@ defmodule ZahlungsWeb.ServiceLive.Index do
         </p>
       </section>
 
-      <section
-        id="service-panel"
-        class={[
-          "cart-panel lg:col-span-2 md:landscape:col-span-2",
-          (@panel_open && "cart-panel-open") || "hidden lg:block md:landscape:block"
-        ]}
+      <.md_sheet
+        id="service-sheet"
+        open={@panel_open}
+        on_close="toggle_panel"
+        class="lg:col-span-2 md:landscape:col-span-2"
       >
-        <div :if={@selected} class="mb-2 flex justify-end lg:hidden md:landscape:hidden">
-          <button type="button" phx-click="toggle_panel" class="touch-target text-sm text-gray-600 underline">
-            Tutup
-          </button>
-        </div>
-        <p :if={is_nil(@selected)} class="text-sm text-gray-500">
-          {if brand_category?(@category), do: "Isi nomor tujuan, lalu pilih produk.", else: "Pilih produk di kiri."}
-        </p>
-
-        <%!-- An api bill or token: check it with the provider first. --%>
-        <form :if={@api_bill} phx-change="change" phx-submit="inquire" class="space-y-3">
-          <p class="font-medium">{@selected.name}</p>
-          <label class="block text-sm">
-            {if Product.bill?(@selected), do: "ID pelanggan", else: "Nomor meter / ID pelanggan"}
-            <input type="text" inputmode="numeric" name="service[customer_ref]" value={@form["customer_ref"]} class="form-control" autocomplete="off" required />
-          </label>
-          <label :if={@ask_months} class="block text-sm">
-            Jumlah bulan
-            <select name="service[months]" class="form-control">
-              <option :for={month <- 1..12} value={month} selected={@form["months"] == to_string(month)}>
-                {month}
-              </option>
-            </select>
-          </label>
-          <button type="submit" phx-disable-with="Mengecek..." class="btn btn-primary w-full">
-            {if Product.bill?(@selected), do: "Cek tagihan", else: "Cek pelanggan"}
-          </button>
-        </form>
-
-        <div :if={@api_bill && @inquiry} id="inquiry" class="mt-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm">
-          <p class="font-semibold text-gray-800">{@inquiry.customer_name}</p>
-          <p class="text-gray-600">
-            {group_digits(@inquiry.customer_ref)}<span :if={@inquiry.period}> · {@inquiry.period}</span><span :if={@inquiry.kind == "bill"}> · {@inquiry.sheets} bulan</span><span :if={@inquiry.details}> · {@inquiry.details}</span>
-          </p>
-          <div :if={@inquiry.kind == "bill"}>
-            <div class="mt-2 flex justify-between"><span>Tagihan</span><span>{format_price(@inquiry.bill_amount)}</span></div>
-            <div class="flex justify-between">
-              <span>Admin penyedia</span>
-              <span>{format_price(@inquiry.provider_admin || Decimal.new(0))}</span>
-            </div>
-            <div class="flex justify-between">
-              <span>Tambahan toko</span>
-              <span>{format_price(extra_fee(@preview, @inquiry))}</span>
-            </div>
+        <section
+          id="service-panel"
+          class="rounded-md3-lg bg-surface-container-lowest p-4 lg:sticky lg:top-20 md:landscape:sticky md:landscape:top-20"
+        >
+          <div :if={@selected} class="mb-2 flex justify-end lg:hidden md:landscape:hidden">
+            <.md_button variant="text" type="button" phx-click="toggle_panel">
+              <:icon><.md_icon name="close" class="h-[18px] w-[18px]" /></:icon>
+              Tutup
+            </.md_button>
           </div>
-          <div class="mt-1 flex justify-between font-semibold">
-            <span>{if @inquiry.kind == "bill", do: "Total", else: "Harga"}</span>
-            <span>{format_price(@preview.price)}</span>
-          </div>
-        </div>
-
-        <form :if={@selected && (not @api_bill or @inquiry)} phx-change="change" phx-submit="review" class={["space-y-3", @api_bill && "mt-4"]}>
-          <div :if={not @api_bill} class="flex justify-between gap-2 font-medium">
-            <span>{@selected.name}</span>
-            <span :if={@preview}>{format_price(@preview.price)}</span>
-          </div>
-          <p
-            :if={brand_category?(@category) && brand_mismatch(@selected, @form["customer_ref"], @brand, @brand_prefixes)}
-            id="brand-mismatch"
-            role="alert"
-            class="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700"
-          >
-            {brand_mismatch(@selected, @form["customer_ref"], @brand, @brand_prefixes)}
+          <p :if={is_nil(@selected)} class="text-body-md text-on-surface-variant">
+            {if brand_category?(@category),
+              do: "Isi nomor tujuan, lalu pilih produk.",
+              else: "Pilih produk di kiri."}
           </p>
 
-          <label :if={not @api && Product.bill?(@selected)} class="block text-sm">
-            Nominal tagihan
-            <input type="text" inputmode="numeric" name="service[bill_amount]" value={@form["bill_amount"]} class="form-control" autocomplete="off" />
-          </label>
+          <%!-- An api bill or token: check it with the provider first. --%>
+          <form :if={@api_bill} phx-change="change" phx-submit="inquire" class="space-y-3">
+            <p class="text-title-md">{@selected.name}</p>
+            <.md_text_field
+              name="service[customer_ref]"
+              value={@form["customer_ref"]}
+              label={if Product.bill?(@selected), do: "ID pelanggan", else: "Nomor meter / ID pelanggan"}
+              inputmode="numeric"
+              autocomplete="off"
+              required
+            />
+            <.md_text_field
+              :if={@ask_months}
+              type="select"
+              name="service[months]"
+              value={@form["months"]}
+              label="Jumlah bulan"
+              options={Enum.map(1..12, &{to_string(&1), to_string(&1)})}
+            />
+            <.md_button type="submit" phx-disable-with="Mengecek..." class="w-full">
+              {if Product.bill?(@selected), do: "Cek tagihan", else: "Cek pelanggan"}
+            </.md_button>
+          </form>
 
-          <div :if={not @api_bill}>
-            <label :if={not brand_category?(@category)} class="block text-sm">
-              Nomor tujuan
-              <input type="text" inputmode="numeric" name="service[customer_ref]" value={@form["customer_ref"]} class="form-control" autocomplete="off" required />
-            </label>
-            <p :if={@form["customer_ref"] != ""} class="mt-3 rounded bg-gray-50 py-2 text-center text-xl font-semibold tracking-wide">
-              {group_digits(digits(@form["customer_ref"]))}
+          <.md_card :if={@api_bill && @inquiry} id="inquiry" class="mt-4 text-body-md">
+            <p class="text-title-sm">{@inquiry.customer_name}</p>
+            <p class="text-on-surface-variant">
+              {group_digits(@inquiry.customer_ref)}<span :if={@inquiry.period}> · {@inquiry.period}</span><span :if={@inquiry.kind == "bill"}> · {@inquiry.sheets} bulan</span><span :if={@inquiry.details}> · {@inquiry.details}</span>
             </p>
-          </div>
+            <div :if={@inquiry.kind == "bill"}>
+              <div class="mt-2 flex justify-between">
+                <span>Tagihan</span><span>{format_price(@inquiry.bill_amount)}</span>
+              </div>
+              <div class="flex justify-between">
+                <span>Admin penyedia</span>
+                <span>{format_price(@inquiry.provider_admin || Decimal.new(0))}</span>
+              </div>
+              <div class="flex justify-between">
+                <span>Tambahan toko</span>
+                <span>{format_price(extra_fee(@preview, @inquiry))}</span>
+              </div>
+            </div>
+            <div class="mt-1 flex justify-between text-title-md">
+              <span>{if @inquiry.kind == "bill", do: "Total", else: "Harga"}</span>
+              <span>{format_price(@preview.price)}</span>
+            </div>
+          </.md_card>
 
-          <label class="block text-sm">
-            Cara bayar
-            <select name="service[payment_method]" class="form-control">
-              <option :for={{value, label} <- payment_methods()} value={value} selected={@form["payment_method"] == value}>
-                {label}
-              </option>
-            </select>
-          </label>
+          <form
+            :if={@selected && (not @api_bill or @inquiry)}
+            phx-change="change"
+            phx-submit="review"
+            class={["space-y-3", @api_bill && "mt-4"]}
+          >
+            <div :if={not @api_bill} class="flex justify-between gap-2 text-title-md">
+              <span>{@selected.name}</span>
+              <span :if={@preview}>{format_price(@preview.price)}</span>
+            </div>
+            <p
+              :if={
+                brand_category?(@category) &&
+                  brand_mismatch(@selected, @form["customer_ref"], @brand, @brand_prefixes)
+              }
+              id="brand-mismatch"
+              role="alert"
+              class="rounded-md3-sm bg-error-container px-3 py-2 text-body-md font-medium text-on-error-container"
+            >
+              {brand_mismatch(@selected, @form["customer_ref"], @brand, @brand_prefixes)}
+            </p>
 
-          <label :if={@form["payment_method"] == "cash"} class="block text-sm">
-            Uang diterima
-            <input type="text" inputmode="numeric" name="service[amount_paid]" value={@form["amount_paid"]} class="form-control" autocomplete="off" />
-          </label>
-          <div :if={@preview && @preview.change} class="flex justify-between font-medium">
-            <span>Kembalian</span>
-            <span>{format_price(@preview.change)}</span>
-          </div>
+            <.md_text_field
+              :if={not @api && Product.bill?(@selected)}
+              name="service[bill_amount]"
+              value={@form["bill_amount"]}
+              label="Nominal tagihan"
+              inputmode="numeric"
+              autocomplete="off"
+            />
 
-          <button type="submit" phx-disable-with="Memeriksa..." class="btn btn-primary w-full">
-            {if @api, do: "Bayar", else: "Catat dan terima uang"}
-          </button>
-        </form>
-      </section>
+            <div :if={not @api_bill}>
+              <.md_text_field
+                :if={not brand_category?(@category)}
+                name="service[customer_ref]"
+                value={@form["customer_ref"]}
+                label="Nomor tujuan"
+                inputmode="numeric"
+                autocomplete="off"
+                required
+              />
+              <p
+                :if={@form["customer_ref"] != ""}
+                class="mt-3 rounded-md3-md bg-surface-container-high py-2 text-center text-headline-sm tracking-wide"
+              >
+                {group_digits(digits(@form["customer_ref"]))}
+              </p>
+            </div>
+
+            <div>
+              <p class="mb-1 text-body-sm text-on-surface-variant">Cara bayar</p>
+              <.md_segmented
+                name="service[payment_method]"
+                value={@form["payment_method"]}
+                options={payment_methods()}
+              />
+            </div>
+
+            <.md_text_field
+              :if={@form["payment_method"] == "cash"}
+              name="service[amount_paid]"
+              value={@form["amount_paid"]}
+              label="Uang diterima"
+              inputmode="numeric"
+              autocomplete="off"
+            />
+            <div :if={@preview && @preview.change} class="flex justify-between text-title-sm">
+              <span>Kembalian</span>
+              <span>{format_price(@preview.change)}</span>
+            </div>
+
+            <.md_button type="submit" phx-disable-with="Memeriksa..." class="!h-14 w-full">
+              {if @api, do: "Bayar", else: "Catat dan terima uang"}
+            </.md_button>
+          </form>
+        </section>
+      </.md_sheet>
 
       <%!-- Portrait only: the product at a glance, pinned to the bottom of the screen. --%>
-      <div id="service-bar" class="cart-bar lg:hidden md:landscape:hidden">
+      <div
+        id="service-bar"
+        class="cart-bar !min-h-[80px] !border-t-0 !bg-surface-container shadow-elev-2 lg:hidden md:landscape:hidden"
+      >
         <div class="min-w-0 flex-1">
-          <p :if={is_nil(@selected)} class="text-sm text-gray-500">Pilih produk</p>
-          <p :if={@selected} class="truncate text-sm text-gray-700">{@selected.name}</p>
-          <p :if={@selected} class="truncate text-lg font-semibold">{bar_price(@preview, @selected)}</p>
+          <p :if={is_nil(@selected)} class="text-body-md text-on-surface-variant">Pilih produk</p>
+          <p :if={@selected} class="truncate text-body-sm text-on-surface-variant">{@selected.name}</p>
+          <p :if={@selected} class="truncate text-title-lg">{bar_price(@preview, @selected)}</p>
         </div>
-        <button
+        <.md_button
           id="service-bar-open"
           type="button"
           phx-click="toggle_panel"
-          class="btn btn-primary touch-target"
           disabled={is_nil(@selected)}
         >
           {bar_action(assigns)}
-        </button>
+        </.md_button>
       </div>
     </div>
 
@@ -974,60 +1013,65 @@ defmodule ZahlungsWeb.ServiceLive.Index do
       </div>
     </section>
 
-    <.modal :if={@confirming} id="confirm-service" show on_cancel={JS.push("cancel_record")}>
-      <h3 class="text-lg font-semibold">Konfirmasi pembayaran</h3>
-      <p class="mt-1 text-sm text-gray-500">Periksa nomor dan produk sebelum melanjutkan.</p>
+    <.md_dialog :if={@confirming} id="confirm-service" show on_cancel={JS.push("cancel_record")}>
+      <:title>Konfirmasi pembayaran</:title>
+      <p class="mt-1 text-body-md text-on-surface-variant">
+        Periksa nomor dan produk sebelum melanjutkan.
+      </p>
 
       <p
-        :if={brand_category?(@category) && brand_mismatch(@selected, @form["customer_ref"], @brand, @brand_prefixes)}
+        :if={
+          brand_category?(@category) &&
+            brand_mismatch(@selected, @form["customer_ref"], @brand, @brand_prefixes)
+        }
         role="alert"
-        class="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700"
+        class="mt-3 rounded-md3-sm bg-error-container px-3 py-2 text-body-md font-medium text-on-error-container"
       >
         {brand_mismatch(@selected, @form["customer_ref"], @brand, @brand_prefixes)}
       </p>
 
-      <p class="mt-3 rounded bg-gray-50 py-3 text-center text-2xl font-semibold tracking-wide">
+      <p class="mt-3 rounded-md3-md bg-surface-container-highest py-3 text-center text-headline-sm tracking-wide">
         {group_digits(digits(@form["customer_ref"]))}
       </p>
-      <p :if={@inquiry} class="mt-2 text-center text-sm text-gray-600">
-        <span class="font-semibold text-gray-800">{@inquiry.customer_name}</span><span :if={@inquiry.period}> · {@inquiry.period}</span><span :if={@inquiry.kind == "bill"}> · {@inquiry.sheets} bulan</span><span :if={@inquiry.details}> · {@inquiry.details}</span>
+      <p :if={@inquiry} class="mt-2 text-center text-body-md text-on-surface-variant">
+        <span class="font-medium text-on-surface">{@inquiry.customer_name}</span><span :if={@inquiry.period}> · {@inquiry.period}</span><span :if={@inquiry.kind == "bill"}> · {@inquiry.sheets} bulan</span><span :if={@inquiry.details}> · {@inquiry.details}</span>
       </p>
 
-      <dl class="mt-4 space-y-1 text-sm">
+      <dl class="mt-4 space-y-1 text-body-md">
         <div class="flex justify-between gap-4">
-          <dt class="text-gray-500">Produk</dt>
+          <dt class="text-on-surface-variant">Produk</dt>
           <dd class="text-right font-medium">{@selected.name}</dd>
         </div>
         <div :if={is_nil(@inquiry) && Product.bill?(@selected)} class="flex justify-between gap-4">
-          <dt class="text-gray-500">Nominal tagihan</dt>
+          <dt class="text-on-surface-variant">Nominal tagihan</dt>
           <dd>{format_price(Decimal.new(@form["bill_amount"]))}</dd>
         </div>
-        <div class="flex justify-between gap-4 text-base font-semibold">
+        <div class="flex justify-between gap-4 text-title-md">
           <dt>Harga</dt>
           <dd>{format_price(@preview.price)}</dd>
         </div>
         <div class="flex justify-between gap-4">
-          <dt class="text-gray-500">Cara bayar</dt>
+          <dt class="text-on-surface-variant">Cara bayar</dt>
           <dd>{payment_method_label(@form["payment_method"])}</dd>
         </div>
         <div :if={@form["payment_method"] == "cash"} class="flex justify-between gap-4">
-          <dt class="text-gray-500">Uang diterima</dt>
+          <dt class="text-on-surface-variant">Uang diterima</dt>
           <dd>{format_price(Decimal.new(@form["amount_paid"]))}</dd>
         </div>
         <div :if={@preview.change} class="flex justify-between gap-4">
-          <dt class="text-gray-500">Kembalian</dt>
+          <dt class="text-on-surface-variant">Kembalian</dt>
           <dd>{format_price(@preview.change)}</dd>
         </div>
       </dl>
 
       <%!-- Batal comes first: the popup focuses it, so a stray Enter pays nothing. --%>
-      <div class="mt-6 flex justify-end gap-2">
-        <button type="button" phx-click="cancel_record" class="chip">Batal</button>
-        <.button phx-click="confirm_record" phx-disable-with="Mencatat...">
+      <:actions>
+        <.md_button variant="text" type="button" phx-click="cancel_record">Batal</.md_button>
+        <.md_button type="button" phx-click="confirm_record" phx-disable-with="Mencatat...">
           {if @api, do: "Ya, bayar", else: "Ya, catat"}
-        </.button>
-      </div>
-    </.modal>
+        </.md_button>
+      </:actions>
+    </.md_dialog>
 
     <%!-- Room for the bar, so the end of the page isn't hidden behind it. --%>
     <div :if={@sellable} class="h-24 lg:hidden md:landscape:hidden"></div>
