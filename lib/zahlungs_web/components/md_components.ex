@@ -65,31 +65,43 @@ defmodule ZahlungsWeb.MdComponents do
 
   @doc """
   An MD3 button: `filled` (default), `tonal`, `outlined`, `text` or `danger`.
-  A pill, 40px high (44px on touch screens), never in capitals.
+  A pill, 40px high (44px on touch screens), never in capitals. With
+  `navigate` or `href` it is a link that looks the same.
   """
   attr :variant, :string, default: "filled", values: ~w(filled tonal outlined text danger)
   attr :type, :string, default: nil
+  attr :navigate, :string, default: nil
+  attr :href, :string, default: nil
   attr :class, :any, default: nil
   attr :rest, :global, include: ~w(disabled form name value)
 
   slot :icon
   slot :inner_block, required: true
 
-  def md_button(assigns) do
+  def md_button(%{navigate: nil, href: nil} = assigns) do
     ~H"""
-    <button
-      type={@type}
-      class={[
-        "md-state inline-flex items-center justify-center gap-2 rounded-full h-10 [@media(pointer:coarse)]:h-11 text-label-lg",
-        button_variant(@variant),
-        @class
-      ]}
-      {@rest}
-    >
+    <button type={@type} class={button_class(@variant, @class)} {@rest}>
       {render_slot(@icon)}
       {render_slot(@inner_block)}
     </button>
     """
+  end
+
+  def md_button(assigns) do
+    ~H"""
+    <.link navigate={@navigate} href={@href} class={button_class(@variant, @class)} {@rest}>
+      {render_slot(@icon)}
+      {render_slot(@inner_block)}
+    </.link>
+    """
+  end
+
+  defp button_class(variant, class) do
+    [
+      "md-state inline-flex items-center justify-center gap-2 rounded-full h-10 [@media(pointer:coarse)]:h-11 text-label-lg",
+      button_variant(variant),
+      class
+    ]
   end
 
   defp button_variant("filled"), do: "px-6 bg-primary text-on-primary"
@@ -228,14 +240,15 @@ defmodule ZahlungsWeb.MdComponents do
 
   @doc """
   An MD3 outlined text field with its label above: `text` (default),
-  `number`, `date`, `search` or `select` (`options`, `prompt`). Extra
-  attributes (`phx-hook`, `phx-update`, `inputmode`, ...) go on the input.
+  `number`, `date`, `search`, `select` (`options`, `prompt`) or `textarea`.
+  Extra attributes (`phx-hook`, `phx-update`, `inputmode`, ...) go on the
+  input. An input can hold a `trailing` icon button at its right.
   """
   attr :id, :any, default: nil
   attr :name, :any, default: nil
   attr :value, :any, default: nil
   attr :label, :string, default: nil
-  attr :type, :string, default: "text", values: ~w(text number date search select)
+  attr :type, :string, default: "text", values: ~w(text number date search select textarea)
   attr :options, :list, default: []
   attr :prompt, :string, default: nil
   attr :supporting, :string, default: nil
@@ -244,7 +257,9 @@ defmodule ZahlungsWeb.MdComponents do
 
   attr :rest, :global,
     include:
-      ~w(autocomplete disabled form inputmode maxlength min max placeholder readonly required step)
+      ~w(autocomplete disabled form inputmode maxlength min max placeholder readonly required rows step)
+
+  slot :trailing
 
   def md_text_field(assigns) do
     ~H"""
@@ -254,15 +269,26 @@ defmodule ZahlungsWeb.MdComponents do
         <option :if={@prompt} value="">{@prompt}</option>
         {Phoenix.HTML.Form.options_for_select(@options, @value)}
       </select>
-      <input
-        :if={@type != "select"}
-        type={@type}
+      <textarea
+        :if={@type == "textarea"}
         id={@id}
         name={@name}
-        value={@value}
-        class={[field_class(), @class]}
+        class={[field_class(), "py-2", @class]}
         {@rest}
-      />
+      >{@value}</textarea>
+      <span :if={@type not in ~w(select textarea)} class="relative block">
+        <input
+          type={@type}
+          id={@id}
+          name={@name}
+          value={@value}
+          class={[field_class(), @trailing != [] && "pr-12", @class]}
+          {@rest}
+        />
+        <span :if={@trailing != []} class="absolute inset-y-0 right-1 flex items-center">
+          {render_slot(@trailing)}
+        </span>
+      </span>
       <span :if={@supporting} class="mt-1 block text-body-sm">{@supporting}</span>
       <span :for={error <- @errors} class="mt-1 block text-body-sm text-error">{error}</span>
     </label>
@@ -272,6 +298,25 @@ defmodule ZahlungsWeb.MdComponents do
   defp field_class,
     do:
       "mt-1 block w-full min-h-[44px] rounded-md3-xs border border-outline bg-transparent px-3 text-body-lg text-on-surface focus:border-primary focus:ring-1 focus:ring-primary"
+
+  @doc "A small pill for a status: `success`, `error`, `warning` or `neutral` (default)."
+  attr :tone, :string, default: "neutral", values: ~w(success error warning neutral)
+  attr :class, :any, default: nil
+
+  slot :inner_block, required: true
+
+  def md_badge(assigns) do
+    ~H"""
+    <span class={["inline-block rounded-full px-2 py-0.5 text-label-md", badge_tone(@tone), @class]}>
+      {render_slot(@inner_block)}
+    </span>
+    """
+  end
+
+  defp badge_tone("success"), do: "bg-primary-container text-on-primary-container"
+  defp badge_tone("error"), do: "bg-error-container text-on-error-container"
+  defp badge_tone("warning"), do: "bg-warning-container text-on-warning-container"
+  defp badge_tone("neutral"), do: "bg-surface-container-highest text-on-surface-variant"
 
   @doc """
   An MD3 dialog with the structure and ids of `CoreComponents.modal/1`

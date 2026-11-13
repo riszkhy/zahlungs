@@ -13,6 +13,7 @@ defmodule ZahlungsWeb.ServiceCorrection do
   alias Phoenix.LiveView.JS
   alias Zahlungs.{Accounts, Services}
   alias Zahlungs.Services.Transaction
+  alias ZahlungsWeb.MdComponents
 
   @messages %{
     in_review: "Transaksi ini sedang ditinjau. Putuskan di halaman akun deposit.",
@@ -116,20 +117,18 @@ defmodule ZahlungsWeb.ServiceCorrection do
     """
   end
 
+  @doc "A service's status as an MD3 badge, the same on every services page."
   attr :status, :string, required: true
 
-  defp status_badge(assigns) do
+  def status_badge(assigns) do
     ~H"""
-    <span class={[
-      "inline-block rounded-full px-2 py-0.5 text-xs",
-      @status == "success" && "bg-green-100 text-green-700",
-      @status == "failed" && "bg-red-100 text-red-700",
-      @status == "processing" && "bg-amber-100 text-amber-800"
-    ]}>
-      {status_label(@status)}
-    </span>
+    <MdComponents.md_badge tone={status_tone(@status)}>{status_label(@status)}</MdComponents.md_badge>
     """
   end
+
+  defp status_tone("success"), do: "success"
+  defp status_tone("failed"), do: "error"
+  defp status_tone(_processing), do: "warning"
 
   defp status_label("success"), do: "Berhasil"
   defp status_label("failed"), do: "Gagal"

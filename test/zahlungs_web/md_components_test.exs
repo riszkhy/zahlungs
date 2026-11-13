@@ -203,4 +203,72 @@ defmodule ZahlungsWeb.MdComponentsTest do
                "shadow-elev-1"
     end
   end
+
+  describe "md_button as a link" do
+    test "navigate renders a link with the variant's classes" do
+      html =
+        render_component(&MdComponents.md_button/1,
+          variant: "outlined",
+          navigate: "/services/history",
+          inner_block: slot("Lihat semua riwayat")
+        )
+
+      assert html =~ ~r/<a[^>]*href="\/services\/history"/
+      assert html =~ "border-outline"
+      refute html =~ "<button"
+    end
+  end
+
+  describe "md_text_field extras" do
+    test "a textarea keeps its name, value and rows" do
+      html =
+        render_component(&MdComponents.md_text_field/1,
+          type: "textarea",
+          name: "reason",
+          value: "Salah nomor",
+          rows: "2",
+          label: "Alasan"
+        )
+
+      assert html =~
+               ~r/<textarea[^>]*name="reason"[^>]*rows="2"[^>]*>\s*Salah nomor\s*<\/textarea>/
+    end
+
+    test "the trailing slot sits inside the field" do
+      html =
+        render_component(&MdComponents.md_text_field/1,
+          name: "n",
+          value: "0812",
+          trailing: slot("✕")
+        )
+
+      assert html =~ ~r/<input[^>]*pr-12[^>]*>.*✕/s
+    end
+  end
+
+  describe "md_badge" do
+    test "each tone has its colours" do
+      for {tone, class} <- [
+            {"success", "bg-primary-container"},
+            {"error", "bg-error-container"},
+            {"warning", "bg-warning-container"},
+            {"neutral", "bg-surface-container-highest"}
+          ] do
+        assert render_component(&MdComponents.md_badge/1, tone: tone, inner_block: slot("x")) =~
+                 class,
+               tone
+      end
+    end
+  end
+
+  describe "service status badge" do
+    test "failed is the error tone, processing the warning one" do
+      assert render_component(&ZahlungsWeb.ServiceCorrection.status_badge/1, status: "failed") =~
+               ~r/bg-error-container[^>]*>\s*Gagal/
+
+      assert render_component(&ZahlungsWeb.ServiceCorrection.status_badge/1,
+               status: "processing"
+             ) =~ ~r/bg-warning-container[^>]*>\s*Diproses/
+    end
+  end
 end
