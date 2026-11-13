@@ -2,6 +2,78 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ---- Material Design 3 -------------------------------------------------- */
+/* Colour roles from the Zahlungs green (#15803d); see
+   docs/superpowers/specs/2026-11-13-kasir-md3-design.md. Tailwind maps each
+   role to a colour of the same name (bg-primary, text-on-surface, ...). */
+:root {
+  --md-primary: #016D30;
+  --md-on-primary: #FFFFFF;
+  --md-primary-container: #ABF3B8;
+  --md-on-primary-container: #002106;
+  --md-secondary: #4C6450;
+  --md-on-secondary: #FFFFFF;
+  --md-secondary-container: #CEEAD2;
+  --md-on-secondary-container: #0A200E;
+  --md-tertiary: #006971;
+  --md-on-tertiary: #FFFFFF;
+  --md-tertiary-container: #96F1FA;
+  --md-on-tertiary-container: #002023;
+  --md-error: #BA1A1A;
+  --md-on-error: #FFFFFF;
+  --md-error-container: #FFDAD6;
+  --md-on-error-container: #410002;
+  --md-warning: #914D00;
+  --md-on-warning: #FFFFFF;
+  --md-warning-container: #FFDCC2;
+  --md-on-warning-container: #2B1700;
+  --md-surface: #F4FBF5;
+  --md-on-surface: #181D19;
+  --md-surface-container-lowest: #FFFFFF;
+  --md-on-surface-variant: #3E4A40;
+  --md-surface-container-low: #EEF5EF;
+  --md-outline: #6E7A6F;
+  --md-surface-container: #E9F0E9;
+  --md-outline-variant: #BDCABE;
+  --md-surface-container-high: #E3EAE4;
+  --md-inverse-surface: #2C322D;
+  --md-surface-container-highest: #DDE4DE;
+  --md-inverse-on-surface: #ECF2EC;
+}
+
+.md3 {
+  font-family: Roboto, system-ui, sans-serif;
+}
+
+/* MD3 state layer: the element's own colour over it, faint on hover, a
+   little more on focus and press. */
+.md-state {
+  position: relative;
+  overflow: hidden;
+}
+.md-state::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: currentColor;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms;
+}
+.md-state:hover::before {
+  opacity: 0.08;
+}
+.md-state:focus-visible::before,
+.md-state:active::before {
+  opacity: 0.1;
+}
+.md-state:disabled {
+  opacity: 0.38;
+}
+.md-state:disabled::before {
+  opacity: 0;
+}
+
 /* For Phoenix Live reload script */
 [hidden] {
   display: none;
