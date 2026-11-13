@@ -86,6 +86,7 @@ defmodule ZahlungsWeb do
       import Phoenix.HTML
       # Core UI components
       import ZahlungsWeb.CoreComponents
+      import ZahlungsWeb.MdComponents
 
       # Shortcut for generating JS commands
       alias Phoenix.LiveView.JS
