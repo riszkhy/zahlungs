@@ -160,7 +160,7 @@ defmodule ZahlungsWeb.MdComponents do
   attr :value, :any, default: nil
   attr :placeholder, :string, default: nil
   attr :class, :any, default: nil
-  attr :rest, :global
+  attr :rest, :global, include: ~w(autocomplete disabled form inputmode maxlength required)
 
   slot :trailing
 
@@ -232,7 +232,7 @@ defmodule ZahlungsWeb.MdComponents do
   attributes (`phx-hook`, `phx-update`, `inputmode`, ...) go on the input.
   """
   attr :id, :any, default: nil
-  attr :name, :any, required: true
+  attr :name, :any, default: nil
   attr :value, :any, default: nil
   attr :label, :string, default: nil
   attr :type, :string, default: "text", values: ~w(text number date search select)

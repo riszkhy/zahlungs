@@ -1031,114 +1031,171 @@ defmodule ZahlungsWeb.CashierLive do
     ~H"""
     <div id="cashier-beeper" phx-hook="Beeper" class="hidden"></div>
 
-    <.header>
-      Cashier
-      <:subtitle>Layar transaksi penjualan</:subtitle>
-    </.header>
+    <div class="md3 -m-6 rounded-xl bg-surface p-4 text-on-surface sm:p-6">
+      <.header>
+        Cashier
+        <:subtitle>Layar transaksi penjualan</:subtitle>
+      </.header>
 
-    <div :if={is_nil(@shift)} class="mt-6 max-w-sm rounded-lg border border-gray-200 p-6 shadow-sm">
-      <h3 class="font-semibold text-gray-700">Open shift</h3>
-      <p class="mt-1 text-sm text-gray-500">
-        You must open a shift (enter the opening cash) before making sales.
-      </p>
-      <p :if={@current_scope.store} class="mt-1 text-sm text-gray-700">
-        Toko: <strong>{@current_scope.store.name}</strong>
-      </p>
-      <p :if={is_nil(@current_scope.store)} class="mt-1 text-sm text-amber-700">
-        Pilih satu toko di menu atas dulu — shift dibuka untuk satu toko.
-      </p>
-      <form phx-submit="open_shift" class="mt-4">
-        <label class="block text-sm">
-          Opening cash (modal awal)
-          <input
-            type="text"
+      <.md_card :if={is_nil(@shift)} variant="outlined" class="mt-6 max-w-sm p-6">
+        <h3 class="text-title-lg">Open shift</h3>
+        <p class="mt-1 text-body-md text-on-surface-variant">
+          You must open a shift (enter the opening cash) before making sales.
+        </p>
+        <p :if={@current_scope.store} class="mt-1 text-body-md">
+          Toko: <strong>{@current_scope.store.name}</strong>
+        </p>
+        <p :if={is_nil(@current_scope.store)} class="mt-1 text-body-md text-warning">
+          Pilih satu toko di menu atas dulu — shift dibuka untuk satu toko.
+        </p>
+        <form phx-submit="open_shift" class="mt-4">
+          <.md_text_field
             id="opening-cash-input"
             name="opening_cash"
             value={@opening_cash}
+            label="Opening cash (modal awal)"
             phx-hook="MoneyInput"
             phx-update="ignore"
             inputmode="numeric"
             placeholder="0"
             required
-            class="form-control"
           />
-        </label>
-        <.button class="mt-4 w-full">Open Shift</.button>
-      </form>
-    </div>
+          <.md_button class="mt-4 w-full">Open shift</.md_button>
+        </form>
+      </.md_card>
 
-    <div :if={@shift} class="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-green-200 bg-green-50 p-3 text-sm">
-      <span class="text-gray-700">
-        <strong :if={@sale_scope.store}>{@sale_scope.store.name}</strong> · Shift #{@shift.id} · opened {Calendar.strftime(Zahlungs.LocalTime.to_local(@shift.opened_at, @sale_scope.store), "%d %b %Y %H:%M")} · float {format_money(@shift.opening_cash)}
-      </span>
-      <div class="flex items-center gap-4">
-        <button type="button" phx-click="toggle_movement" class="font-medium text-green-700 hover:underline">
-          Catat kas
-        </button>
-        <button type="button" phx-click="toggle_close" class="font-medium text-red-600 hover:underline">
-          Close shift
-        </button>
+      <div
+        :if={@shift}
+        class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-md3-md bg-surface-container-low p-3"
+      >
+        <div class="min-w-0">
+          <p :if={@sale_scope.store} class="text-title-sm">{@sale_scope.store.name}</p>
+          <p class="text-body-sm text-on-surface-variant">
+            Shift #{@shift.id} · opened {Calendar.strftime(Zahlungs.LocalTime.to_local(@shift.opened_at, @sale_scope.store), "%d %b %Y %H:%M")} · float {format_money(@shift.opening_cash)}
+          </p>
+        </div>
+        <div class="flex items-center gap-2">
+          <.md_button variant="outlined" type="button" phx-click="toggle_movement">Catat kas</.md_button>
+          <.md_button variant="outlined" type="button" phx-click="toggle_close" class="!text-error">
+            Close shift
+          </.md_button>
+        </div>
       </div>
-    </div>
 
-    <div :if={@shift && @movements != []} class="mt-2 rounded-lg border border-gray-200 p-3 text-sm">
-      <p class="font-medium text-gray-700">Gerakan kas shift ini</p>
-      <ul class="mt-1 divide-y divide-gray-100">
-        <li :for={m <- @movements} class="flex justify-between py-1">
-          <span class="text-gray-600">
-            {movement_label(m.category)}
-            <span :if={m.supplier} class="text-gray-400">· {m.supplier.name}</span>
-            <span :if={m.note not in [nil, ""]} class="text-gray-400">· {m.note}</span>
-          </span>
-          <span class={if m.direction == "in", do: "text-green-700", else: "text-red-600"}>
-            {movement_sign(m.direction)}{format_money(m.amount)}
-          </span>
-        </li>
-      </ul>
-    </div>
+      <.md_card :if={@shift && @movements != []} variant="outlined" class="mt-2 p-3 text-body-md">
+        <p class="text-title-sm">Gerakan kas shift ini</p>
+        <ul class="mt-1 divide-y divide-outline-variant">
+          <li :for={m <- @movements} class="flex justify-between py-1">
+            <span class="text-on-surface-variant">
+              {movement_label(m.category)}
+              <span :if={m.supplier}>· {m.supplier.name}</span>
+              <span :if={m.note not in [nil, ""]}>· {m.note}</span>
+            </span>
+            <span class={if m.direction == "in", do: "text-primary", else: "text-error"}>
+              {movement_sign(m.direction)}{format_money(m.amount)}
+            </span>
+          </li>
+        </ul>
+      </.md_card>
 
-    <%!--
-      Two panels side by side on a landscape tablet or wider (products left, cart
-      right). On a portrait tablet the products fill the screen and the cart is a
-      panel opened from the bar pinned to the bottom.
-    --%>
-    <div :if={@shift} class="mt-4 grid grid-cols-1 gap-6 lg:grid-cols-5 md:landscape:grid-cols-5">
-      <%!-- Product search + tiles --%>
-      <div class="pb-24 lg:col-span-3 lg:pb-0 md:landscape:col-span-3 md:landscape:pb-0">
-        <%!-- Piutang: a customer repays (part of) what they owe, into this shift. --%>
-        <div class="mb-3">
-          <button type="button" phx-click="toggle_receivable" class={["chip", @receivable_open && "chip-active"]}>
-            Piutang
-          </button>
-          <div :if={@receivable_open} id="receivable-panel" class="mt-2 rounded-lg border border-gray-200 p-3 text-sm">
+      <%!--
+        Two panels side by side on a landscape tablet or wider (products left, cart
+        right). On a portrait tablet or phone the products fill the screen and the
+        cart is a bottom sheet opened from the bar pinned to the bottom.
+      --%>
+      <div :if={@shift} class="mt-4 grid grid-cols-1 gap-6 lg:grid-cols-5 md:landscape:grid-cols-5">
+        <%!-- Product search + tiles --%>
+        <div class="pb-24 lg:col-span-3 lg:pb-0 md:landscape:col-span-3 md:landscape:pb-0">
+          <form phx-change="search" phx-submit="scan">
+            <.md_search
+              id="cashier-search"
+              name="q"
+              value={@search}
+              placeholder="Scan barcode or search name / SKU"
+              phx-debounce="200"
+              autocomplete="off"
+            >
+              <:trailing>
+                <button
+                  type="button"
+                  phx-click="toggle_camera"
+                  aria-label={if @scanning, do: "Stop camera", else: "Scan with camera"}
+                  class="md-state -mr-2 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-on-surface-variant"
+                >
+                  <.md_icon name={if @scanning, do: "close", else: "camera"} />
+                </button>
+              </:trailing>
+            </.md_search>
+            <p class="mt-1 px-4 text-body-sm text-on-surface-variant">
+              Tip: a barcode scanner types the code and presses Enter to add the item.
+            </p>
+          </form>
+
+          <div :if={@scanning} class="mt-2">
+            <video
+              id="cashier-scanner"
+              phx-hook="BarcodeScanner"
+              phx-update="ignore"
+              autoplay
+              muted
+              class="aspect-video w-full max-w-xs rounded-md3-md bg-black"
+            >
+            </video>
+            <p class="mt-1 text-body-sm text-on-surface-variant">Point the camera at a barcode.</p>
+          </div>
+
+          <div class="mt-3 flex flex-wrap gap-2">
+            <%!-- Piutang: a customer repays (part of) what they owe, into this shift. --%>
+            <.md_chip phx-click="toggle_receivable" selected={@receivable_open}>
+              <:icon :if={not @receivable_open}><.md_icon name="person" class="-ml-1 h-[18px] w-[18px]" /></:icon>
+              Piutang
+            </.md_chip>
+            <%!-- Carts put aside in this store (Tunda), to resume from any tablet. --%>
+            <.md_chip :if={@held_count > 0} phx-click="toggle_held" selected={@held_open}>
+              <:icon :if={not @held_open}><.md_icon name="history" class="-ml-1 h-[18px] w-[18px]" /></:icon>
+              Ditunda ({@held_count})
+            </.md_chip>
+          </div>
+
+          <.md_card :if={@receivable_open} id="receivable-panel" variant="outlined" class="mt-2 p-3 text-body-md">
             <form phx-change="receivable_search" phx-submit="receivable_search">
-              <input type="search" name="q" value={@receivable_query} placeholder="Cari pelanggan (nama / no HP)" phx-debounce="250" autocomplete="off" class="form-control" />
+              <.md_text_field
+                type="search"
+                name="q"
+                value={@receivable_query}
+                placeholder="Cari pelanggan (nama / no HP)"
+                phx-debounce="250"
+                autocomplete="off"
+              />
             </form>
-            <div :if={@receivable_results != []} class="mt-1 divide-y divide-gray-100 rounded border border-gray-200">
+            <div
+              :if={@receivable_results != []}
+              class="mt-1 divide-y divide-outline-variant rounded-md3-xs border border-outline-variant"
+            >
               <button
                 :for={c <- @receivable_results}
                 type="button"
                 phx-click={JS.push("receivable_pick", value: %{id: c.id})}
-                class="block w-full px-2 py-1.5 text-left hover:bg-gray-50"
+                class="md-state block w-full px-3 py-2 text-left"
               >
-                {c.name} <span class="text-xs text-gray-500">{c.phone}</span>
+                {c.name} <span class="text-body-sm text-on-surface-variant">{c.phone}</span>
               </button>
             </div>
 
             <div :if={@receivable_customer} class="mt-3">
               <div class="flex items-baseline justify-between">
-                <p class="font-semibold">{@receivable_customer.name}</p>
+                <p class="text-title-sm">{@receivable_customer.name}</p>
                 <p>
                   {if Decimal.negative?(@receivable_balance), do: "Lebih bayar", else: "Sisa utang"}
-                  <span class="font-semibold">{format_money(Decimal.abs(@receivable_balance))}</span>
+                  <span class="font-medium">{format_money(Decimal.abs(@receivable_balance))}</span>
                 </p>
               </div>
-              <ul :if={@receivable_notes != []} class="mt-2 space-y-1 text-xs">
+              <ul :if={@receivable_notes != []} class="mt-2 space-y-1 text-body-sm">
                 <li :for={note <- @receivable_notes} class="flex justify-between">
                   <span>
                     {note.sale.code} · jatuh tempo {note.sale.due_date && Calendar.strftime(note.sale.due_date, "%d/%m/%Y")}
                   </span>
-                  <span class={note.overdue? && "font-semibold text-red-700"}>
+                  <span class={note.overdue? && "font-medium text-error"}>
                     {format_money(note.remaining)}{if note.overdue?, do: " · lewat"}
                   </span>
                 </li>
@@ -1149,337 +1206,317 @@ defmodule ZahlungsWeb.CashierLive do
                 phx-submit="receive_payment"
                 class="mt-3 grid grid-cols-2 gap-2"
               >
-                <label class="text-xs">
-                  Jumlah
-                  <input
-                    type="text"
-                    name="amount"
-                    inputmode="numeric"
-                    value={Decimal.to_string(Decimal.round(@receivable_balance, 0, :down), :normal)}
-                    class="form-control"
-                  />
-                </label>
-                <label class="text-xs">
-                  Cara bayar
-                  <select name="payment_method" class="form-control">
-                    <option :for={{value, label} <- repayment_method_options()} value={value}>{label}</option>
-                  </select>
-                </label>
-                <input type="text" name="note" maxlength="255" placeholder="Catatan (opsional)" class="form-control col-span-2" />
-                <.button class="col-span-2">Terima pelunasan</.button>
+                <.md_text_field
+                  name="amount"
+                  label="Jumlah"
+                  inputmode="numeric"
+                  value={Decimal.to_string(Decimal.round(@receivable_balance, 0, :down), :normal)}
+                />
+                <.md_text_field
+                  type="select"
+                  name="payment_method"
+                  label="Cara bayar"
+                  options={Enum.map(repayment_method_options(), fn {value, label} -> {label, value} end)}
+                />
+                <div class="col-span-2">
+                  <.md_text_field name="note" maxlength="255" placeholder="Catatan (opsional)" />
+                </div>
+                <.md_button class="col-span-2">Terima pelunasan</.md_button>
               </form>
-              <p :if={@last_payment} class="mt-2 text-xs">
-                <.link href={~p"/customer_payments/#{@last_payment.id}/receipt"} target="_blank" class="text-green-700 hover:underline">
+              <p :if={@last_payment} class="mt-2 text-body-sm">
+                <.link
+                  href={~p"/customer_payments/#{@last_payment.id}/receipt"}
+                  target="_blank"
+                  class="text-primary hover:underline"
+                >
                   Cetak struk pelunasan
                 </.link>
               </p>
             </div>
-          </div>
-        </div>
+          </.md_card>
 
-        <%!-- Carts put aside in this store (Tunda), to resume from any tablet. --%>
-        <div :if={@held_count > 0} class="mb-3">
-          <button type="button" phx-click="toggle_held" class={["chip", @held_open && "chip-active"]}>
-            Ditunda ({@held_count})
-          </button>
-          <div :if={@held_open} id="held-carts" class="mt-2 divide-y divide-gray-100 rounded-lg border border-gray-200">
-            <div :for={held <- @held} id={"held-#{held.id}"} class="flex items-center justify-between gap-2 p-3 text-sm">
+          <.md_card
+            :if={@held_count > 0 and @held_open}
+            id="held-carts"
+            variant="outlined"
+            class="mt-2 divide-y divide-outline-variant p-0"
+          >
+            <div :for={held <- @held} id={"held-#{held.id}"} class="flex items-center justify-between gap-2 p-3 text-body-md">
               <div class="min-w-0">
-                <p class="truncate font-medium">{held_label(held, @sale_scope.store)}</p>
-                <p class="text-xs text-gray-500">{held_age(held.inserted_at)}</p>
+                <p class="truncate text-title-sm">{held_label(held, @sale_scope.store)}</p>
+                <p class="text-body-sm text-on-surface-variant">{held_age(held.inserted_at)}</p>
               </div>
               <div class="flex shrink-0 gap-2">
-                <button type="button" phx-click={JS.push("resume_held", value: %{id: held.id})} class="chip chip-active">
+                <.md_button variant="tonal" type="button" phx-click={JS.push("resume_held", value: %{id: held.id})}>
                   Lanjutkan
-                </button>
-                <button
+                </.md_button>
+                <.md_button
+                  variant="text"
                   type="button"
                   phx-click={JS.push("delete_held", value: %{id: held.id})}
                   data-confirm="Hapus keranjang tertunda ini?"
-                  class="chip"
+                  class="!text-error"
                 >
                   Hapus
-                </button>
+                </.md_button>
               </div>
             </div>
-          </div>
-        </div>
+          </.md_card>
 
-        <form phx-change="search" phx-submit="scan">
-          <input
-            type="text"
-            name="q"
-            value={@search}
-            placeholder="Scan barcode or search name / SKU"
-            phx-debounce="200"
-            autocomplete="off"
-            class="form-control"
-          />
-          <p class="mt-1 text-xs text-gray-400">
-            Tip: a barcode scanner types the code and presses Enter to add the item.
-          </p>
-        </form>
-
-        <button type="button" phx-click="toggle_camera" class="mt-2 text-sm text-blue-600 hover:underline">
-          {if @scanning, do: "■ Stop camera", else: "📷 Scan with camera"}
-        </button>
-
-        <div :if={@scanning} class="mt-2">
-          <video
-            id="cashier-scanner"
-            phx-hook="BarcodeScanner"
-            phx-update="ignore"
-            autoplay
-            muted
-            class="w-full max-w-xs rounded border border-gray-300 bg-black aspect-video"
-          >
-          </video>
-          <p class="mt-1 text-xs text-gray-400">Point the camera at a barcode.</p>
-        </div>
-
-        <div class="mt-3 flex gap-2 overflow-x-auto pb-1" role="group" aria-label="Kategori">
-          <button
-            type="button"
-            phx-click={JS.push("set_category", value: %{id: ""})}
-            class={["chip", is_nil(@category_id) && "chip-active"]}
-          >
-            Semua
-          </button>
-          <button
-            :for={{name, id} <- @category_options}
-            type="button"
-            phx-click={JS.push("set_category", value: %{id: id})}
-            class={["chip", @category_id == id && "chip-active"]}
-          >
-            {name}
-          </button>
-        </div>
-
-        <div class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <button
-            :for={product <- @results}
-            type="button"
-            phx-click={JS.push("add", value: %{id: product.id})}
-            class="product-tile"
-          >
-            <span class="block font-medium leading-snug">{product.name}</span>
-            <span class="mt-1 block text-blue-700">{format_money(product.price)}</span>
-            <span class="mt-1 block text-xs text-gray-500">Stok {product.stock}</span>
-          </button>
-        </div>
-        <p :if={@results == []} class="mt-3 text-sm text-gray-500">
-          Tidak ada produk berstok yang cocok.
-        </p>
-      </div>
-
-      <%!-- Cart + payment --%>
-      <div class={[
-        "cart-panel lg:col-span-2 md:landscape:col-span-2",
-        (@cart_open && "cart-panel-open") || "hidden lg:block md:landscape:block"
-      ]}>
-        <div class="flex items-center justify-between">
-          <h3 class="font-semibold text-gray-700">Cart</h3>
-          <button
-            type="button"
-            phx-click="toggle_cart"
-            class="touch-target text-sm text-gray-600 underline lg:hidden md:landscape:hidden"
-          >
-            Tutup
-          </button>
-        </div>
-
-        <p :if={@cart == []} class="mt-3 text-sm text-gray-400">Cart is empty. Add products to begin.</p>
-
-        <table :if={@cart != []} class="w-full mt-3 text-sm">
-          <tr :for={item <- @priced_cart} class="border-t border-gray-100">
-            <td class="py-2">
-              <p class="font-medium">{item.name}</p>
-              <p class="text-xs text-gray-400">{format_money(item.unit_price)} each</p>
-              <p :if={item.promotion_name} class="text-xs text-amber-700">
-                {item.promotion_name} −{format_money(item.discount)}
-              </p>
-            </td>
-            <td class="py-2">
-              <div class="flex items-center gap-2">
-                <.link phx-click={JS.push("dec", value: %{id: item.product_id})} class="qty-button">-</.link>
-                <span>{item.quantity}</span>
-                <.link phx-click={JS.push("inc", value: %{id: item.product_id})} class="qty-button">+</.link>
-              </div>
-            </td>
-            <td class="py-2 text-right">
-              <span :if={item.promotion_name} class="block text-xs text-gray-400 line-through">
-                {format_money(Decimal.mult(item.unit_price, item.quantity))}
-              </span>
-              {format_money(item.line_total)}
-            </td>
-            <td class="py-2 text-right">
-              <.link phx-click={JS.push("remove", value: %{id: item.product_id})} class="text-red-600 text-xs">remove</.link>
-            </td>
-          </tr>
-        </table>
-
-        <form phx-change="payment" class="mt-4 space-y-2">
-          <div class="grid grid-cols-2 gap-3">
-            <label class="text-sm">
-              Discount
-              <input type="number" name="discount" value={@discount} min="0" step="0.01" class="form-control" />
-            </label>
-            <label class="text-sm">
-              Tax
-              <input type="number" name="tax" value={@tax} min="0" step="0.01" class="form-control" />
-            </label>
-          </div>
-          <p :if={@amount_error && @cart != []} class="text-sm text-red-600">{@amount_error}</p>
-        </form>
-
-        <div class="mt-3">
-          <span class="text-sm">Payment method</span>
-          <div class="mt-1 grid grid-cols-5 gap-1">
-            <button
-              :for={{value, label} <- payment_method_options()}
-              type="button"
-              disabled={not sale_method?(value)}
-              phx-click={sale_method?(value) && JS.push("set_payment_method", value: %{method: value})}
-              class={[
-                "text-sm py-1.5 rounded border",
-                (@payment_method == value && "bg-green-700 text-white border-green-700") ||
-                  "bg-white text-gray-700 border-gray-300 hover:border-green-500",
-                not sale_method?(value) && "opacity-40 cursor-not-allowed hover:border-gray-300"
-              ]}
+          <div class="mt-3 flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none]" role="group" aria-label="Kategori">
+            <.md_chip phx-click={JS.push("set_category", value: %{id: ""})} selected={is_nil(@category_id)}>
+              Semua
+            </.md_chip>
+            <.md_chip
+              :for={{name, id} <- @category_options}
+              phx-click={JS.push("set_category", value: %{id: id})}
+              selected={@category_id == id}
             >
-              {label}
+              {name}
+            </.md_chip>
+          </div>
+
+          <div class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <button
+              :for={product <- @results}
+              type="button"
+              phx-click={JS.push("add", value: %{id: product.id})}
+              class="md-state min-h-[88px] rounded-md3-md bg-surface-container-low p-3 text-left"
+            >
+              <span class="block text-title-sm line-clamp-2">{product.name}</span>
+              <span class="mt-1 block text-label-lg text-primary">{format_money(product.price)}</span>
+              <span class="mt-1 block text-body-sm text-on-surface-variant">Stok {product.stock}</span>
             </button>
           </div>
+          <p :if={@results == []} class="mt-3 text-body-md text-on-surface-variant">
+            Tidak ada produk berstok yang cocok.
+          </p>
         </div>
 
-        <label :if={@payment_method == "cash"} class="block text-sm mt-2">
-          Amount paid
-          <input
-            type="text"
-            id="amount-paid"
-            phx-hook="CurrencyInput"
-            phx-update="ignore"
-            inputmode="numeric"
-            placeholder="0"
-            class="form-control"
-          />
-        </label>
-        <div
-          :if={@payment_method == "cash" and @cart != []}
-          class="mt-2 flex flex-wrap gap-2"
-          role="group"
-          aria-label="Nominal cepat"
-        >
-          <button type="button" phx-click={JS.push("quick_cash", value: %{amount: "exact"})} class="chip">
-            Uang pas
-          </button>
-          <button
-            :for={amount <- quick_amounts(@total)}
-            type="button"
-            data-quick-cash={amount}
-            phx-click={JS.push("quick_cash", value: %{amount: amount})}
-            class="chip"
-          >
-            {format_money(amount)}
-          </button>
-        </div>
-        <p :if={@payment_method not in ["cash", "credit"]} class="text-sm text-gray-500 mt-2">
-          Dibayar pas sejumlah total ({payment_method_label(@payment_method)}).
-        </p>
-
-        <%!-- Piutang: who owes the rest, how much is paid now, and when the rest is due. --%>
-        <div :if={@payment_method == "credit"} id="credit-panel" class="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">
-          <%= if @credit_customer do %>
-            <div class="flex items-start justify-between gap-2">
-              <div>
-                <p class="font-semibold">{@credit_customer.name}</p>
-                <p class="text-xs text-gray-600">
-                  Utang {format_money(Decimal.sub(@credit_customer.credit_limit, @credit_available))} · Limit {format_money(@credit_customer.credit_limit)} · Sisa limit {format_money(Decimal.max(@credit_available, 0))}
-                </p>
-              </div>
-              <button type="button" phx-click="credit_clear" class="chip-sm">Ganti</button>
+        <%!-- Cart + payment: a panel on wide screens, a bottom sheet on phones. --%>
+        <.md_sheet id="cart-sheet" open={@cart_open} on_close="toggle_cart" class="lg:col-span-2 md:landscape:col-span-2">
+          <div class="rounded-md3-lg bg-surface-container-lowest p-4 lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto md:landscape:sticky md:landscape:top-20 md:landscape:max-h-[calc(100vh-6rem)] md:landscape:overflow-y-auto">
+            <div class="flex items-center justify-between">
+              <h3 class="text-title-md">Cart</h3>
+              <.md_button variant="text" type="button" phx-click="toggle_cart" class="lg:hidden md:landscape:hidden">
+                Tutup
+              </.md_button>
             </div>
-            <form phx-change="credit_fields" class="mt-2 grid grid-cols-2 gap-2">
-              <label class="text-xs">
-                Uang muka (tunai)
-                <input type="text" name="down_payment" value={@down_payment} inputmode="numeric" placeholder="0" class="form-control" />
-              </label>
-              <label class="text-xs">
-                Jatuh tempo
-                <input type="date" name="due_date" value={@due_date} class="form-control" />
-              </label>
-            </form>
-            <p :if={@credit_customer && Decimal.equal?(@credit_customer.credit_limit, 0)} class="mt-1 text-xs text-gray-600">
-              Limit piutang diatur admin.
+
+            <p :if={@cart == []} class="mt-3 text-body-md text-on-surface-variant">
+              Cart is empty. Add products to begin.
             </p>
-          <% else %>
-            <form phx-change="credit_search" phx-submit="credit_search">
-              <input type="search" name="q" value={@credit_query} placeholder="Cari pelanggan (nama / no HP)" phx-debounce="250" autocomplete="off" class="form-control" />
+
+            <table :if={@cart != []} class="mt-3 w-full text-body-md">
+              <tr :for={item <- @priced_cart} class="border-t border-outline-variant">
+                <td class="py-2">
+                  <p class="text-body-lg">{item.name}</p>
+                  <p class="text-body-sm text-on-surface-variant">{format_money(item.unit_price)} each</p>
+                  <p :if={item.promotion_name} class="text-body-sm text-warning">
+                    {item.promotion_name} −{format_money(item.discount)}
+                  </p>
+                </td>
+                <td class="py-2">
+                  <div class="flex items-center gap-2">
+                    <.md_button
+                      variant="outlined"
+                      type="button"
+                      phx-click={JS.push("dec", value: %{id: item.product_id})}
+                      aria-label="Kurangi"
+                      class="!h-11 !w-11 !px-0"
+                    >
+                      <.md_icon name="minus" />
+                    </.md_button>
+                    <span class="min-w-[1.5rem] text-center text-title-sm">{item.quantity}</span>
+                    <.md_button
+                      variant="tonal"
+                      type="button"
+                      phx-click={JS.push("inc", value: %{id: item.product_id})}
+                      aria-label="Tambah"
+                      class="!h-11 !w-11 !px-0"
+                    >
+                      <.md_icon name="plus" />
+                    </.md_button>
+                  </div>
+                </td>
+                <td class="py-2 text-right">
+                  <span :if={item.promotion_name} class="block text-body-sm text-on-surface-variant line-through">
+                    {format_money(Decimal.mult(item.unit_price, item.quantity))}
+                  </span>
+                  {format_money(item.line_total)}
+                </td>
+                <td class="py-2 text-right">
+                  <.link
+                    phx-click={JS.push("remove", value: %{id: item.product_id})}
+                    class="text-label-md text-error"
+                  >
+                    remove
+                  </.link>
+                </td>
+              </tr>
+            </table>
+
+            <form phx-change="payment" class="mt-4 space-y-2">
+              <div class="grid grid-cols-2 gap-3">
+                <.md_text_field type="number" name="discount" value={@discount} min="0" step="0.01" label="Discount" />
+                <.md_text_field type="number" name="tax" value={@tax} min="0" step="0.01" label="Tax" />
+              </div>
+              <p :if={@amount_error && @cart != []} class="text-body-md text-error">{@amount_error}</p>
             </form>
-            <div :if={@credit_results != []} class="mt-1 divide-y divide-amber-100 rounded border border-amber-200 bg-white">
-              <button
-                :for={c <- @credit_results}
-                type="button"
-                phx-click={JS.push("credit_pick", value: %{id: c.id})}
-                class="block w-full px-2 py-1.5 text-left hover:bg-amber-50"
-              >
-                {c.name} <span class="text-xs text-gray-500">{c.phone}</span>
-              </button>
+
+            <div class="mt-3">
+              <span class="text-body-sm text-on-surface-variant">Payment method</span>
+              <.md_segmented
+                name="payment_method"
+                value={@payment_method}
+                options={payment_method_options()}
+                disabled_options={for {value, _} <- payment_method_options(), not sale_method?(value), do: value}
+                event="set_payment_method"
+                value_key={:method}
+                class="mt-1"
+              />
             </div>
-            <form phx-submit="credit_new" class="mt-2 flex flex-wrap gap-2">
-              <input type="text" name="name" maxlength="80" placeholder="Nama pelanggan baru" class="form-control flex-1" />
-              <input type="text" name="phone" maxlength="20" placeholder="No HP" inputmode="tel" class="form-control w-28" />
-              <button type="submit" class="chip-sm">+ Pelanggan baru</button>
+
+            <div :if={@payment_method == "cash"} class="mt-3">
+              <.md_text_field
+                id="amount-paid"
+                label="Amount paid"
+                phx-hook="CurrencyInput"
+                phx-update="ignore"
+                inputmode="numeric"
+                placeholder="0"
+              />
+            </div>
+            <div
+              :if={@payment_method == "cash" and @cart != []}
+              class="mt-2 flex flex-wrap gap-2"
+              role="group"
+              aria-label="Nominal cepat"
+            >
+              <.md_chip kind="assist" phx-click={JS.push("quick_cash", value: %{amount: "exact"})}>
+                Uang pas
+              </.md_chip>
+              <.md_chip
+                :for={amount <- quick_amounts(@total)}
+                kind="assist"
+                data-quick-cash={amount}
+                phx-click={JS.push("quick_cash", value: %{amount: amount})}
+              >
+                {format_money(amount)}
+              </.md_chip>
+            </div>
+            <p :if={@payment_method not in ["cash", "credit"]} class="mt-2 text-body-md text-on-surface-variant">
+              Dibayar pas sejumlah total ({payment_method_label(@payment_method)}).
+            </p>
+
+            <%!-- Piutang: who owes the rest, how much is paid now, and when the rest is due. --%>
+            <div
+              :if={@payment_method == "credit"}
+              id="credit-panel"
+              class="mt-3 rounded-md3-md bg-warning-container p-3 text-body-md text-on-warning-container"
+            >
+              <%= if @credit_customer do %>
+                <div class="flex items-start justify-between gap-2">
+                  <div>
+                    <p class="text-title-sm">{@credit_customer.name}</p>
+                    <p class="text-body-sm">
+                      Utang {format_money(Decimal.sub(@credit_customer.credit_limit, @credit_available))} · Limit {format_money(@credit_customer.credit_limit)} · Sisa limit {format_money(Decimal.max(@credit_available, 0))}
+                    </p>
+                  </div>
+                  <.md_button variant="text" type="button" phx-click="credit_clear">Ganti</.md_button>
+                </div>
+                <form phx-change="credit_fields" class="mt-2 grid grid-cols-2 gap-2">
+                  <.md_text_field
+                    name="down_payment"
+                    value={@down_payment}
+                    label="Uang muka (tunai)"
+                    inputmode="numeric"
+                    placeholder="0"
+                  />
+                  <.md_text_field type="date" name="due_date" value={@due_date} label="Jatuh tempo" />
+                </form>
+                <p :if={@credit_customer && Decimal.equal?(@credit_customer.credit_limit, 0)} class="mt-1 text-body-sm">
+                  Limit piutang diatur admin.
+                </p>
+              <% else %>
+                <form phx-change="credit_search" phx-submit="credit_search">
+                  <.md_text_field
+                    type="search"
+                    name="q"
+                    value={@credit_query}
+                    placeholder="Cari pelanggan (nama / no HP)"
+                    phx-debounce="250"
+                    autocomplete="off"
+                  />
+                </form>
+                <div
+                  :if={@credit_results != []}
+                  class="mt-1 divide-y divide-outline-variant rounded-md3-xs border border-outline-variant bg-surface-container-lowest"
+                >
+                  <button
+                    :for={c <- @credit_results}
+                    type="button"
+                    phx-click={JS.push("credit_pick", value: %{id: c.id})}
+                    class="md-state block w-full px-3 py-2 text-left text-on-surface"
+                  >
+                    {c.name} <span class="text-body-sm text-on-surface-variant">{c.phone}</span>
+                  </button>
+                </div>
+                <form phx-submit="credit_new" class="mt-2 flex flex-wrap items-end gap-2">
+                  <div class="min-w-0 flex-1">
+                    <.md_text_field name="name" maxlength="80" placeholder="Nama pelanggan baru" />
+                  </div>
+                  <div class="w-28">
+                    <.md_text_field name="phone" maxlength="20" placeholder="No HP" inputmode="tel" />
+                  </div>
+                  <.md_button variant="text" type="submit">+ Pelanggan baru</.md_button>
+                </form>
+              <% end %>
+              <p :if={@credit_error && @cart != []} class="mt-2 text-body-md text-error">{@credit_error}</p>
+            </div>
+
+            <dl class="mt-4 space-y-1 border-t border-outline-variant pt-3 text-body-md">
+              <.receipt_row
+                :if={Decimal.gt?(@promo_saving, 0)}
+                label="Hemat promo"
+                value={"−" <> format_money(@promo_saving)}
+              />
+              <.receipt_row label="Subtotal" value={format_money(@subtotal)} />
+              <.receipt_row label="Total" value={format_money(@total)} bold />
+              <.receipt_row :if={@payment_method == "cash"} label="Change" value={format_money(@change_due)} />
+              <.receipt_row
+                :if={@payment_method == "credit"}
+                label="Jadi utang"
+                value={format_money(Decimal.max(Decimal.sub(@total, to_dec(@down_payment)), 0))}
+              />
+            </dl>
+
+            <div class="mt-4">
+              <.md_button type="button" phx-click="review_checkout" disabled={not @can_checkout} class="!h-14 w-full">
+                Complete sale
+              </.md_button>
+            </div>
+
+            <%!-- Tunda: put the cart aside to serve the next customer. --%>
+            <form :if={@cart != []} id="hold-form" phx-submit="hold" class="mt-3 flex items-end gap-2">
+              <div class="min-w-0 flex-1">
+                <.md_text_field name="note" maxlength="60" placeholder="Catatan (opsional)" autocomplete="off" />
+              </div>
+              <.md_button variant="outlined" type="submit">Tunda</.md_button>
             </form>
-          <% end %>
-          <p :if={@credit_error && @cart != []} class="mt-2 text-sm text-red-600">{@credit_error}</p>
+          </div>
+        </.md_sheet>
+
+        <%!-- Phones and portrait tablets: the cart at a glance, pinned to the bottom. --%>
+        <div class="cart-bar !min-h-[80px] !border-t-0 !bg-surface-container shadow-elev-2 lg:hidden md:landscape:hidden">
+          <div class="min-w-0 flex-1">
+            <p class="text-body-sm text-on-surface-variant">{cart_units(@cart)} item</p>
+            <p class="truncate text-title-lg">{format_money(@total)}</p>
+          </div>
+          <.md_button type="button" phx-click="toggle_cart" disabled={@cart == []}>
+            {if @cart_open, do: "Tutup", else: "Bayar"}
+          </.md_button>
         </div>
-
-        <dl class="mt-4 space-y-1 text-sm border-t border-gray-200 pt-3">
-          <.receipt_row
-            :if={Decimal.gt?(@promo_saving, 0)}
-            label="Hemat promo"
-            value={"−" <> format_money(@promo_saving)}
-          />
-          <.receipt_row label="Subtotal" value={format_money(@subtotal)} />
-          <.receipt_row label="Total" value={format_money(@total)} bold />
-          <.receipt_row :if={@payment_method == "cash"} label="Change" value={format_money(@change_due)} />
-          <.receipt_row
-            :if={@payment_method == "credit"}
-            label="Jadi utang"
-            value={format_money(Decimal.max(Decimal.sub(@total, to_dec(@down_payment)), 0))}
-          />
-        </dl>
-
-        <div class="mt-4">
-          <.button phx-click="review_checkout" disabled={not @can_checkout} class="w-full">
-            Complete Sale
-          </.button>
-        </div>
-
-        <%!-- Tunda: put the cart aside to serve the next customer. --%>
-        <form :if={@cart != []} id="hold-form" phx-submit="hold" class="mt-3 flex gap-2">
-          <input
-            type="text"
-            name="note"
-            maxlength="60"
-            placeholder="Catatan (opsional)"
-            autocomplete="off"
-            class="form-control min-w-0 flex-1"
-          />
-          <button type="submit" class="chip">Tunda</button>
-        </form>
-      </div>
-
-      <%!-- Portrait only: the cart at a glance, pinned to the bottom of the screen. --%>
-      <div class="cart-bar lg:hidden md:landscape:hidden">
-        <div class="min-w-0 flex-1">
-          <p class="text-xs text-gray-500">{cart_units(@cart)} item</p>
-          <p class="truncate text-lg font-semibold">{format_money(@total)}</p>
-        </div>
-        <button type="button" phx-click="toggle_cart" class="btn btn-primary touch-target" disabled={@cart == []}>
-          {if @cart_open, do: "Tutup", else: "Bayar"}
-        </button>
       </div>
     </div>
 
