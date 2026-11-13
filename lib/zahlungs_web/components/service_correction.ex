@@ -8,7 +8,7 @@ defmodule ZahlungsWeb.ServiceCorrection do
   """
   use Phoenix.Component
 
-  import ZahlungsWeb.CoreComponents, only: [modal: 1, button: 1, format_price: 1]
+  import ZahlungsWeb.CoreComponents, only: [format_price: 1]
 
   alias Phoenix.LiveView.JS
   alias Zahlungs.{Accounts, Services}
@@ -56,37 +56,33 @@ defmodule ZahlungsWeb.ServiceCorrection do
     assigns = assign(assigns, :to, target(assigns.transaction))
 
     ~H"""
-    <.modal id="correct-service" show on_cancel={JS.push("cancel_correction")}>
-      <div class="pr-10">
-        <h3 class="text-lg font-semibold">
-          {if @to == "failed", do: "Jadikan gagal", else: "Jadikan berhasil"}
-        </h3>
-      </div>
+    <MdComponents.md_dialog id="correct-service" show on_cancel={JS.push("cancel_correction")}>
+      <:title>{if @to == "failed", do: "Jadikan gagal", else: "Jadikan berhasil"}</:title>
 
-      <dl class="mt-3 space-y-1 text-sm">
+      <dl class="mt-3 space-y-1 text-body-md">
         <div class="flex justify-between gap-4">
-          <dt class="text-gray-500">Kode</dt>
+          <dt class="text-on-surface-variant">Kode</dt>
           <dd class="min-w-0 break-words text-right">{@transaction.code}</dd>
         </div>
         <div class="flex justify-between gap-4">
-          <dt class="text-gray-500">Produk</dt>
+          <dt class="text-on-surface-variant">Produk</dt>
           <dd class="min-w-0 break-words text-right">{@transaction.product_name}</dd>
         </div>
         <div class="flex justify-between gap-4">
-          <dt class="text-gray-500">Nomor pelanggan</dt>
+          <dt class="text-on-surface-variant">Nomor pelanggan</dt>
           <dd class="min-w-0 break-words text-right">{@transaction.customer_ref}</dd>
         </div>
         <div class="flex justify-between gap-4">
-          <dt class="text-gray-500">Harga</dt>
+          <dt class="text-on-surface-variant">Harga</dt>
           <dd>{format_price(@transaction.price)}</dd>
         </div>
         <div class="flex justify-between gap-4 font-medium">
-          <dt class="text-gray-500">Status</dt>
+          <dt class="text-on-surface-variant">Status</dt>
           <dd><.status_badge status={@transaction.status} /> → <.status_badge status={@to} /></dd>
         </div>
       </dl>
 
-      <p class="mt-3 rounded bg-amber-50 px-3 py-2 text-sm text-amber-800">
+      <p class="mt-3 rounded-md3-sm bg-warning-container px-3 py-2 text-body-md text-on-warning-container">
         <%= if @to == "failed" do %>
           Uang {format_price(@transaction.price)} menunggu dikembalikan ke pelanggan oleh kasir.
         <% else %>
@@ -94,26 +90,42 @@ defmodule ZahlungsWeb.ServiceCorrection do
         <% end %>
       </p>
 
-      <form phx-submit="confirm_correction" class="mt-4 space-y-3">
-        <label :if={@to == "success"} class="block text-sm">
-          SN / token (opsional)
-          <input type="text" name="token_sn" value={@token_sn} maxlength="64" class="form-control mt-1" autocomplete="off" />
-        </label>
+      <form id="correct-service-form" phx-submit="confirm_correction" class="mt-4 space-y-3">
+        <MdComponents.md_text_field
+          :if={@to == "success"}
+          name="token_sn"
+          value={@token_sn}
+          label="SN / token (opsional)"
+          maxlength="64"
+          autocomplete="off"
+        />
         <input :if={@to == "failed"} type="hidden" name="token_sn" value="" />
-        <label class="block text-sm">
-          Alasan
-          <textarea name="reason" maxlength="200" required rows="2" class="form-control mt-1">{@reason}</textarea>
-        </label>
-        <p :if={@error} role="alert" class="text-sm text-red-600">{@error}</p>
-        <div class="flex justify-end gap-2">
-          <button type="button" phx-click="cancel_correction" class="chip">Batal</button>
-          <.button :if={@to == "failed"} class="!bg-red-600" phx-disable-with="Menyimpan...">
-            Jadikan gagal
-          </.button>
-          <.button :if={@to == "success"} phx-disable-with="Menyimpan...">Jadikan berhasil</.button>
-        </div>
+        <MdComponents.md_text_field
+          type="textarea"
+          name="reason"
+          value={@reason}
+          label="Alasan"
+          maxlength="200"
+          rows="2"
+          required
+        />
+        <p :if={@error} role="alert" class="text-body-sm text-error">{@error}</p>
       </form>
-    </.modal>
+
+      <:actions>
+        <MdComponents.md_button variant="text" type="button" phx-click="cancel_correction">
+          Batal
+        </MdComponents.md_button>
+        <MdComponents.md_button
+          variant={if @to == "failed", do: "danger", else: "filled"}
+          type="submit"
+          form="correct-service-form"
+          phx-disable-with="Menyimpan..."
+        >
+          {if @to == "failed", do: "Jadikan gagal", else: "Jadikan berhasil"}
+        </MdComponents.md_button>
+      </:actions>
+    </MdComponents.md_dialog>
     """
   end
 

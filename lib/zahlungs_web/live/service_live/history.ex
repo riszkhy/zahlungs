@@ -182,25 +182,6 @@ defmodule ZahlungsWeb.ServiceLive.History do
     |> Calendar.strftime("%d %b %Y %H:%M")
   end
 
-  defp status_label("success"), do: "Berhasil"
-  defp status_label("failed"), do: "Gagal"
-  defp status_label(_), do: "Diproses"
-
-  attr :transaction, :map, required: true
-
-  defp status_badge(assigns) do
-    ~H"""
-    <span class={[
-      "inline-block rounded-full px-2 py-0.5 text-xs",
-      @transaction.status == "success" && "bg-green-100 text-green-700",
-      @transaction.status == "failed" && "bg-red-100 text-red-700",
-      @transaction.status == "processing" && "bg-amber-100 text-amber-800"
-    ]}>
-      {status_label(@transaction.status)}
-    </span>
-    """
-  end
-
   attr :transaction, :map, required: true
   attr :user, :map, required: true
 
@@ -319,7 +300,7 @@ defmodule ZahlungsWeb.ServiceLive.History do
         </span>
         <span class="text-right">
           <span class="block font-semibold">{format_price(tx.price)}</span>
-          <.status_badge transaction={tx} />
+          <ServiceCorrection.status_badge status={tx.status} />
           <.correct_button transaction={tx} user={@current_user} />
         </span>
       </div>
@@ -335,7 +316,7 @@ defmodule ZahlungsWeb.ServiceLive.History do
         <:col :let={tx} label="Kasir">{cashier(tx)}</:col>
         <:col :let={tx} label="Harga">{format_price(tx.price)}</:col>
         <:col :let={tx} label="Status">
-          <.status_badge transaction={tx} />
+          <ServiceCorrection.status_badge status={tx.status} />
           <.outcome transaction={tx} />
           <.correct_button transaction={tx} user={@current_user} />
         </:col>

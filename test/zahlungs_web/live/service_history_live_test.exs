@@ -292,7 +292,7 @@ defmodule ZahlungsWeb.ServiceHistoryLiveTest do
         |> event("review_correction", %{"id" => ctx.success.id})
         |> html()
 
-      assert html =~ ~r/class="[^"]*\bpr-10\b[^"]*">\s*<h3/
+      assert html =~ ~r/class="[^"]*\bpr-10\b[^"]*"[^>]*>\s*Jadikan gagal/
     end
 
     defp popup_html(ctx, tx) do
@@ -304,8 +304,16 @@ defmodule ZahlungsWeb.ServiceHistoryLiveTest do
 
     test "the popup names its action", ctx do
       html = popup_html(ctx, ctx.success)
-      assert html =~ ~r/<button[^>]*!bg-red-600[^>]*>\s*Jadikan gagal\s*<\/button>/
+      assert html =~ ~r/<button[^>]*bg-error[^>]*>\s*Jadikan gagal\s*<\/button>/
       refute html =~ "Simpan koreksi"
+    end
+
+    test "the main button submits the form from outside it", ctx do
+      html = popup_html(ctx, ctx.success)
+      assert html =~ ~r/<form[^>]*id="correct-service-form"[^>]*phx-submit="confirm_correction"/
+      [button] = Regex.run(~r/<button[^>]*>\s*Jadikan gagal/, html)
+      assert button =~ ~s(type="submit")
+      assert button =~ ~s(form="correct-service-form")
     end
 
     test "towards success warns the money stays", ctx do
@@ -318,13 +326,13 @@ defmodule ZahlungsWeb.ServiceHistoryLiveTest do
     test "Batal sits at the bottom, before the main button", ctx do
       html = popup_html(ctx, ctx.success)
       assert html =~ ~r/<\/textarea>.*phx-click="cancel_correction".*Jadikan gagal/s
-      refute html =~ ~r/<\/h3>\s*<button[^>]*cancel_correction/
+      refute html =~ ~r/<\/h2>\s*<button[^>]*cancel_correction/
     end
 
     test "a failed service has a red badge", ctx do
       {:ok, _} = Services.correct_status(ctx.admin, ctx.success, "failed", "Uji")
       html = ServiceLive.History |> mount_live(ctx.admin) |> html()
-      assert html =~ ~r/bg-red-100 text-red-700[^>]*>\s*Gagal/
+      assert html =~ ~r/bg-error-container[^>]*>\s*Gagal/
     end
 
     test "a correction's reason shows once on the card", ctx do
