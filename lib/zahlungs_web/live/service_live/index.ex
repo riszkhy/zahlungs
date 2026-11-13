@@ -662,7 +662,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
     </.md_card>
 
     <div :if={@sellable} class="mt-6 grid gap-4 lg:grid-cols-5 md:landscape:grid-cols-5">
-      <section class="lg:col-span-3 md:landscape:col-span-3">
+      <section class="min-w-0 lg:col-span-3 md:landscape:col-span-3">
         <div class="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none]">
           <.md_chip
             :for={{value, label} <- Services.categories()}

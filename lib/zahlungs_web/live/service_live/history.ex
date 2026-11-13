@@ -321,7 +321,7 @@ defmodule ZahlungsWeb.ServiceLive.History do
             </span>
             <.outcome transaction={tx} />
           </span>
-          <span class="text-right">
+          <span class="flex shrink-0 flex-col items-end gap-1 text-right">
             <span class="block text-title-sm">{format_price(tx.price)}</span>
             <ServiceCorrection.status_badge status={tx.status} />
             <.correct_button transaction={tx} user={@current_user} />

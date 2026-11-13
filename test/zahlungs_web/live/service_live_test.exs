@@ -653,6 +653,12 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       assert event(socket, "clear_number").assigns.form["customer_ref"] == ""
     end
 
+    # The category chips scroll sideways; without min-w-0 their row would
+    # widen the grid column past a phone's screen.
+    test "the product column may shrink below its chips' width", ctx do
+      assert html(ctx.socket) =~ ~r/<section class="[^"]*\bmin-w-0\b[^"]*lg:col-span-3/
+    end
+
     test "the page is MD3 and links to the history", ctx do
       html = html(ctx.socket)
       assert html =~ ~s(class="md3 -m-6)

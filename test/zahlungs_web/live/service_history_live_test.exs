@@ -132,6 +132,17 @@ defmodule ZahlungsWeb.ServiceHistoryLiveTest do
       assert box =~ "rounded-md3-lg"
     end
 
+    test "a card stacks price, status and Koreksi status at its right", %{
+      cashier: cashier,
+      pulsa: pulsa
+    } do
+      tx = service_fixture(cashier, pulsa)
+      html = ServiceLive.History |> mount_live(admin_fixture()) |> html()
+
+      [card] = Regex.run(~r/<div[^>]*id="service-card-#{tx.id}".*?<\/div>/s, html)
+      assert card =~ ~r/<span class="[^"]*\bflex-col\b[^"]*">\s*<span[^>]*>\s*Rp/
+    end
+
     test "the page is MD3 with a link back to Layanan", %{cashier: cashier, pulsa: pulsa} do
       {:ok, _} = Services.mark_success(service_fixture(cashier, pulsa), cashier, nil)
       html = ServiceLive.History |> mount_live(cashier) |> html()
