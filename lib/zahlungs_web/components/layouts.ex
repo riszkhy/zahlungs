@@ -30,9 +30,9 @@ defmodule ZahlungsWeb.Layouts do
         name="store_id"
         aria-label="Toko aktif"
         onchange="this.form.return_to.value = window.location.pathname; this.form.submit()"
-        class="max-w-full rounded border-0 bg-white/15 py-1 pl-2 pr-7 text-sm text-white focus:ring-1 focus:ring-white"
+        class="max-w-full rounded-md3-xs border-0 bg-surface-container-highest py-1 pl-2 pr-7 text-body-md text-on-surface focus:ring-1 focus:ring-primary"
       >
-        <option value="all" selected={is_nil(@scope.store)} class="text-gray-800">Semua toko</option>
+        <option value="all" selected={is_nil(@scope.store)} class="text-on-surface">Semua toko</option>
         <option
           :for={store <- Zahlungs.Stores.list_active_stores()}
           value={store.id}
@@ -46,7 +46,7 @@ defmodule ZahlungsWeb.Layouts do
     <span
       :if={not @admin? and @scope.store}
       title={@scope.store.name}
-      class="min-w-0 truncate rounded bg-white/15 px-2 py-1 text-white"
+      class="min-w-0 truncate rounded-md3-sm bg-secondary-container px-2 py-1 text-body-md text-on-secondary-container"
     >
       {@scope.store.name}
     </span>

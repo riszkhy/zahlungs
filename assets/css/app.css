@@ -290,15 +290,16 @@
   display: none !important;
 }
 
+/* MD3 top bar links (on bg-surface-container): pills with a state layer. */
 .nav-tap {
-  @apply inline-flex items-center justify-center gap-2 rounded px-3 text-sm font-medium text-white/90;
+  @apply md-state inline-flex items-center justify-center gap-2 rounded-full px-4 text-label-lg text-on-surface-variant;
   min-height: 44px;
   min-width: 44px;
 }
 
 .nav-tap:hover,
 .nav-tap:focus-visible {
-  @apply bg-white/15 text-white;
+  @apply text-on-surface;
 }
 
 .drawer-link {
