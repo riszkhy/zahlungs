@@ -10,6 +10,9 @@ defmodule ZahlungsWeb.MdComponents do
   """
   use Phoenix.Component
 
+  alias Phoenix.LiveView.JS
+  alias ZahlungsWeb.CoreComponents
+
   @doc "A 24px Material icon, in the text colour. An unknown name raises."
   attr :name, :string, required: true
   attr :class, :string, default: nil
@@ -181,4 +184,196 @@ defmodule ZahlungsWeb.MdComponents do
     </div>
     """
   end
+
+  @doc """
+  An MD3 segmented button over radio inputs (so a form submits the choice).
+  An option in `disabled_options` can't be picked: disabled, no `phx-click`.
+  With `event`, picking an option pushes `event` with `%{value_key => value}`.
+  """
+  attr :name, :string, required: true
+  attr :value, :any, default: nil
+  attr :options, :list, required: true, doc: "`{value, label}` pairs, at most five"
+  attr :disabled_options, :list, default: []
+  attr :event, :string, default: nil
+  attr :value_key, :atom, default: :value
+  attr :class, :any, default: nil
+
+  def md_segmented(assigns) do
+    ~H"""
+    <div role="radiogroup" class={["flex overflow-hidden rounded-full border border-outline", @class]}>
+      <label
+        :for={{{value, label}, i} <- Enum.with_index(@options)}
+        class={[
+          "md-state flex min-h-[44px] flex-1 cursor-pointer items-center justify-center gap-1 px-2 text-label-lg",
+          i > 0 && "border-l border-outline",
+          (value == @value && "bg-secondary-container text-on-secondary-container") || "text-on-surface",
+          value in @disabled_options && "cursor-not-allowed opacity-40"
+        ]}
+      >
+        <input
+          type="radio"
+          class="sr-only"
+          name={@name}
+          value={value}
+          checked={value == @value}
+          disabled={value in @disabled_options}
+          phx-click={@event && value not in @disabled_options && JS.push(@event, value: %{@value_key => value})}
+        />
+        <.md_icon :if={value == @value} name="check" class="h-[18px] w-[18px]" />
+        {label}
+      </label>
+    </div>
+    """
+  end
+
+  @doc """
+  An MD3 outlined text field with its label above: `text` (default),
+  `number`, `date`, `search` or `select` (`options`, `prompt`). Extra
+  attributes (`phx-hook`, `phx-update`, `inputmode`, ...) go on the input.
+  """
+  attr :id, :any, default: nil
+  attr :name, :any, required: true
+  attr :value, :any, default: nil
+  attr :label, :string, default: nil
+  attr :type, :string, default: "text", values: ~w(text number date search select)
+  attr :options, :list, default: []
+  attr :prompt, :string, default: nil
+  attr :supporting, :string, default: nil
+  attr :errors, :list, default: []
+  attr :class, :any, default: nil
+
+  attr :rest, :global,
+    include:
+      ~w(autocomplete disabled form inputmode maxlength min max placeholder readonly required step)
+
+  def md_text_field(assigns) do
+    ~H"""
+    <label class="block text-body-sm text-on-surface-variant">
+      {@label}
+      <select :if={@type == "select"} id={@id} name={@name} class={[field_class(), @class]} {@rest}>
+        <option :if={@prompt} value="">{@prompt}</option>
+        {Phoenix.HTML.Form.options_for_select(@options, @value)}
+      </select>
+      <input
+        :if={@type != "select"}
+        type={@type}
+        id={@id}
+        name={@name}
+        value={@value}
+        class={[field_class(), @class]}
+        {@rest}
+      />
+      <span :if={@supporting} class="mt-1 block text-body-sm">{@supporting}</span>
+      <span :for={error <- @errors} class="mt-1 block text-body-sm text-error">{error}</span>
+    </label>
+    """
+  end
+
+  defp field_class,
+    do:
+      "mt-1 block w-full min-h-[44px] rounded-md3-xs border border-outline bg-transparent px-3 text-body-lg text-on-surface focus:border-primary focus:ring-1 focus:ring-primary"
+
+  @doc """
+  An MD3 dialog with the structure and ids of `CoreComponents.modal/1`
+  (`id`, `id-bg`, `id-container`, `id-content`, the close mark outside
+  `-content`), so it opens, focuses and closes the same way.
+  """
+  attr :id, :string, required: true
+  attr :show, :boolean, default: false
+  attr :on_cancel, JS, default: %JS{}
+
+  slot :title
+  slot :inner_block, required: true
+  slot :actions
+
+  def md_dialog(assigns) do
+    ~H"""
+    <div
+      id={@id}
+      phx-mounted={@show && CoreComponents.show_modal(@id)}
+      phx-remove={CoreComponents.hide_modal(@id)}
+      data-cancel={JS.exec(@on_cancel, "phx-remove")}
+      class="md3 relative z-50 hidden"
+    >
+      <div id={"#{@id}-bg"} class="fixed inset-0 bg-black/30 transition-opacity" aria-hidden="true" />
+      <div
+        class="fixed inset-0 overflow-y-auto"
+        aria-labelledby={"#{@id}-title"}
+        role="dialog"
+        aria-modal="true"
+        tabindex="0"
+      >
+        <div class="flex min-h-full items-center justify-center p-4">
+          <.focus_wrap
+            id={"#{@id}-container"}
+            phx-window-keydown={JS.exec("data-cancel", to: "##{@id}")}
+            phx-key="escape"
+            phx-click-away={JS.exec("data-cancel", to: "##{@id}")}
+            class="relative hidden w-full max-w-lg rounded-md3-xl bg-surface-container-high p-6 text-on-surface shadow-elev-3 transition"
+          >
+            <div class="absolute top-4 right-4">
+              <button
+                phx-click={JS.exec("data-cancel", to: "##{@id}")}
+                type="button"
+                class="md-state flex h-10 w-10 items-center justify-center rounded-full text-on-surface-variant"
+                aria-label="close"
+              >
+                <.md_icon name="close" />
+              </button>
+            </div>
+            <div id={"#{@id}-content"}>
+              <h2 :if={@title != []} id={"#{@id}-title"} class="pr-10 text-headline-sm">
+                {render_slot(@title)}
+              </h2>
+              {render_slot(@inner_block)}
+              <div :if={@actions != []} class="mt-6 flex flex-wrap justify-end gap-2">
+                {render_slot(@actions)}
+              </div>
+            </div>
+          </.focus_wrap>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
+  An MD3 bottom sheet on phones (below `lg`, and not `md` landscape); on wide
+  screens its content stays in place. `open` shows it with a scrim whose click
+  pushes `on_close`.
+  """
+  attr :id, :string, required: true
+  attr :open, :boolean, default: false
+  attr :on_close, :string, required: true
+  attr :class, :any, default: nil
+
+  slot :inner_block, required: true
+
+  def md_sheet(assigns) do
+    ~H"""
+    <div
+      :if={@open}
+      class="fixed inset-0 z-40 bg-black/30 lg:hidden md:landscape:hidden"
+      phx-click={@on_close}
+      aria-hidden="true"
+    />
+    <div
+      id={@id}
+      class={[
+        (@open && sheet_open_class()) || "hidden lg:block md:landscape:block",
+        @class
+      ]}
+    >
+      <div :if={@open} class="mx-auto mb-3 h-1 w-8 rounded-full bg-outline lg:hidden md:landscape:hidden" />
+      {render_slot(@inner_block)}
+    </div>
+    """
+  end
+
+  # Fixed at the bottom on phones; back in the page flow on wide screens.
+  defp sheet_open_class,
+    do:
+      "fixed inset-x-0 bottom-0 z-50 max-h-[85vh] overflow-y-auto rounded-t-md3-xl bg-surface-container-low p-4 pt-2 shadow-elev-1 " <>
+        "lg:static lg:z-auto lg:max-h-none lg:overflow-visible lg:rounded-none lg:bg-transparent lg:p-0 lg:shadow-none " <>
+        "md:landscape:static md:landscape:z-auto md:landscape:max-h-none md:landscape:overflow-visible md:landscape:rounded-none md:landscape:bg-transparent md:landscape:p-0 md:landscape:shadow-none"
 end

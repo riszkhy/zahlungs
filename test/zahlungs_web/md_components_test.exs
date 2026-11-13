@@ -84,6 +84,110 @@ defmodule ZahlungsWeb.MdComponentsTest do
     end
   end
 
+  describe "md_segmented" do
+    test "one radio per option, the chosen checked, a disabled one inert" do
+      html =
+        render_component(&MdComponents.md_segmented/1,
+          name: "payment_method",
+          value: "qris",
+          options: [{"cash", "Tunai"}, {"qris", "QRIS"}, {"credit", "Piutang"}],
+          disabled_options: ["credit"],
+          event: "set_payment_method",
+          value_key: :method
+        )
+
+      assert html =~ ~s(role="radiogroup")
+      assert length(Regex.scan(~r/type="radio"[^>]*name="payment_method"/, html)) == 3
+      assert html =~ ~r/<input[^>]*value="qris"[^>]*checked/
+      assert html =~ ~r/<input[^>]*value="credit"[^>]*disabled/
+      refute html =~ ~r/<input[^>]*value="credit"[^>]*phx-click/
+      assert html =~ ~r/<input[^>]*value="qris"[^>]*phx-click="[^"]*set_payment_method/
+    end
+  end
+
+  describe "md_text_field" do
+    test "keeps id, hook and phx-update" do
+      html =
+        render_component(&MdComponents.md_text_field/1,
+          id: "amount-paid",
+          name: "amount_paid",
+          value: "",
+          label: "Uang diterima",
+          "phx-hook": "MoneyInput",
+          "phx-update": "ignore"
+        )
+
+      assert html =~ ~s(id="amount-paid")
+      assert html =~ ~s(phx-hook="MoneyInput")
+      assert html =~ ~s(phx-update="ignore")
+      assert html =~ "Uang diterima"
+      assert html =~ "rounded-md3-xs"
+    end
+
+    test "select" do
+      html =
+        render_component(&MdComponents.md_text_field/1,
+          name: "category",
+          type: "select",
+          label: "Tipe",
+          options: [{"Masuk", "in"}, {"Keluar", "out"}],
+          value: "in"
+        )
+
+      assert html =~ ~s(<select)
+      assert html =~ ~r/value="in"[^>]*selected|selected[^>]*value="in"/
+    end
+  end
+
+  describe "md_dialog" do
+    test "ids and close mark like modal" do
+      html =
+        render_component(&MdComponents.md_dialog/1,
+          id: "confirm-sale",
+          title: slot("Konfirmasi penjualan"),
+          inner_block: slot("BODY"),
+          actions: slot("ACTIONS")
+        )
+
+      assert html =~ ~s(role="dialog")
+      assert html =~ ~s(id="confirm-sale-container")
+      assert html =~ ~s(id="confirm-sale-bg")
+      assert html =~ ~r/aria-label="close".*id="confirm-sale-content"/s
+      assert html =~ ~r/id="confirm-sale-title"[^>]*>\s*Konfirmasi penjualan/
+      assert html =~ ~r/id="confirm-sale-content".*BODY.*ACTIONS/s
+      assert html =~ "rounded-md3-xl"
+    end
+  end
+
+  describe "md_sheet" do
+    test "closed hides on phones, open has a scrim that closes" do
+      closed =
+        render_component(&MdComponents.md_sheet/1,
+          id: "cart-sheet",
+          open: false,
+          on_close: "toggle_cart",
+          inner_block: slot("CART")
+        )
+
+      assert closed =~ "hidden lg:block"
+      refute closed =~ "bg-black/30"
+
+      open =
+        render_component(&MdComponents.md_sheet/1,
+          id: "cart-sheet",
+          open: true,
+          on_close: "toggle_cart",
+          inner_block: slot("CART")
+        )
+
+      assert open =~
+               ~r/bg-black\/30[^>]*phx-click="toggle_cart"|phx-click="toggle_cart"[^>]*bg-black\/30/
+
+      assert open =~ "rounded-t-md3-xl"
+      assert open =~ "CART"
+    end
+  end
+
   describe "md_card" do
     test "variants" do
       assert render_component(&MdComponents.md_card/1,
