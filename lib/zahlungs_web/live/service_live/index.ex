@@ -17,7 +17,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
 
   alias Zahlungs.{Deposits, Services, Shifts, Stores}
   alias Zahlungs.Services.{Brand, Product}
-  alias ZahlungsWeb.AmountInput
+  alias ZahlungsWeb.{AmountInput, ServiceCorrection}
 
   @payment_methods [
     {"cash", "Tunai"},
@@ -572,10 +572,6 @@ defmodule ZahlungsWeb.ServiceLive.Index do
   defp by_hand?(transaction, user),
     do: user.role == "admin" and Services.awaiting_too_long?(transaction)
 
-  defp status_label("success"), do: "Berhasil"
-  defp status_label("failed"), do: "Gagal"
-  defp status_label(_), do: "Diproses"
-
   defp time(transaction, store) do
     transaction.inserted_at |> Zahlungs.LocalTime.to_local(store) |> Calendar.strftime("%H:%M")
   end
@@ -941,74 +937,113 @@ defmodule ZahlungsWeb.ServiceLive.Index do
 
 
     <section :if={@shift} class="mt-6">
-      <h3 class="font-semibold text-gray-700">Sedang diproses ({length(@processing)})</h3>
-      <p :if={@processing == []} class="mt-2 text-sm text-gray-500">Tidak ada.</p>
-      <div :for={tx <- @processing} id={"processing-#{tx.id}"} class="mt-2 rounded-lg border border-gray-200 p-3">
-        <p class="text-sm">
+      <h3 class="text-title-md">Sedang diproses ({length(@processing)})</h3>
+      <p :if={@processing == []} class="mt-2 text-body-md text-on-surface-variant">Tidak ada.</p>
+      <.md_card
+        :for={tx <- @processing}
+        id={"processing-#{tx.id}"}
+        variant="outlined"
+        class="mt-2 !p-3"
+      >
+        <p class="text-body-md">
           <span class="font-medium">{tx.product_name}</span>
           · {group_digits(tx.customer_ref)} · {format_price(tx.price)} · {time(tx, @store)}
         </p>
 
-        <div :if={tx.channel == "api"} class="mt-2 flex flex-wrap items-center justify-between gap-2 text-sm">
-          <span class="text-amber-700">
+        <div
+          :if={tx.channel == "api"}
+          class="mt-2 flex flex-wrap items-center justify-between gap-2 text-body-md"
+        >
+          <span class="text-warning">
             Menunggu penyedia
-            <span :if={tx.provider_message} class="block text-xs text-gray-500">{tx.provider_message}</span>
+            <span :if={tx.provider_message} class="block text-body-sm text-on-surface-variant">
+              {tx.provider_message}
+            </span>
           </span>
-          <button
+          <.md_button
+            variant="tonal"
             type="button"
             phx-click={JS.push("check_status", value: %{transaction_id: tx.id})}
             phx-disable-with="Mengecek..."
-            class="chip"
           >
             Cek status
-          </button>
+          </.md_button>
         </div>
 
-        <p :if={by_hand?(tx, @current_user)} class="mt-2 text-xs text-amber-800">
+        <p :if={by_hand?(tx, @current_user)} class="mt-2 text-body-sm text-warning">
           Belum ada jawaban penyedia lebih dari 10 menit. Periksa di aplikasi penyedia, lalu tandai.
         </p>
 
         <div :if={tx.channel != "api" or by_hand?(tx, @current_user)}>
-          <form phx-submit="mark_success" class="mt-2 flex flex-wrap items-center gap-2">
+          <form phx-submit="mark_success" class="mt-2 flex items-end gap-2">
             <input type="hidden" name="transaction_id" value={tx.id} />
-            <input type="text" name="token_sn" placeholder="Token / SN (opsional)" maxlength="64" class="form-control min-w-0 flex-1" />
-            <button type="submit" class="chip">Berhasil</button>
+            <div class="min-w-0 flex-1">
+              <.md_text_field
+                name="token_sn"
+                placeholder="Token / SN (opsional)"
+                maxlength="64"
+                autocomplete="off"
+              />
+            </div>
+            <.md_button variant="tonal" type="submit">Berhasil</.md_button>
           </form>
-          <form phx-submit="mark_failed" class="mt-2 flex flex-wrap items-center gap-2">
+          <form phx-submit="mark_failed" class="mt-2 flex items-end gap-2">
             <input type="hidden" name="transaction_id" value={tx.id} />
-            <input type="text" name="reason" placeholder="Alasan gagal" maxlength="255" required class="form-control min-w-0 flex-1" />
-            <button type="submit" class="chip !border-red-300 !text-red-700">Gagal</button>
+            <div class="min-w-0 flex-1">
+              <.md_text_field
+                name="reason"
+                placeholder="Alasan gagal"
+                maxlength="255"
+                autocomplete="off"
+                required
+              />
+            </div>
+            <.md_button variant="outlined" type="submit" class="!text-error">Gagal</.md_button>
           </form>
         </div>
-      </div>
+      </.md_card>
     </section>
 
-    <p :if={@commission} id="shift-commission" class="mt-6 text-sm text-gray-600">
-      Komisi shift ini: <strong class="text-green-700">{format_money(@commission)}</strong>
-      <.link navigate={~p"/commissions"} class="ml-2 underline">Komisi saya</.link>
+    <p :if={@commission} id="shift-commission" class="mt-6 text-body-md text-on-surface-variant">
+      Komisi shift ini: <strong class="text-primary">{format_money(@commission)}</strong>
+      <.md_button variant="text" navigate={~p"/commissions"} class="ml-1">Komisi saya</.md_button>
     </p>
 
     <section :if={@history != []} class="mt-6">
-      <h3 class="font-semibold text-gray-700">Riwayat shift ini</h3>
-      <div :for={tx <- @history} id={"history-#{tx.id}"} class="list-card mt-2">
+      <h3 class="text-title-md">Riwayat shift ini</h3>
+      <div
+        :for={tx <- @history}
+        id={"history-#{tx.id}"}
+        class="mt-2 flex items-center gap-3 rounded-md3-md bg-surface-container-low px-4 py-3 text-body-md"
+      >
         <span class="min-w-0 flex-1">
-          <span class="block truncate font-medium">{tx.product_name} · {group_digits(tx.customer_ref)}</span>
-          <span :if={tx.token_sn} class="block text-xs text-gray-500">Token / SN: {token_text(tx.token_sn)}</span>
-          <span :if={tx.review_reason} class="block text-xs font-medium text-amber-700">
+          <span class="block truncate font-medium">
+            {tx.product_name} · {group_digits(tx.customer_ref)}
+          </span>
+          <span :if={tx.token_sn} class="block break-words text-body-sm text-on-surface-variant">
+            Token / SN: {token_text(tx.token_sn)}
+          </span>
+          <span :if={tx.review_reason} class="block text-body-sm font-medium text-warning">
             Perlu ditinjau — admin akan meninjau
           </span>
-          <span :if={tx.failure_reason || tx.provider_message} class="block text-xs text-gray-500">
+          <span
+            :if={tx.failure_reason || tx.provider_message}
+            class="block text-body-sm text-on-surface-variant"
+          >
             {tx.failure_reason || tx.provider_message}
           </span>
-          <.link :if={tx.status == "success"} href={~p"/services/#{tx.id}/receipt"} target="_blank" class="text-xs text-blue-600 hover:underline">
+          <.link
+            :if={tx.status == "success"}
+            href={~p"/services/#{tx.id}/receipt"}
+            target="_blank"
+            class="text-body-sm text-primary hover:underline"
+          >
             Cetak struk
           </.link>
         </span>
         <span class="text-right">
-          <span class="block font-semibold">{format_price(tx.price)}</span>
-          <span class={["inline-block rounded-full px-2 py-0.5 text-xs", tx.status == "success" && "bg-green-100 text-green-700", tx.status == "failed" && "bg-gray-200 text-gray-700"]}>
-            {status_label(tx.status)}
-          </span>
+          <span class="block text-title-sm">{format_price(tx.price)}</span>
+          <ServiceCorrection.status_badge status={tx.status} />
         </span>
       </div>
     </section>

@@ -342,6 +342,46 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       assert Services.list_shift_transactions(ctx.shift) == []
     end
 
+    test "a manual processing service gets MD3 mark forms", ctx do
+      tx = service_fixture(ctx.cashier, ctx.product)
+      html = ServiceLive.Index |> mount_live(ctx.cashier) |> html()
+
+      [card] = Regex.run(~r/<div[^>]*id="processing-#{tx.id}"[^>]*>/, html)
+      assert card =~ "border-outline-variant"
+
+      assert html =~
+               ~r/<input[^>]*name="token_sn"[^>]*maxlength="64"|<input[^>]*maxlength="64"[^>]*name="token_sn"/
+
+      assert html =~
+               ~r/<input[^>]*name="reason"[^>]*maxlength="255"|<input[^>]*maxlength="255"[^>]*name="reason"/
+    end
+
+    test "a failed service in the shift history has the error badge", ctx do
+      tx = service_fixture(ctx.cashier, ctx.product)
+
+      html =
+        ServiceLive.Index
+        |> mount_live(ctx.cashier)
+        |> event("mark_failed", %{"transaction_id" => tx.id, "reason" => "nomor tidak aktif"})
+        |> html()
+
+      assert html =~ ~r/id="history-#{tx.id}".*?bg-error-container[^>]*>\s*Gagal/s
+    end
+
+    test "no old classes are left below the panel", ctx do
+      _processing = service_fixture(ctx.cashier, ctx.product)
+      failed = service_fixture(ctx.cashier, ctx.product)
+
+      html =
+        ServiceLive.Index
+        |> mount_live(ctx.cashier)
+        |> event("mark_failed", %{"transaction_id" => failed.id, "reason" => "nomor tidak aktif"})
+        |> html()
+
+      refute html =~ ~r/class="[^"]*\b(chip|list-card|form-control|btn-primary)\b/
+      refute html =~ ~r/\b(gray|green|red|amber|blue)-\d{2,3}\b/
+    end
+
     test "marking success keeps the token; failing tells how much to return", ctx do
       done = service_fixture(ctx.cashier, ctx.product)
       failed = service_fixture(ctx.cashier, ctx.product)
