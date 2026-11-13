@@ -327,7 +327,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
        when is_binary(product_brand) do
     number_brand = if brand in Brand.keys(), do: brand, else: Brand.detect(number, prefixes)
 
-    if (number_brand && number_brand != product_brand) and
+    if number_brand != nil and number_brand != product_brand and
          {number_brand, product_brand} != {"telkomsel", "byu"} do
       "Nomor ini #{Brand.label(number_brand)}, produk ini #{Brand.label(product_brand)}."
     end
@@ -609,134 +609,164 @@ defmodule ZahlungsWeb.ServiceLive.Index do
     assigns = assign(assigns, api_bill: checked?(assigns), ask_months: ask_months?(assigns))
 
     ~H"""
-    <.header>
-      Layanan
-      <:subtitle>Pulsa, paket data, token PLN dan tagihan{if @store, do: " · #{@store.name}"}</:subtitle>
-      <:actions>
-        <.link navigate={~p"/services/history"} class="chip">Lihat semua riwayat</.link>
-      </:actions>
-    </.header>
-
-    <div :if={is_nil(@shift)} class="mt-6 rounded-lg border border-gray-200 bg-gray-50 p-5">
-      <p class="font-medium text-gray-800">Belum ada shift</p>
-      <p class="mt-1 text-sm text-gray-600">Buka shift dulu untuk mencatat layanan.</p>
-      <.link navigate={~p"/cashier"} class="btn btn-primary mt-4 inline-flex items-center">
-        Buka shift di Cashier
-      </.link>
+    <div class="md3 -m-6 rounded-xl bg-surface p-4 text-on-surface">
+    <div class="flex flex-wrap items-start justify-between gap-3">
+      <div class="min-w-0">
+        <h1 class="text-headline-sm">Layanan</h1>
+        <p class="mt-1 text-body-md text-on-surface-variant">
+          Pulsa, paket data, token PLN dan tagihan{if @store, do: " · #{@store.name}"}
+        </p>
+      </div>
+      <.md_button variant="outlined" navigate={~p"/services/history"}>
+        <:icon><.md_icon name="history" class="-ml-2 h-[18px] w-[18px]" /></:icon>
+        Lihat semua riwayat
+      </.md_button>
     </div>
 
-    <div :if={@shift && not @sellable} class="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800">
+    <.md_card :if={is_nil(@shift)} variant="outlined" class="mt-6">
+      <p class="text-title-md">Belum ada shift</p>
+      <p class="mt-1 text-body-md text-on-surface-variant">Buka shift dulu untuk mencatat layanan.</p>
+      <.md_button navigate={~p"/cashier"} class="mt-4">Buka shift di Cashier</.md_button>
+    </.md_card>
+
+    <.md_card
+      :if={@shift && not @sellable}
+      class="mt-6 !bg-warning-container text-body-md text-on-warning-container"
+    >
       Toko ini belum punya akun deposit aktif. Minta admin mengaturnya di menu Deposit.
-    </div>
+    </.md_card>
 
-    <section :if={@refunds != []} id="refunds-due" class="mt-6 rounded-lg border border-red-200 bg-red-50 p-4">
-      <h3 class="font-semibold text-red-800">Perlu dikembalikan ({length(@refunds)})</h3>
-      <div :for={tx <- @refunds} id={"refund-#{tx.id}"} class="mt-2 flex flex-wrap items-center justify-between gap-2 text-sm">
+    <.md_card
+      :if={@refunds != []}
+      id="refunds-due"
+      class="mt-6 !bg-error-container text-on-error-container"
+    >
+      <h3 class="text-title-sm">Perlu dikembalikan ({length(@refunds)})</h3>
+      <div
+        :for={tx <- @refunds}
+        id={"refund-#{tx.id}"}
+        class="mt-2 flex flex-wrap items-center justify-between gap-2 text-body-md"
+      >
         <span>
           <span class="font-medium">{tx.product_name}</span>
           · {group_digits(tx.customer_ref)} · {refund_message(tx)}
-          <span :if={tx.failure_reason || tx.provider_message} class="block text-xs text-red-700">
+          <span :if={tx.failure_reason || tx.provider_message} class="block text-body-sm">
             {tx.failure_reason || tx.provider_message}
           </span>
         </span>
-        <button
+        <.md_button
+          variant="outlined"
           type="button"
           phx-click={JS.push("confirm_refund", value: %{transaction_id: tx.id})}
           phx-disable-with="Mencatat..."
-          class="chip"
         >
           Uang sudah dikembalikan
-        </button>
+        </.md_button>
       </div>
-    </section>
+    </.md_card>
 
     <div :if={@sellable} class="mt-6 grid gap-4 lg:grid-cols-5 md:landscape:grid-cols-5">
       <section class="lg:col-span-3 md:landscape:col-span-3">
-        <div class="flex flex-wrap gap-2">
-          <button
+        <div class="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none]">
+          <.md_chip
             :for={{value, label} <- Services.categories()}
-            type="button"
+            selected={@category == value}
             phx-click="set_category"
             phx-value-category={value}
-            class={["chip", @category == value && "chip-active"]}
           >
             {label}
-          </button>
+          </.md_chip>
         </div>
 
         <div :if={brand_category?(@category)} class="mt-3">
           <form id="brand-number" phx-change="change" phx-submit="change">
-            <label class="block text-sm" for="brand-number-input">Nomor tujuan</label>
-            <div class="relative">
-              <input
-                type="text"
-                id="brand-number-input"
-                inputmode="numeric"
-                name="service[customer_ref]"
-                value={@form["customer_ref"]}
-                placeholder="08xx xxxx xxxx"
-                class="form-control pr-10"
-                autocomplete="off"
-              />
-              <button
-                :if={@form["customer_ref"] != ""}
-                type="button"
-                phx-click="clear_number"
-                class="absolute inset-y-0 right-0 px-3 text-lg text-gray-400 hover:text-gray-700"
-                aria-label="Hapus nomor"
-              >
-                ×
-              </button>
-            </div>
-            <p :if={@form["customer_ref"] != ""} id="brand-number-hint" class="mt-1 text-sm font-medium text-gray-700">
+            <.md_text_field
+              id="brand-number-input"
+              name="service[customer_ref]"
+              value={@form["customer_ref"]}
+              label="Nomor tujuan"
+              inputmode="numeric"
+              placeholder="08xx xxxx xxxx"
+              autocomplete="off"
+            >
+              <:trailing :if={@form["customer_ref"] != ""}>
+                <button
+                  type="button"
+                  phx-click="clear_number"
+                  class="md-state flex h-10 w-10 items-center justify-center rounded-full text-on-surface-variant"
+                  aria-label="Hapus nomor"
+                >
+                  <.md_icon name="close" />
+                </button>
+              </:trailing>
+            </.md_text_field>
+            <p
+              :if={@form["customer_ref"] != ""}
+              id="brand-number-hint"
+              class="mt-1 text-body-md text-on-surface-variant"
+            >
               {number_hint(@form["customer_ref"], @brand, @brand_prefixes)}
             </p>
           </form>
           <div class="mt-2 flex flex-wrap gap-2" role="group" aria-label="Brand">
-            <button type="button" phx-click="set_brand" phx-value-brand="" class={["chip chip-sm", is_nil(@brand) && "chip-sm-active"]}>
+            <.md_chip
+              selected={is_nil(@brand)}
+              phx-click="set_brand"
+              phx-value-brand=""
+              class="!min-h-[36px] px-3 !text-label-md"
+            >
               Semua
-            </button>
-            <button
+            </.md_chip>
+            <.md_chip
               :for={{label, key} <- brand_chips(@products, @brand)}
-              type="button"
+              selected={@brand == key}
               phx-click="set_brand"
               phx-value-brand={key}
-              class={["chip chip-sm", @brand == key && "chip-sm-active"]}
+              class="!min-h-[36px] px-3 !text-label-md"
             >
               {label}
-            </button>
+            </.md_chip>
           </div>
         </div>
 
-        <p
+        <.md_card
           :if={brand_fallback?(@products, @brand) and shown_products(@products, @brand) != []}
-          class="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+          class="mt-3 !bg-warning-container !p-3 text-body-md text-on-warning-container"
         >
           Belum ada produk {Brand.label(@brand)}. Yang tampil produk tanpa brand.
-          <button type="button" phx-click="set_brand" phx-value-brand="" class="font-medium underline">
+          <.md_button variant="text" type="button" phx-click="set_brand" phx-value-brand="">
             Tampilkan semua
-          </button>
-        </p>
+          </.md_button>
+        </.md_card>
 
         <div class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
           <button
             :for={product <- shown_products(@products, @brand)}
             type="button"
+            aria-pressed={to_string(@selected != nil and @selected.id == product.id)}
             phx-click={JS.push("select", value: %{id: product.id})}
-            class={["product-tile", @selected && @selected.id == product.id && "!border-green-700 ring-2 ring-green-200"]}
+            class={[
+              "md-state min-h-[88px] rounded-md3-md p-3 text-left",
+              (@selected && @selected.id == product.id &&
+                 "bg-secondary-container text-on-secondary-container") ||
+                "bg-surface-container-low"
+            ]}
           >
-            <span class="block font-medium text-gray-800">{product.name}</span>
-            <span class="mt-1 block text-gray-500">{tile_price(product)}</span>
+            <span class="line-clamp-2 block text-title-sm">{product.name}</span>
+            <span class="mt-1 block text-label-lg text-primary">{tile_price(product)}</span>
           </button>
         </div>
-        <p :if={@products == []} class="mt-3 text-sm text-gray-500">
+        <p :if={@products == []} class="mt-3 text-body-md text-on-surface-variant">
           Belum ada produk {category_label(@category)}. Admin menambahkannya di menu Produk layanan.
         </p>
-        <p :if={@products != [] and shown_products(@products, @brand) == []} class="mt-3 text-sm text-gray-500">
+        <p
+          :if={@products != [] and shown_products(@products, @brand) == []}
+          class="mt-3 text-body-md text-on-surface-variant"
+        >
           Belum ada produk {Brand.label(if(@brand != "other", do: @brand))}.
-          <button type="button" phx-click="set_brand" phx-value-brand="" class="font-medium text-green-800 underline">
+          <.md_button variant="text" type="button" phx-click="set_brand" phx-value-brand="">
             Tampilkan semua
-          </button>
+          </.md_button>
         </p>
       </section>
 
@@ -1001,6 +1031,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
 
     <%!-- Room for the bar, so the end of the page isn't hidden behind it. --%>
     <div :if={@sellable} class="h-24 lg:hidden md:landscape:hidden"></div>
+    </div>
     """
   end
 end

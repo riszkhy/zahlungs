@@ -44,7 +44,7 @@ defmodule ZahlungsWeb.ServiceLiveTest do
     test "without a shift it sends the cashier to open one" do
       rendered = ServiceLive.Index |> mount_live(user_fixture()) |> html()
 
-      assert rendered =~ ~s(href="/cashier")
+      assert rendered =~ ~r/<a[^>]*href="\/cashier"[^>]*>\s*Buka shift di Cashier/
       refute rendered =~ "Catat dan terima uang"
     end
 
@@ -499,7 +499,8 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       assert rendered =~ "Belum ada produk Tri. Yang tampil produk tanpa brand."
       assert rendered =~ "Tampilkan semua"
       # The brand is shown as the chosen chip, though it has no products.
-      assert rendered =~ ~r/class="chip chip-sm chip-sm-active"[^>]*>\s*Tri/
+      assert rendered =~
+               ~r/<button[^>]*aria-pressed="true"[^>]*>(?:(?!<\/button>).)*?\bTri\s*<\/button>/s
     end
 
     test "a brand with nothing at all to show says so, with a way back", ctx do
@@ -568,9 +569,40 @@ defmodule ZahlungsWeb.ServiceLiveTest do
                "Pilih produk di kiri."
     end
 
+    test "the ✕ shows only with a number and clears it", ctx do
+      refute html(ctx.socket) =~ ~s(aria-label="Hapus nomor")
+      socket = typed(ctx.socket, "0812")
+      assert html(socket) =~ ~s(aria-label="Hapus nomor")
+      assert event(socket, "clear_number").assigns.form["customer_ref"] == ""
+    end
+
+    test "the page is MD3 and links to the history", ctx do
+      html = html(ctx.socket)
+      assert html =~ ~s(class="md3 -m-6)
+      assert html =~ ~r/<a[^>]*href="\/services\/history"[^>]*>.*Lihat semua riwayat/s
+      refute html =~ ~s(class="chip)
+      refute html =~ "product-tile"
+    end
+
+    test "a branded product picked before any number is typed doesn't break the screen", ctx do
+      socket = event(ctx.socket, "select", %{"id" => ctx.tsel.id})
+      assert socket.assigns.selected.id == ctx.tsel.id
+      refute html(socket) =~ ~s(id="brand-mismatch")
+    end
+
+    test "a chosen tile is pressed", ctx do
+      html = ctx.socket |> event("select", %{"id" => ctx.tsel.id}) |> html()
+
+      assert html =~
+               ~r/<button[^>]*aria-pressed="true"[^>]*>(?:(?!<\/button>).)*?#{ctx.tsel.name}/s
+
+      refute html =~
+               ~r/<button[^>]*aria-pressed="true"[^>]*>(?:(?!<\/button>).)*?#{ctx.isat.name}/s
+    end
+
     test "brand chips are smaller than the category ones", ctx do
       rendered = html(ctx.socket)
-      assert rendered =~ ~r/class="chip chip-sm[^"]*"[^>]*>\s*Semua/
+      assert rendered =~ ~r/<button[^>]*min-h-\[36px\][^>]*>(?:(?!<\/button>).)*?Semua/s
     end
 
     test "another category forgets the brand", ctx do
