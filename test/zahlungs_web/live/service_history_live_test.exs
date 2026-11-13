@@ -118,6 +118,32 @@ defmodule ZahlungsWeb.ServiceHistoryLiveTest do
       refute rendered =~ "16,9KWH"
     end
 
+    test "the table is MD3 with the same columns", %{cashier: cashier, pulsa: pulsa} do
+      service_fixture(cashier, pulsa)
+      html = ServiceLive.History |> mount_live(admin_fixture(), store: "all") |> html()
+
+      [_, table] = Regex.run(~r/<div[^>]*id="service-history"[^>]*>(.*?)<\/table>/s, html)
+
+      for label <- ~w(Waktu Kode Produk Cabang Kasir Harga Status) ++ ["Nomor tujuan"] do
+        assert table =~ ">#{label}<", label
+      end
+
+      [box] = Regex.run(~r/<div[^>]*id="service-history"[^>]*>/, html)
+      assert box =~ "rounded-md3-lg"
+    end
+
+    test "the page is MD3 with a link back to Layanan", %{cashier: cashier, pulsa: pulsa} do
+      {:ok, _} = Services.mark_success(service_fixture(cashier, pulsa), cashier, nil)
+      html = ServiceLive.History |> mount_live(cashier) |> html()
+
+      assert html =~ ~s(class="md3 -m-6)
+      assert html =~ ~r/<a[^>]*href="\/services"[^>]*>\s*Layanan/
+      # The shared pagination keeps its own look (out of scope).
+      [page | _] = String.split(html, ~r/<p[^>]*>\s*Menampilkan/, parts: 2)
+      refute page =~ ~r/class="[^"]*\b(chip|list-card|form-control|btn-primary)\b/
+      refute page =~ ~r/\b(gray|green|red|amber|blue)-\d{2,3}\b/
+    end
+
     test "names the store only across stores", %{cashier: cashier, pulsa: pulsa} do
       service_fixture(cashier, pulsa)
       admin = admin_fixture()
@@ -185,6 +211,20 @@ defmodule ZahlungsWeb.ServiceHistoryLiveTest do
       assert socket |> event("filter", %{@all | "status" => "success"}) |> ids() == [done.id]
       assert socket |> event("filter", %{@all | "category" => "token_pln"}) |> ids() == [token.id]
       assert socket |> event("filter", %{@all | "q" => done.code}) |> ids() == [done.id]
+    end
+
+    test "the filters keep their choice", %{cashier: cashier} do
+      html =
+        ServiceLive.History
+        |> mount_live(cashier)
+        |> event("filter", %{@all | "status" => "failed", "q" => "0812"})
+        |> html()
+
+      assert html =~ ~r/<option (selected value="failed"|value="failed" selected)/
+      [search] = Regex.run(~r/<input[^>]*type="search"[^>]*>/, html)
+      assert search =~ ~s(name="q")
+      assert search =~ ~s(value="0812")
+      assert search =~ ~s(phx-debounce="300")
     end
 
     test "another period is empty", %{cashier: cashier, pulsa: pulsa} do
