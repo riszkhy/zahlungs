@@ -229,24 +229,87 @@ defmodule ZahlungsWeb.SalesLiveTest do
     setup :sale_fixture
 
     test "is refused for cashiers", %{cashier: cashier, product: product, sale: sale} do
-      socket = SalesLive.Index |> mount_live(cashier) |> event("return", %{"id" => sale.id})
+      socket =
+        SalesLive.Index |> mount_live(cashier) |> event("prompt_return", %{"id" => sale.id})
 
       assert flash(socket, :error) =~ "permission"
+      assert is_nil(socket.assigns.returning)
+
+      event(socket, "confirm_return")
       assert Sales.get_sale!(store_scope(), sale.id).status == "completed"
       assert stock_of(product) == 7
     end
 
-    test "an admin returns the sale once; a second attempt is reported",
-         %{product: product, sale: sale} do
-      socket = mount_live(SalesLive.Index, admin_fixture())
+    test "a cashier's confirm is refused even with a sale held",
+         %{cashier: cashier, product: product, sale: sale} do
+      socket = mount_live(SalesLive.Index, cashier)
+      held = %{socket | assigns: Map.put(socket.assigns, :returning, sale)}
 
-      returned = event(socket, "return", %{"id" => sale.id})
+      refused = event(held, "confirm_return")
+      assert flash(refused, :error) =~ "permission"
+      assert Sales.get_sale!(store_scope(), sale.id).status == "completed"
+      assert stock_of(product) == 7
+    end
+
+    test "an admin confirms the return in a popup with Batal first",
+         %{product: product, sale: sale} do
+      socket =
+        SalesLive.Index
+        |> mount_live(admin_fixture(), action: :show, params: %{"id" => to_string(sale.id)})
+        |> event("prompt_return", %{"id" => sale.id})
+
+      assert socket.assigns.returning.id == sale.id
+
+      rendered = html(socket)
+      assert rendered =~ ~s(id="return-modal")
+      assert rendered =~ sale.code
+      assert rendered =~ ZahlungsWeb.CoreComponents.format_money(sale.total)
+      refute rendered =~ "data-confirm"
+
+      {cancel, _} = :binary.match(rendered, ~s(phx-click="cancel_return"))
+      {confirm, _} = :binary.match(rendered, ~s(phx-click="confirm_return"))
+      assert cancel < confirm
+
+      returned = event(socket, "confirm_return")
       assert flash(returned, :info) =~ "returned; stock restored"
       assert live_redirect(returned) == "/sales"
+      assert is_nil(returned.assigns.returning)
       assert Sales.get_sale!(store_scope(), sale.id).status == "returned"
+      assert stock_of(product) == 10
+    end
 
-      again = event(socket, "return", %{"id" => sale.id})
-      assert flash(again, :error) =~ "already been returned"
+    test "cancelling leaves the sale alone", %{sale: sale} do
+      socket =
+        SalesLive.Index
+        |> mount_live(admin_fixture())
+        |> event("prompt_return", %{"id" => sale.id})
+        |> event("cancel_return")
+
+      assert is_nil(socket.assigns.returning)
+      assert Sales.get_sale!(store_scope(), sale.id).status == "completed"
+    end
+
+    test "confirm without a popup does nothing", %{product: product, sale: sale} do
+      socket = SalesLive.Index |> mount_live(admin_fixture()) |> event("confirm_return")
+
+      assert is_nil(flash(socket, :info))
+      assert is_nil(flash(socket, :error))
+      assert Sales.get_sale!(store_scope(), sale.id).status == "completed"
+      assert stock_of(product) == 7
+    end
+
+    test "confirming from two open screens returns once", %{product: product, sale: sale} do
+      admin = admin_fixture()
+
+      prompt = fn ->
+        SalesLive.Index |> mount_live(admin) |> event("prompt_return", %{"id" => sale.id})
+      end
+
+      first = prompt.()
+      second = prompt.()
+
+      assert flash(event(first, "confirm_return"), :info) =~ "returned; stock restored"
+      assert flash(event(second, "confirm_return"), :error) =~ "already been returned"
       assert stock_of(product) == 10
     end
 
@@ -256,10 +319,23 @@ defmodule ZahlungsWeb.SalesLiveTest do
       admin = admin_fixture()
       admin_shift = shift_fixture(admin, "50000")
 
-      SalesLive.Index |> mount_live(admin) |> event("return", %{"id" => sale.id})
+      SalesLive.Index
+      |> mount_live(admin)
+      |> event("prompt_return", %{"id" => sale.id})
+      |> event("confirm_return")
 
       assert [%{category: "refund"}] = Shifts.list_cash_movements(admin_shift)
       assert Decimal.equal?(Shifts.expected_cash(admin_shift), Decimal.new("47000"))
+    end
+
+    test "the detail popup's Return button opens the popup", %{sale: sale} do
+      rendered =
+        SalesLive.Index
+        |> mount_live(admin_fixture(), action: :show, params: %{"id" => to_string(sale.id)})
+        |> html()
+
+      assert rendered =~ "prompt_return"
+      refute rendered =~ "data-confirm"
     end
   end
 end

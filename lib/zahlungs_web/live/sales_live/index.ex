@@ -16,6 +16,7 @@ defmodule ZahlungsWeb.SalesLive.Index do
      |> assign(date: "", page: 1, per_page: @per_page)
      |> assign(:voiding, nil)
      |> assign(:void_reason, "")
+     |> assign(:returning, nil)
      |> load_sales()}
   end
 
@@ -45,9 +46,28 @@ defmodule ZahlungsWeb.SalesLive.Index do
     {:noreply, socket |> assign(:page, max(1, to_int(to))) |> load_sales()}
   end
 
-  def handle_event("return", %{"id" => id}, socket) do
+  def handle_event("prompt_return", %{"id" => id}, socket) do
     if socket.assigns.current_user.role == "admin" do
-      sale = Sales.get_sale!(socket.assigns.current_scope, id)
+      {:noreply, assign(socket, :returning, Sales.get_sale!(socket.assigns.current_scope, id))}
+    else
+      {:noreply, put_flash(socket, :error, "You do not have permission to return sales.")}
+    end
+  end
+
+  def handle_event("cancel_return", _params, socket) do
+    {:noreply, assign(socket, :returning, nil)}
+  end
+
+  # Only while the popup is open, so a second click does nothing.
+  def handle_event("confirm_return", _params, %{assigns: %{returning: nil}} = socket) do
+    {:noreply, socket}
+  end
+
+  def handle_event("confirm_return", _params, socket) do
+    if socket.assigns.current_user.role == "admin" do
+      scope = socket.assigns.current_scope
+      sale = Sales.get_sale!(scope, socket.assigns.returning.id)
+      socket = assign(socket, :returning, nil)
 
       case Sales.return_sale(sale, socket.assigns.current_user) do
         {:ok, _returned} ->
@@ -64,7 +84,10 @@ defmodule ZahlungsWeb.SalesLive.Index do
           {:noreply, put_flash(socket, :error, "Could not return the sale.")}
       end
     else
-      {:noreply, put_flash(socket, :error, "You do not have permission to return sales.")}
+      {:noreply,
+       socket
+       |> assign(:returning, nil)
+       |> put_flash(:error, "You do not have permission to return sales.")}
     end
   end
 
@@ -238,8 +261,7 @@ defmodule ZahlungsWeb.SalesLive.Index do
           </.button>
           <.button
             :if={@current_user.role == "admin" and @sale.status == "completed"}
-            phx-click={JS.push("return", value: %{id: @sale.id})}
-            data-confirm="Return this sale and restore stock? This cannot be undone."
+            phx-click={JS.push("prompt_return", value: %{id: @sale.id})}
             class="!bg-red-600"
           >
             Return / Refund
@@ -266,6 +288,27 @@ defmodule ZahlungsWeb.SalesLive.Index do
         </div>
       </form>
     </.modal>
+
+    <.md_dialog :if={@returning} id="return-modal" show on_cancel={JS.push("cancel_return")}>
+      <:title>Return penjualan {@returning.code}</:title>
+      <p class="mt-2 text-body-lg font-medium">{format_money(@returning.total)}</p>
+      <p class="mt-2 text-body-md text-on-surface-variant">
+        Penjualan ditandai <strong>returned</strong>, stok dikembalikan ke cabang penjualan,
+        dan uang tunai dikembalikan dari laci (penjualan piutang: uang mukanya saja).
+        Ini tidak bisa dibatalkan.
+      </p>
+      <:actions>
+        <.md_button variant="text" type="button" phx-click="cancel_return">Batal</.md_button>
+        <.md_button
+          variant="danger"
+          type="button"
+          phx-click="confirm_return"
+          phx-disable-with="Memproses..."
+        >
+          Return
+        </.md_button>
+      </:actions>
+    </.md_dialog>
     """
   end
 
