@@ -338,4 +338,94 @@ defmodule ZahlungsWeb.SalesLiveTest do
       refute rendered =~ "data-confirm"
     end
   end
+
+  describe "MD3" do
+    setup :sale_fixture
+
+    test "the page is MD3 with no old classes", %{cashier: cashier} do
+      rendered = SalesLive.Index |> mount_live(cashier) |> html()
+
+      assert rendered =~ ~s(class="md3 )
+      assert rendered =~ ~s(id="sales")
+      assert rendered =~ "rounded-md3-lg"
+
+      # The shared pagination keeps its own look.
+      [page | _] = String.split(rendered, ~r/<p[^>]*>Menampilkan/)
+
+      for old <- ~w(list-card form-control btn-sm btn-link gray- green- red- amber-) do
+        refute page =~ old, "found #{old}"
+      end
+    end
+
+    test "rows and cards carry a badge per status", %{
+      cashier: cashier,
+      product: product,
+      sale: sale
+    } do
+      {:ok, voided} =
+        Sales.create_sale(cashier, [%{product_id: product.id, quantity: 1}], %{
+          amount_paid: "1000"
+        })
+
+      {:ok, _} = Sales.void_sale(voided, cashier, "salah")
+
+      {:ok, returned} =
+        Sales.create_sale(cashier, [%{product_id: product.id, quantity: 1}], %{
+          amount_paid: "1000"
+        })
+
+      {:ok, _} = Sales.return_sale(returned, admin_fixture())
+
+      rendered = SalesLive.Index |> mount_live(cashier) |> html()
+
+      for {id, tone} <- [
+            {sale.id, "bg-primary-container"},
+            {voided.id, "bg-surface-container-highest"},
+            {returned.id, "bg-error-container"}
+          ] do
+        [row] = Regex.run(~r{<tr[^>]*id="sales-#{id}".*?</tr>}s, rendered)
+        assert row =~ tone
+        [card] = Regex.run(~r{<a[^>]*id="sale-card-#{id}".*?</a>}s, rendered)
+        assert card =~ tone
+      end
+    end
+
+    test "the Store column shows only for all stores", %{cashier: cashier, sale: sale} do
+      refute SalesLive.Index |> mount_live(cashier) |> html() =~ ">Store<"
+
+      rendered = SalesLive.Index |> mount_live(admin_fixture(), store: "all") |> html()
+      assert rendered =~ ">Store<"
+      [row] = Regex.run(~r{<tr[^>]*id="sales-#{sale.id}".*?</tr>}s, rendered)
+      assert row =~ default_store().name
+    end
+
+    test "the detail popup is MD3", %{sale: sale} do
+      rendered =
+        SalesLive.Index
+        |> mount_live(admin_fixture(), action: :show, params: %{"id" => to_string(sale.id)})
+        |> html()
+
+      assert rendered =~ ~s(id="sale-modal")
+      assert rendered =~ "rounded-md3-xl"
+      [tag] = Regex.run(~r{<a[^>]*href="/sales/#{sale.id}/receipt"[^>]*>}, rendered)
+      assert tag =~ ~s(target="_blank")
+      assert rendered =~ "Batalkan (koreksi)"
+      assert rendered =~ "Return / Refund"
+      refute rendered =~ "data-confirm"
+    end
+
+    test "the void popup puts the reason first", %{cashier: cashier, sale: sale} do
+      rendered =
+        SalesLive.Index
+        |> mount_live(cashier)
+        |> event("prompt_void", %{"id" => sale.id})
+        |> html()
+
+      [_, popup] = String.split(rendered, ~s(id="void-modal"), parts: 2)
+      {reason, _} = :binary.match(popup, ~s(name="reason"))
+      {cancel, _} = :binary.match(popup, ~s(phx-click="cancel_void"))
+      assert reason < cancel
+      assert popup =~ "rounded-md3-xl"
+    end
+  end
 end
