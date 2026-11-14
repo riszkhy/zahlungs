@@ -217,6 +217,22 @@ defmodule ZahlungsWeb.MdComponentsTest do
       assert html =~ "border-outline"
       refute html =~ "<button"
     end
+
+    test "href with target opens a new tab" do
+      html =
+        render_component(&MdComponents.md_button/1,
+          variant: "text",
+          href: "/sales/1/receipt",
+          target: "_blank",
+          rel: "noopener",
+          inner_block: slot("Print receipt")
+        )
+
+      [tag] = Regex.run(~r/<a[^>]*>/, html)
+      assert tag =~ ~s(href="/sales/1/receipt")
+      assert tag =~ ~s(target="_blank")
+      assert tag =~ ~s(rel="noopener")
+    end
   end
 
   describe "md_text_field extras" do

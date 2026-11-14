@@ -73,7 +73,7 @@ defmodule ZahlungsWeb.MdComponents do
   attr :navigate, :string, default: nil
   attr :href, :string, default: nil
   attr :class, :any, default: nil
-  attr :rest, :global, include: ~w(disabled form name value)
+  attr :rest, :global, include: ~w(disabled form name value target rel)
 
   slot :icon
   slot :inner_block, required: true
