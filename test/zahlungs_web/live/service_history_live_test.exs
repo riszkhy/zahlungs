@@ -118,6 +118,43 @@ defmodule ZahlungsWeb.ServiceHistoryLiveTest do
       refute rendered =~ "16,9KWH"
     end
 
+    test "the table is MD3 with the same columns", %{cashier: cashier, pulsa: pulsa} do
+      service_fixture(cashier, pulsa)
+      html = ServiceLive.History |> mount_live(admin_fixture(), store: "all") |> html()
+
+      [_, table] = Regex.run(~r/<div[^>]*id="service-history"[^>]*>(.*?)<\/table>/s, html)
+
+      for label <- ~w(Waktu Kode Produk Cabang Kasir Harga Status) ++ ["Nomor tujuan"] do
+        assert table =~ ">#{label}<", label
+      end
+
+      [box] = Regex.run(~r/<div[^>]*id="service-history"[^>]*>/, html)
+      assert box =~ "rounded-md3-lg"
+    end
+
+    test "a card stacks price, status and Koreksi status at its right", %{
+      cashier: cashier,
+      pulsa: pulsa
+    } do
+      tx = service_fixture(cashier, pulsa)
+      html = ServiceLive.History |> mount_live(admin_fixture()) |> html()
+
+      [card] = Regex.run(~r/<div[^>]*id="service-card-#{tx.id}".*?<\/div>/s, html)
+      assert card =~ ~r/<span class="[^"]*\bflex-col\b[^"]*">\s*<span[^>]*>\s*Rp/
+    end
+
+    test "the page is MD3 with a link back to Layanan", %{cashier: cashier, pulsa: pulsa} do
+      {:ok, _} = Services.mark_success(service_fixture(cashier, pulsa), cashier, nil)
+      html = ServiceLive.History |> mount_live(cashier) |> html()
+
+      assert html =~ ~s(class="md3 -m-6)
+      assert html =~ ~r/<a[^>]*href="\/services"[^>]*>\s*Layanan/
+      # The shared pagination keeps its own look (out of scope).
+      [page | _] = String.split(html, ~r/<p[^>]*>\s*Menampilkan/, parts: 2)
+      refute page =~ ~r/class="[^"]*\b(chip|list-card|form-control|btn-primary)\b/
+      refute page =~ ~r/\b(gray|green|red|amber|blue)-\d{2,3}\b/
+    end
+
     test "names the store only across stores", %{cashier: cashier, pulsa: pulsa} do
       service_fixture(cashier, pulsa)
       admin = admin_fixture()
@@ -185,6 +222,20 @@ defmodule ZahlungsWeb.ServiceHistoryLiveTest do
       assert socket |> event("filter", %{@all | "status" => "success"}) |> ids() == [done.id]
       assert socket |> event("filter", %{@all | "category" => "token_pln"}) |> ids() == [token.id]
       assert socket |> event("filter", %{@all | "q" => done.code}) |> ids() == [done.id]
+    end
+
+    test "the filters keep their choice", %{cashier: cashier} do
+      html =
+        ServiceLive.History
+        |> mount_live(cashier)
+        |> event("filter", %{@all | "status" => "failed", "q" => "0812"})
+        |> html()
+
+      assert html =~ ~r/<option (selected value="failed"|value="failed" selected)/
+      [search] = Regex.run(~r/<input[^>]*type="search"[^>]*>/, html)
+      assert search =~ ~s(name="q")
+      assert search =~ ~s(value="0812")
+      assert search =~ ~s(phx-debounce="300")
     end
 
     test "another period is empty", %{cashier: cashier, pulsa: pulsa} do
@@ -292,7 +343,7 @@ defmodule ZahlungsWeb.ServiceHistoryLiveTest do
         |> event("review_correction", %{"id" => ctx.success.id})
         |> html()
 
-      assert html =~ ~r/class="[^"]*\bpr-10\b[^"]*">\s*<h3/
+      assert html =~ ~r/class="[^"]*\bpr-10\b[^"]*"[^>]*>\s*Jadikan gagal/
     end
 
     defp popup_html(ctx, tx) do
@@ -304,8 +355,16 @@ defmodule ZahlungsWeb.ServiceHistoryLiveTest do
 
     test "the popup names its action", ctx do
       html = popup_html(ctx, ctx.success)
-      assert html =~ ~r/<button[^>]*!bg-red-600[^>]*>\s*Jadikan gagal\s*<\/button>/
+      assert html =~ ~r/<button[^>]*bg-error[^>]*>\s*Jadikan gagal\s*<\/button>/
       refute html =~ "Simpan koreksi"
+    end
+
+    test "the main button submits the form from outside it", ctx do
+      html = popup_html(ctx, ctx.success)
+      assert html =~ ~r/<form[^>]*id="correct-service-form"[^>]*phx-submit="confirm_correction"/
+      [button] = Regex.run(~r/<button[^>]*>\s*Jadikan gagal/, html)
+      assert button =~ ~s(type="submit")
+      assert button =~ ~s(form="correct-service-form")
     end
 
     test "towards success warns the money stays", ctx do
@@ -318,13 +377,13 @@ defmodule ZahlungsWeb.ServiceHistoryLiveTest do
     test "Batal sits at the bottom, before the main button", ctx do
       html = popup_html(ctx, ctx.success)
       assert html =~ ~r/<\/textarea>.*phx-click="cancel_correction".*Jadikan gagal/s
-      refute html =~ ~r/<\/h3>\s*<button[^>]*cancel_correction/
+      refute html =~ ~r/<\/h2>\s*<button[^>]*cancel_correction/
     end
 
     test "a failed service has a red badge", ctx do
       {:ok, _} = Services.correct_status(ctx.admin, ctx.success, "failed", "Uji")
       html = ServiceLive.History |> mount_live(ctx.admin) |> html()
-      assert html =~ ~r/bg-red-100 text-red-700[^>]*>\s*Gagal/
+      assert html =~ ~r/bg-error-container[^>]*>\s*Gagal/
     end
 
     test "a correction's reason shows once on the card", ctx do

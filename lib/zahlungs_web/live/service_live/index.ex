@@ -17,7 +17,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
 
   alias Zahlungs.{Deposits, Services, Shifts, Stores}
   alias Zahlungs.Services.{Brand, Product}
-  alias ZahlungsWeb.AmountInput
+  alias ZahlungsWeb.{AmountInput, ServiceCorrection}
 
   @payment_methods [
     {"cash", "Tunai"},
@@ -327,7 +327,7 @@ defmodule ZahlungsWeb.ServiceLive.Index do
        when is_binary(product_brand) do
     number_brand = if brand in Brand.keys(), do: brand, else: Brand.detect(number, prefixes)
 
-    if (number_brand && number_brand != product_brand) and
+    if number_brand != nil and number_brand != product_brand and
          {number_brand, product_brand} != {"telkomsel", "byu"} do
       "Nomor ini #{Brand.label(number_brand)}, produk ini #{Brand.label(product_brand)}."
     end
@@ -572,10 +572,6 @@ defmodule ZahlungsWeb.ServiceLive.Index do
   defp by_hand?(transaction, user),
     do: user.role == "admin" and Services.awaiting_too_long?(transaction)
 
-  defp status_label("success"), do: "Berhasil"
-  defp status_label("failed"), do: "Gagal"
-  defp status_label(_), do: "Diproses"
-
   defp time(transaction, store) do
     transaction.inserted_at |> Zahlungs.LocalTime.to_local(store) |> Calendar.strftime("%H:%M")
   end
@@ -609,398 +605,512 @@ defmodule ZahlungsWeb.ServiceLive.Index do
     assigns = assign(assigns, api_bill: checked?(assigns), ask_months: ask_months?(assigns))
 
     ~H"""
-    <.header>
-      Layanan
-      <:subtitle>Pulsa, paket data, token PLN dan tagihan{if @store, do: " · #{@store.name}"}</:subtitle>
-      <:actions>
-        <.link navigate={~p"/services/history"} class="chip">Lihat semua riwayat</.link>
-      </:actions>
-    </.header>
-
-    <div :if={is_nil(@shift)} class="mt-6 rounded-lg border border-gray-200 bg-gray-50 p-5">
-      <p class="font-medium text-gray-800">Belum ada shift</p>
-      <p class="mt-1 text-sm text-gray-600">Buka shift dulu untuk mencatat layanan.</p>
-      <.link navigate={~p"/cashier"} class="btn btn-primary mt-4 inline-flex items-center">
-        Buka shift di Cashier
-      </.link>
+    <div class="md3 -m-6 rounded-xl bg-surface p-4 text-on-surface">
+    <div class="flex flex-wrap items-start justify-between gap-3">
+      <div class="min-w-0">
+        <h1 class="text-headline-sm">Layanan</h1>
+        <p class="mt-1 text-body-md text-on-surface-variant">
+          Pulsa, paket data, token PLN dan tagihan{if @store, do: " · #{@store.name}"}
+        </p>
+      </div>
+      <.md_button variant="outlined" navigate={~p"/services/history"}>
+        <:icon><.md_icon name="history" class="-ml-2 h-[18px] w-[18px]" /></:icon>
+        Lihat semua riwayat
+      </.md_button>
     </div>
 
-    <div :if={@shift && not @sellable} class="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800">
+    <.md_card :if={is_nil(@shift)} variant="outlined" class="mt-6">
+      <p class="text-title-md">Belum ada shift</p>
+      <p class="mt-1 text-body-md text-on-surface-variant">Buka shift dulu untuk mencatat layanan.</p>
+      <.md_button navigate={~p"/cashier"} class="mt-4">Buka shift di Cashier</.md_button>
+    </.md_card>
+
+    <.md_card
+      :if={@shift && not @sellable}
+      class="mt-6 !bg-warning-container text-body-md text-on-warning-container"
+    >
       Toko ini belum punya akun deposit aktif. Minta admin mengaturnya di menu Deposit.
-    </div>
+    </.md_card>
 
-    <section :if={@refunds != []} id="refunds-due" class="mt-6 rounded-lg border border-red-200 bg-red-50 p-4">
-      <h3 class="font-semibold text-red-800">Perlu dikembalikan ({length(@refunds)})</h3>
-      <div :for={tx <- @refunds} id={"refund-#{tx.id}"} class="mt-2 flex flex-wrap items-center justify-between gap-2 text-sm">
+    <.md_card
+      :if={@refunds != []}
+      id="refunds-due"
+      class="mt-6 !bg-error-container text-on-error-container"
+    >
+      <h3 class="text-title-sm">Perlu dikembalikan ({length(@refunds)})</h3>
+      <div
+        :for={tx <- @refunds}
+        id={"refund-#{tx.id}"}
+        class="mt-2 flex flex-wrap items-center justify-between gap-2 text-body-md"
+      >
         <span>
           <span class="font-medium">{tx.product_name}</span>
           · {group_digits(tx.customer_ref)} · {refund_message(tx)}
-          <span :if={tx.failure_reason || tx.provider_message} class="block text-xs text-red-700">
+          <span :if={tx.failure_reason || tx.provider_message} class="block text-body-sm">
             {tx.failure_reason || tx.provider_message}
           </span>
         </span>
-        <button
+        <.md_button
+          variant="outlined"
           type="button"
           phx-click={JS.push("confirm_refund", value: %{transaction_id: tx.id})}
           phx-disable-with="Mencatat..."
-          class="chip"
         >
           Uang sudah dikembalikan
-        </button>
+        </.md_button>
       </div>
-    </section>
+    </.md_card>
 
     <div :if={@sellable} class="mt-6 grid gap-4 lg:grid-cols-5 md:landscape:grid-cols-5">
-      <section class="lg:col-span-3 md:landscape:col-span-3">
-        <div class="flex flex-wrap gap-2">
-          <button
+      <section class="min-w-0 lg:col-span-3 md:landscape:col-span-3">
+        <div class="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none]">
+          <.md_chip
             :for={{value, label} <- Services.categories()}
-            type="button"
+            selected={@category == value}
             phx-click="set_category"
             phx-value-category={value}
-            class={["chip", @category == value && "chip-active"]}
           >
             {label}
-          </button>
+          </.md_chip>
         </div>
 
         <div :if={brand_category?(@category)} class="mt-3">
           <form id="brand-number" phx-change="change" phx-submit="change">
-            <label class="block text-sm" for="brand-number-input">Nomor tujuan</label>
-            <div class="relative">
-              <input
-                type="text"
-                id="brand-number-input"
-                inputmode="numeric"
-                name="service[customer_ref]"
-                value={@form["customer_ref"]}
-                placeholder="08xx xxxx xxxx"
-                class="form-control pr-10"
-                autocomplete="off"
-              />
-              <button
-                :if={@form["customer_ref"] != ""}
-                type="button"
-                phx-click="clear_number"
-                class="absolute inset-y-0 right-0 px-3 text-lg text-gray-400 hover:text-gray-700"
-                aria-label="Hapus nomor"
-              >
-                ×
-              </button>
-            </div>
-            <p :if={@form["customer_ref"] != ""} id="brand-number-hint" class="mt-1 text-sm font-medium text-gray-700">
+            <.md_text_field
+              id="brand-number-input"
+              name="service[customer_ref]"
+              value={@form["customer_ref"]}
+              label="Nomor tujuan"
+              inputmode="numeric"
+              placeholder="08xx xxxx xxxx"
+              autocomplete="off"
+            >
+              <:trailing :if={@form["customer_ref"] != ""}>
+                <button
+                  type="button"
+                  phx-click="clear_number"
+                  class="md-state flex h-10 w-10 items-center justify-center rounded-full text-on-surface-variant"
+                  aria-label="Hapus nomor"
+                >
+                  <.md_icon name="close" />
+                </button>
+              </:trailing>
+            </.md_text_field>
+            <p
+              :if={@form["customer_ref"] != ""}
+              id="brand-number-hint"
+              class="mt-1 text-body-md text-on-surface-variant"
+            >
               {number_hint(@form["customer_ref"], @brand, @brand_prefixes)}
             </p>
           </form>
           <div class="mt-2 flex flex-wrap gap-2" role="group" aria-label="Brand">
-            <button type="button" phx-click="set_brand" phx-value-brand="" class={["chip chip-sm", is_nil(@brand) && "chip-sm-active"]}>
+            <.md_chip
+              selected={is_nil(@brand)}
+              phx-click="set_brand"
+              phx-value-brand=""
+              class="!min-h-[36px] px-3 !text-label-md"
+            >
               Semua
-            </button>
-            <button
+            </.md_chip>
+            <.md_chip
               :for={{label, key} <- brand_chips(@products, @brand)}
-              type="button"
+              selected={@brand == key}
               phx-click="set_brand"
               phx-value-brand={key}
-              class={["chip chip-sm", @brand == key && "chip-sm-active"]}
+              class="!min-h-[36px] px-3 !text-label-md"
             >
               {label}
-            </button>
+            </.md_chip>
           </div>
         </div>
 
-        <p
+        <.md_card
           :if={brand_fallback?(@products, @brand) and shown_products(@products, @brand) != []}
-          class="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+          class="mt-3 !bg-warning-container !p-3 text-body-md text-on-warning-container"
         >
           Belum ada produk {Brand.label(@brand)}. Yang tampil produk tanpa brand.
-          <button type="button" phx-click="set_brand" phx-value-brand="" class="font-medium underline">
+          <.md_button variant="text" type="button" phx-click="set_brand" phx-value-brand="">
             Tampilkan semua
-          </button>
-        </p>
+          </.md_button>
+        </.md_card>
 
         <div class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
           <button
             :for={product <- shown_products(@products, @brand)}
             type="button"
+            aria-pressed={to_string(@selected != nil and @selected.id == product.id)}
             phx-click={JS.push("select", value: %{id: product.id})}
-            class={["product-tile", @selected && @selected.id == product.id && "!border-green-700 ring-2 ring-green-200"]}
+            class={[
+              "md-state min-h-[88px] rounded-md3-md p-3 text-left",
+              (@selected && @selected.id == product.id &&
+                 "bg-secondary-container text-on-secondary-container") ||
+                "bg-surface-container-low"
+            ]}
           >
-            <span class="block font-medium text-gray-800">{product.name}</span>
-            <span class="mt-1 block text-gray-500">{tile_price(product)}</span>
+            <span class="line-clamp-2 block text-title-sm">{product.name}</span>
+            <span class="mt-1 block text-label-lg text-primary">{tile_price(product)}</span>
           </button>
         </div>
-        <p :if={@products == []} class="mt-3 text-sm text-gray-500">
+        <p :if={@products == []} class="mt-3 text-body-md text-on-surface-variant">
           Belum ada produk {category_label(@category)}. Admin menambahkannya di menu Produk layanan.
         </p>
-        <p :if={@products != [] and shown_products(@products, @brand) == []} class="mt-3 text-sm text-gray-500">
+        <p
+          :if={@products != [] and shown_products(@products, @brand) == []}
+          class="mt-3 text-body-md text-on-surface-variant"
+        >
           Belum ada produk {Brand.label(if(@brand != "other", do: @brand))}.
-          <button type="button" phx-click="set_brand" phx-value-brand="" class="font-medium text-green-800 underline">
+          <.md_button variant="text" type="button" phx-click="set_brand" phx-value-brand="">
             Tampilkan semua
-          </button>
+          </.md_button>
         </p>
       </section>
 
-      <section
-        id="service-panel"
-        class={[
-          "cart-panel lg:col-span-2 md:landscape:col-span-2",
-          (@panel_open && "cart-panel-open") || "hidden lg:block md:landscape:block"
-        ]}
+      <.md_sheet
+        id="service-sheet"
+        open={@panel_open}
+        on_close="toggle_panel"
+        class="lg:col-span-2 md:landscape:col-span-2"
       >
-        <div :if={@selected} class="mb-2 flex justify-end lg:hidden md:landscape:hidden">
-          <button type="button" phx-click="toggle_panel" class="touch-target text-sm text-gray-600 underline">
-            Tutup
-          </button>
-        </div>
-        <p :if={is_nil(@selected)} class="text-sm text-gray-500">
-          {if brand_category?(@category), do: "Isi nomor tujuan, lalu pilih produk.", else: "Pilih produk di kiri."}
-        </p>
-
-        <%!-- An api bill or token: check it with the provider first. --%>
-        <form :if={@api_bill} phx-change="change" phx-submit="inquire" class="space-y-3">
-          <p class="font-medium">{@selected.name}</p>
-          <label class="block text-sm">
-            {if Product.bill?(@selected), do: "ID pelanggan", else: "Nomor meter / ID pelanggan"}
-            <input type="text" inputmode="numeric" name="service[customer_ref]" value={@form["customer_ref"]} class="form-control" autocomplete="off" required />
-          </label>
-          <label :if={@ask_months} class="block text-sm">
-            Jumlah bulan
-            <select name="service[months]" class="form-control">
-              <option :for={month <- 1..12} value={month} selected={@form["months"] == to_string(month)}>
-                {month}
-              </option>
-            </select>
-          </label>
-          <button type="submit" phx-disable-with="Mengecek..." class="btn btn-primary w-full">
-            {if Product.bill?(@selected), do: "Cek tagihan", else: "Cek pelanggan"}
-          </button>
-        </form>
-
-        <div :if={@api_bill && @inquiry} id="inquiry" class="mt-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm">
-          <p class="font-semibold text-gray-800">{@inquiry.customer_name}</p>
-          <p class="text-gray-600">
-            {group_digits(@inquiry.customer_ref)}<span :if={@inquiry.period}> · {@inquiry.period}</span><span :if={@inquiry.kind == "bill"}> · {@inquiry.sheets} bulan</span><span :if={@inquiry.details}> · {@inquiry.details}</span>
-          </p>
-          <div :if={@inquiry.kind == "bill"}>
-            <div class="mt-2 flex justify-between"><span>Tagihan</span><span>{format_price(@inquiry.bill_amount)}</span></div>
-            <div class="flex justify-between">
-              <span>Admin penyedia</span>
-              <span>{format_price(@inquiry.provider_admin || Decimal.new(0))}</span>
-            </div>
-            <div class="flex justify-between">
-              <span>Tambahan toko</span>
-              <span>{format_price(extra_fee(@preview, @inquiry))}</span>
-            </div>
+        <section
+          id="service-panel"
+          class="rounded-md3-lg bg-surface-container-lowest p-4 lg:sticky lg:top-20 md:landscape:sticky md:landscape:top-20"
+        >
+          <div :if={@selected} class="mb-2 flex justify-end lg:hidden md:landscape:hidden">
+            <.md_button variant="text" type="button" phx-click="toggle_panel">
+              <:icon><.md_icon name="close" class="h-[18px] w-[18px]" /></:icon>
+              Tutup
+            </.md_button>
           </div>
-          <div class="mt-1 flex justify-between font-semibold">
-            <span>{if @inquiry.kind == "bill", do: "Total", else: "Harga"}</span>
-            <span>{format_price(@preview.price)}</span>
-          </div>
-        </div>
-
-        <form :if={@selected && (not @api_bill or @inquiry)} phx-change="change" phx-submit="review" class={["space-y-3", @api_bill && "mt-4"]}>
-          <div :if={not @api_bill} class="flex justify-between gap-2 font-medium">
-            <span>{@selected.name}</span>
-            <span :if={@preview}>{format_price(@preview.price)}</span>
-          </div>
-          <p
-            :if={brand_category?(@category) && brand_mismatch(@selected, @form["customer_ref"], @brand, @brand_prefixes)}
-            id="brand-mismatch"
-            role="alert"
-            class="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700"
-          >
-            {brand_mismatch(@selected, @form["customer_ref"], @brand, @brand_prefixes)}
+          <p :if={is_nil(@selected)} class="text-body-md text-on-surface-variant">
+            {if brand_category?(@category),
+              do: "Isi nomor tujuan, lalu pilih produk.",
+              else: "Pilih produk di kiri."}
           </p>
 
-          <label :if={not @api && Product.bill?(@selected)} class="block text-sm">
-            Nominal tagihan
-            <input type="text" inputmode="numeric" name="service[bill_amount]" value={@form["bill_amount"]} class="form-control" autocomplete="off" />
-          </label>
+          <%!-- An api bill or token: check it with the provider first. --%>
+          <form :if={@api_bill} phx-change="change" phx-submit="inquire" class="space-y-3">
+            <p class="text-title-md">{@selected.name}</p>
+            <.md_text_field
+              name="service[customer_ref]"
+              value={@form["customer_ref"]}
+              label={if Product.bill?(@selected), do: "ID pelanggan", else: "Nomor meter / ID pelanggan"}
+              inputmode="numeric"
+              autocomplete="off"
+              required
+            />
+            <.md_text_field
+              :if={@ask_months}
+              type="select"
+              name="service[months]"
+              value={@form["months"]}
+              label="Jumlah bulan"
+              options={Enum.map(1..12, &{to_string(&1), to_string(&1)})}
+            />
+            <.md_button type="submit" phx-disable-with="Mengecek..." class="w-full">
+              {if Product.bill?(@selected), do: "Cek tagihan", else: "Cek pelanggan"}
+            </.md_button>
+          </form>
 
-          <div :if={not @api_bill}>
-            <label :if={not brand_category?(@category)} class="block text-sm">
-              Nomor tujuan
-              <input type="text" inputmode="numeric" name="service[customer_ref]" value={@form["customer_ref"]} class="form-control" autocomplete="off" required />
-            </label>
-            <p :if={@form["customer_ref"] != ""} class="mt-3 rounded bg-gray-50 py-2 text-center text-xl font-semibold tracking-wide">
-              {group_digits(digits(@form["customer_ref"]))}
+          <.md_card :if={@api_bill && @inquiry} id="inquiry" class="mt-4 text-body-md">
+            <p class="text-title-sm">{@inquiry.customer_name}</p>
+            <p class="text-on-surface-variant">
+              {group_digits(@inquiry.customer_ref)}<span :if={@inquiry.period}> · {@inquiry.period}</span><span :if={@inquiry.kind == "bill"}> · {@inquiry.sheets} bulan</span><span :if={@inquiry.details}> · {@inquiry.details}</span>
             </p>
-          </div>
+            <div :if={@inquiry.kind == "bill"}>
+              <div class="mt-2 flex justify-between">
+                <span>Tagihan</span><span>{format_price(@inquiry.bill_amount)}</span>
+              </div>
+              <div class="flex justify-between">
+                <span>Admin penyedia</span>
+                <span>{format_price(@inquiry.provider_admin || Decimal.new(0))}</span>
+              </div>
+              <div class="flex justify-between">
+                <span>Tambahan toko</span>
+                <span>{format_price(extra_fee(@preview, @inquiry))}</span>
+              </div>
+            </div>
+            <div class="mt-1 flex justify-between text-title-md">
+              <span>{if @inquiry.kind == "bill", do: "Total", else: "Harga"}</span>
+              <span>{format_price(@preview.price)}</span>
+            </div>
+          </.md_card>
 
-          <label class="block text-sm">
-            Cara bayar
-            <select name="service[payment_method]" class="form-control">
-              <option :for={{value, label} <- payment_methods()} value={value} selected={@form["payment_method"] == value}>
-                {label}
-              </option>
-            </select>
-          </label>
+          <form
+            :if={@selected && (not @api_bill or @inquiry)}
+            phx-change="change"
+            phx-submit="review"
+            class={["space-y-3", @api_bill && "mt-4"]}
+          >
+            <div :if={not @api_bill} class="flex justify-between gap-2 text-title-md">
+              <span>{@selected.name}</span>
+              <span :if={@preview}>{format_price(@preview.price)}</span>
+            </div>
+            <p
+              :if={
+                brand_category?(@category) &&
+                  brand_mismatch(@selected, @form["customer_ref"], @brand, @brand_prefixes)
+              }
+              id="brand-mismatch"
+              role="alert"
+              class="rounded-md3-sm bg-error-container px-3 py-2 text-body-md font-medium text-on-error-container"
+            >
+              {brand_mismatch(@selected, @form["customer_ref"], @brand, @brand_prefixes)}
+            </p>
 
-          <label :if={@form["payment_method"] == "cash"} class="block text-sm">
-            Uang diterima
-            <input type="text" inputmode="numeric" name="service[amount_paid]" value={@form["amount_paid"]} class="form-control" autocomplete="off" />
-          </label>
-          <div :if={@preview && @preview.change} class="flex justify-between font-medium">
-            <span>Kembalian</span>
-            <span>{format_price(@preview.change)}</span>
-          </div>
+            <.md_text_field
+              :if={not @api && Product.bill?(@selected)}
+              name="service[bill_amount]"
+              value={@form["bill_amount"]}
+              label="Nominal tagihan"
+              inputmode="numeric"
+              autocomplete="off"
+            />
 
-          <button type="submit" phx-disable-with="Memeriksa..." class="btn btn-primary w-full">
-            {if @api, do: "Bayar", else: "Catat dan terima uang"}
-          </button>
-        </form>
-      </section>
+            <div :if={not @api_bill}>
+              <.md_text_field
+                :if={not brand_category?(@category)}
+                name="service[customer_ref]"
+                value={@form["customer_ref"]}
+                label="Nomor tujuan"
+                inputmode="numeric"
+                autocomplete="off"
+                required
+              />
+              <p
+                :if={@form["customer_ref"] != ""}
+                class="mt-3 rounded-md3-md bg-surface-container-high py-2 text-center text-headline-sm tracking-wide"
+              >
+                {group_digits(digits(@form["customer_ref"]))}
+              </p>
+            </div>
+
+            <div>
+              <p class="mb-1 text-body-sm text-on-surface-variant">Cara bayar</p>
+              <.md_segmented
+                name="service[payment_method]"
+                value={@form["payment_method"]}
+                options={payment_methods()}
+              />
+            </div>
+
+            <.md_text_field
+              :if={@form["payment_method"] == "cash"}
+              name="service[amount_paid]"
+              value={@form["amount_paid"]}
+              label="Uang diterima"
+              inputmode="numeric"
+              autocomplete="off"
+            />
+            <div :if={@preview && @preview.change} class="flex justify-between text-title-sm">
+              <span>Kembalian</span>
+              <span>{format_price(@preview.change)}</span>
+            </div>
+
+            <.md_button type="submit" phx-disable-with="Memeriksa..." class="!h-14 w-full">
+              {if @api, do: "Bayar", else: "Catat dan terima uang"}
+            </.md_button>
+          </form>
+        </section>
+      </.md_sheet>
 
       <%!-- Portrait only: the product at a glance, pinned to the bottom of the screen. --%>
-      <div id="service-bar" class="cart-bar lg:hidden md:landscape:hidden">
+      <div
+        id="service-bar"
+        class="cart-bar !min-h-[80px] !border-t-0 !bg-surface-container shadow-elev-2 lg:hidden md:landscape:hidden"
+      >
         <div class="min-w-0 flex-1">
-          <p :if={is_nil(@selected)} class="text-sm text-gray-500">Pilih produk</p>
-          <p :if={@selected} class="truncate text-sm text-gray-700">{@selected.name}</p>
-          <p :if={@selected} class="truncate text-lg font-semibold">{bar_price(@preview, @selected)}</p>
+          <p :if={is_nil(@selected)} class="text-body-md text-on-surface-variant">Pilih produk</p>
+          <p :if={@selected} class="truncate text-body-sm text-on-surface-variant">{@selected.name}</p>
+          <p :if={@selected} class="truncate text-title-lg">{bar_price(@preview, @selected)}</p>
         </div>
-        <button
+        <.md_button
           id="service-bar-open"
           type="button"
           phx-click="toggle_panel"
-          class="btn btn-primary touch-target"
           disabled={is_nil(@selected)}
         >
           {bar_action(assigns)}
-        </button>
+        </.md_button>
       </div>
     </div>
 
 
     <section :if={@shift} class="mt-6">
-      <h3 class="font-semibold text-gray-700">Sedang diproses ({length(@processing)})</h3>
-      <p :if={@processing == []} class="mt-2 text-sm text-gray-500">Tidak ada.</p>
-      <div :for={tx <- @processing} id={"processing-#{tx.id}"} class="mt-2 rounded-lg border border-gray-200 p-3">
-        <p class="text-sm">
+      <h3 class="text-title-md">Sedang diproses ({length(@processing)})</h3>
+      <p :if={@processing == []} class="mt-2 text-body-md text-on-surface-variant">Tidak ada.</p>
+      <.md_card
+        :for={tx <- @processing}
+        id={"processing-#{tx.id}"}
+        variant="outlined"
+        class="mt-2 !p-3"
+      >
+        <p class="text-body-md">
           <span class="font-medium">{tx.product_name}</span>
           · {group_digits(tx.customer_ref)} · {format_price(tx.price)} · {time(tx, @store)}
         </p>
 
-        <div :if={tx.channel == "api"} class="mt-2 flex flex-wrap items-center justify-between gap-2 text-sm">
-          <span class="text-amber-700">
+        <div
+          :if={tx.channel == "api"}
+          class="mt-2 flex flex-wrap items-center justify-between gap-2 text-body-md"
+        >
+          <span class="text-warning">
             Menunggu penyedia
-            <span :if={tx.provider_message} class="block text-xs text-gray-500">{tx.provider_message}</span>
+            <span :if={tx.provider_message} class="block text-body-sm text-on-surface-variant">
+              {tx.provider_message}
+            </span>
           </span>
-          <button
+          <.md_button
+            variant="tonal"
             type="button"
             phx-click={JS.push("check_status", value: %{transaction_id: tx.id})}
             phx-disable-with="Mengecek..."
-            class="chip"
           >
             Cek status
-          </button>
+          </.md_button>
         </div>
 
-        <p :if={by_hand?(tx, @current_user)} class="mt-2 text-xs text-amber-800">
+        <p :if={by_hand?(tx, @current_user)} class="mt-2 text-body-sm text-warning">
           Belum ada jawaban penyedia lebih dari 10 menit. Periksa di aplikasi penyedia, lalu tandai.
         </p>
 
         <div :if={tx.channel != "api" or by_hand?(tx, @current_user)}>
-          <form phx-submit="mark_success" class="mt-2 flex flex-wrap items-center gap-2">
+          <form phx-submit="mark_success" class="mt-2 flex items-end gap-2">
             <input type="hidden" name="transaction_id" value={tx.id} />
-            <input type="text" name="token_sn" placeholder="Token / SN (opsional)" maxlength="64" class="form-control min-w-0 flex-1" />
-            <button type="submit" class="chip">Berhasil</button>
+            <div class="min-w-0 flex-1">
+              <.md_text_field
+                name="token_sn"
+                placeholder="Token / SN (opsional)"
+                maxlength="64"
+                autocomplete="off"
+              />
+            </div>
+            <.md_button variant="tonal" type="submit">Berhasil</.md_button>
           </form>
-          <form phx-submit="mark_failed" class="mt-2 flex flex-wrap items-center gap-2">
+          <form phx-submit="mark_failed" class="mt-2 flex items-end gap-2">
             <input type="hidden" name="transaction_id" value={tx.id} />
-            <input type="text" name="reason" placeholder="Alasan gagal" maxlength="255" required class="form-control min-w-0 flex-1" />
-            <button type="submit" class="chip !border-red-300 !text-red-700">Gagal</button>
+            <div class="min-w-0 flex-1">
+              <.md_text_field
+                name="reason"
+                placeholder="Alasan gagal"
+                maxlength="255"
+                autocomplete="off"
+                required
+              />
+            </div>
+            <.md_button variant="outlined" type="submit" class="!text-error">Gagal</.md_button>
           </form>
         </div>
-      </div>
+      </.md_card>
     </section>
 
-    <p :if={@commission} id="shift-commission" class="mt-6 text-sm text-gray-600">
-      Komisi shift ini: <strong class="text-green-700">{format_money(@commission)}</strong>
-      <.link navigate={~p"/commissions"} class="ml-2 underline">Komisi saya</.link>
+    <p :if={@commission} id="shift-commission" class="mt-6 text-body-md text-on-surface-variant">
+      Komisi shift ini: <strong class="text-primary">{format_money(@commission)}</strong>
+      <.md_button variant="text" navigate={~p"/commissions"} class="ml-1">Komisi saya</.md_button>
     </p>
 
     <section :if={@history != []} class="mt-6">
-      <h3 class="font-semibold text-gray-700">Riwayat shift ini</h3>
-      <div :for={tx <- @history} id={"history-#{tx.id}"} class="list-card mt-2">
+      <h3 class="text-title-md">Riwayat shift ini</h3>
+      <div
+        :for={tx <- @history}
+        id={"history-#{tx.id}"}
+        class="mt-2 flex items-center gap-3 rounded-md3-md bg-surface-container-low px-4 py-3 text-body-md"
+      >
         <span class="min-w-0 flex-1">
-          <span class="block truncate font-medium">{tx.product_name} · {group_digits(tx.customer_ref)}</span>
-          <span :if={tx.token_sn} class="block text-xs text-gray-500">Token / SN: {token_text(tx.token_sn)}</span>
-          <span :if={tx.review_reason} class="block text-xs font-medium text-amber-700">
+          <span class="block truncate font-medium">
+            {tx.product_name} · {group_digits(tx.customer_ref)}
+          </span>
+          <span :if={tx.token_sn} class="block break-words text-body-sm text-on-surface-variant">
+            Token / SN: {token_text(tx.token_sn)}
+          </span>
+          <span :if={tx.review_reason} class="block text-body-sm font-medium text-warning">
             Perlu ditinjau — admin akan meninjau
           </span>
-          <span :if={tx.failure_reason || tx.provider_message} class="block text-xs text-gray-500">
+          <span
+            :if={tx.failure_reason || tx.provider_message}
+            class="block text-body-sm text-on-surface-variant"
+          >
             {tx.failure_reason || tx.provider_message}
           </span>
-          <.link :if={tx.status == "success"} href={~p"/services/#{tx.id}/receipt"} target="_blank" class="text-xs text-blue-600 hover:underline">
+          <.link
+            :if={tx.status == "success"}
+            href={~p"/services/#{tx.id}/receipt"}
+            target="_blank"
+            class="text-body-sm text-primary hover:underline"
+          >
             Cetak struk
           </.link>
         </span>
         <span class="text-right">
-          <span class="block font-semibold">{format_price(tx.price)}</span>
-          <span class={["inline-block rounded-full px-2 py-0.5 text-xs", tx.status == "success" && "bg-green-100 text-green-700", tx.status == "failed" && "bg-gray-200 text-gray-700"]}>
-            {status_label(tx.status)}
-          </span>
+          <span class="block text-title-sm">{format_price(tx.price)}</span>
+          <ServiceCorrection.status_badge status={tx.status} />
         </span>
       </div>
     </section>
 
-    <.modal :if={@confirming} id="confirm-service" show on_cancel={JS.push("cancel_record")}>
-      <h3 class="text-lg font-semibold">Konfirmasi pembayaran</h3>
-      <p class="mt-1 text-sm text-gray-500">Periksa nomor dan produk sebelum melanjutkan.</p>
+    <.md_dialog :if={@confirming} id="confirm-service" show on_cancel={JS.push("cancel_record")}>
+      <:title>Konfirmasi pembayaran</:title>
+      <p class="mt-1 text-body-md text-on-surface-variant">
+        Periksa nomor dan produk sebelum melanjutkan.
+      </p>
 
       <p
-        :if={brand_category?(@category) && brand_mismatch(@selected, @form["customer_ref"], @brand, @brand_prefixes)}
+        :if={
+          brand_category?(@category) &&
+            brand_mismatch(@selected, @form["customer_ref"], @brand, @brand_prefixes)
+        }
         role="alert"
-        class="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700"
+        class="mt-3 rounded-md3-sm bg-error-container px-3 py-2 text-body-md font-medium text-on-error-container"
       >
         {brand_mismatch(@selected, @form["customer_ref"], @brand, @brand_prefixes)}
       </p>
 
-      <p class="mt-3 rounded bg-gray-50 py-3 text-center text-2xl font-semibold tracking-wide">
+      <p class="mt-3 rounded-md3-md bg-surface-container-highest py-3 text-center text-headline-sm tracking-wide">
         {group_digits(digits(@form["customer_ref"]))}
       </p>
-      <p :if={@inquiry} class="mt-2 text-center text-sm text-gray-600">
-        <span class="font-semibold text-gray-800">{@inquiry.customer_name}</span><span :if={@inquiry.period}> · {@inquiry.period}</span><span :if={@inquiry.kind == "bill"}> · {@inquiry.sheets} bulan</span><span :if={@inquiry.details}> · {@inquiry.details}</span>
+      <p :if={@inquiry} class="mt-2 text-center text-body-md text-on-surface-variant">
+        <span class="font-medium text-on-surface">{@inquiry.customer_name}</span><span :if={@inquiry.period}> · {@inquiry.period}</span><span :if={@inquiry.kind == "bill"}> · {@inquiry.sheets} bulan</span><span :if={@inquiry.details}> · {@inquiry.details}</span>
       </p>
 
-      <dl class="mt-4 space-y-1 text-sm">
+      <dl class="mt-4 space-y-1 text-body-md">
         <div class="flex justify-between gap-4">
-          <dt class="text-gray-500">Produk</dt>
+          <dt class="text-on-surface-variant">Produk</dt>
           <dd class="text-right font-medium">{@selected.name}</dd>
         </div>
         <div :if={is_nil(@inquiry) && Product.bill?(@selected)} class="flex justify-between gap-4">
-          <dt class="text-gray-500">Nominal tagihan</dt>
+          <dt class="text-on-surface-variant">Nominal tagihan</dt>
           <dd>{format_price(Decimal.new(@form["bill_amount"]))}</dd>
         </div>
-        <div class="flex justify-between gap-4 text-base font-semibold">
+        <div class="flex justify-between gap-4 text-title-md">
           <dt>Harga</dt>
           <dd>{format_price(@preview.price)}</dd>
         </div>
         <div class="flex justify-between gap-4">
-          <dt class="text-gray-500">Cara bayar</dt>
+          <dt class="text-on-surface-variant">Cara bayar</dt>
           <dd>{payment_method_label(@form["payment_method"])}</dd>
         </div>
         <div :if={@form["payment_method"] == "cash"} class="flex justify-between gap-4">
-          <dt class="text-gray-500">Uang diterima</dt>
+          <dt class="text-on-surface-variant">Uang diterima</dt>
           <dd>{format_price(Decimal.new(@form["amount_paid"]))}</dd>
         </div>
         <div :if={@preview.change} class="flex justify-between gap-4">
-          <dt class="text-gray-500">Kembalian</dt>
+          <dt class="text-on-surface-variant">Kembalian</dt>
           <dd>{format_price(@preview.change)}</dd>
         </div>
       </dl>
 
       <%!-- Batal comes first: the popup focuses it, so a stray Enter pays nothing. --%>
-      <div class="mt-6 flex justify-end gap-2">
-        <button type="button" phx-click="cancel_record" class="chip">Batal</button>
-        <.button phx-click="confirm_record" phx-disable-with="Mencatat...">
+      <:actions>
+        <.md_button variant="text" type="button" phx-click="cancel_record">Batal</.md_button>
+        <.md_button type="button" phx-click="confirm_record" phx-disable-with="Mencatat...">
           {if @api, do: "Ya, bayar", else: "Ya, catat"}
-        </.button>
-      </div>
-    </.modal>
+        </.md_button>
+      </:actions>
+    </.md_dialog>
 
     <%!-- Room for the bar, so the end of the page isn't hidden behind it. --%>
     <div :if={@sellable} class="h-24 lg:hidden md:landscape:hidden"></div>
+    </div>
     """
   end
 end

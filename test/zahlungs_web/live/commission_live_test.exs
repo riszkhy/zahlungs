@@ -86,6 +86,7 @@ defmodule ZahlungsWeb.CommissionLiveTest do
       rendered = socket |> info({:service_changed, tx.id}) |> html()
       assert rendered =~ "Komisi shift ini"
       assert rendered =~ "Rp 185,00"
+      assert rendered =~ ~r/<a[^>]*href="\/commissions"[^>]*>\s*Komisi saya/
     end
 
     test "an admin earns none, so sees none" do

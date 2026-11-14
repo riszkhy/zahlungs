@@ -414,6 +414,70 @@ defmodule ZahlungsWeb.CashierLiveTest do
     end
   end
 
+  describe "md3" do
+    setup do
+      user = user_on_shift_fixture()
+      product = product_fixture(price: Decimal.new("1000"), stock: 3)
+      %{user: user, product: product, socket: mount_live(CashierLive, user)}
+    end
+
+    test "the camera button sits in the search bar", %{socket: socket} do
+      html = html(socket)
+      assert html =~ ~r/id="cashier-search".*aria-label="Scan with camera"/s
+      refute html =~ "📷"
+    end
+
+    test "payment method is a segmented button; picking QRIS checks it", ctx do
+      socket = event(ctx.socket, "add", %{"id" => ctx.product.id})
+      assert html(socket) =~ ~s(role="radiogroup")
+
+      html = socket |> event("set_payment_method", %{"method" => "qris"}) |> html()
+      assert html =~ ~r/<input[^>]*value="qris"[^>]*checked/
+    end
+
+    test "a method not allowed for a sale can't be picked", %{socket: socket} do
+      html = html(socket)
+      refute html =~ ~r/type="radio"[^>]*disabled[^>]*phx-click/
+      refute html =~ ~r/type="radio"[^>]*phx-click[^>]*disabled/
+    end
+
+    test "the amount paid keeps its id and hook", %{socket: socket} do
+      html = html(socket)
+
+      assert html =~
+               ~r/id="amount-paid"[^>]*phx-hook="CurrencyInput"|phx-hook="CurrencyInput"[^>]*id="amount-paid"/
+
+      assert html =~
+               ~r/id="amount-paid"[^>]*phx-update="ignore"|phx-update="ignore"[^>]*id="amount-paid"/
+    end
+
+    test "toggle_cart opens the bottom sheet; its scrim closes it", ctx do
+      socket = event(ctx.socket, "add", %{"id" => ctx.product.id})
+      refute html(socket) =~ "bg-black/30"
+
+      socket = event(socket, "toggle_cart")
+
+      assert html(socket) =~
+               ~r/bg-black\/30[^>]*phx-click="toggle_cart"|phx-click="toggle_cart"[^>]*bg-black\/30/
+
+      assert html(socket) =~ "rounded-t-md3-xl"
+
+      refute socket |> event("toggle_cart") |> html() =~ "bg-black/30"
+    end
+
+    test "an empty cart keeps Bayar disabled", %{socket: socket} do
+      assert html(socket) =~
+               ~r/<button[^>]*phx-click="toggle_cart"[^>]*disabled[^>]*>\s*Bayar|<button[^>]*disabled[^>]*phx-click="toggle_cart"[^>]*>\s*Bayar/
+    end
+
+    test "the screen is MD3 and not in capitals", %{socket: socket} do
+      html = html(socket)
+      assert html =~ ~s(class="md3)
+      refute html =~ "uppercase"
+      refute html =~ "btn-primary"
+    end
+  end
+
   describe "quick cash" do
     setup do
       user = user_on_shift_fixture()
@@ -659,6 +723,51 @@ defmodule ZahlungsWeb.CashierLiveTest do
                []
 
       assert stock_of(product) == 10
+    end
+  end
+
+  describe "md3 dialogs" do
+    setup do
+      user = user_on_shift_fixture()
+      product = product_fixture(price: Decimal.new("1000"), stock: 10)
+
+      socket =
+        CashierLive
+        |> mount_live(user)
+        |> event("scan", %{"q" => product.sku})
+        |> event("set_amount_paid", %{"value" => "1000"})
+
+      %{socket: socket}
+    end
+
+    test "confirm sale: Batal comes first, inside the dialog content", %{socket: socket} do
+      html = socket |> event("review_checkout") |> html()
+      assert html =~ ~r/id="confirm-sale-content".*cancel_checkout.*Ya, selesaikan/s
+      assert html =~ "rounded-md3-xl"
+    end
+
+    test "receipt: actions at the bottom, New Transaction filled", %{socket: socket} do
+      html = socket |> event("review_checkout") |> event("confirm_checkout") |> html()
+      assert html =~ ~r/id="receipt-modal-content".*Print receipt.*New Transaction/s
+
+      assert html =~
+               ~r/bg-primary[^"]*"[^>]*phx-click="new_sale"|phx-click="new_sale"[^>]*bg-primary/
+    end
+
+    test "close shift: the button is the danger variant", %{socket: socket} do
+      html = socket |> event("toggle_close") |> html()
+      assert html =~ ~r/id="close-shift-modal-content"/
+      assert html =~ ~r/bg-error[^>]*>\s*Close shift/
+    end
+
+    test "movement: the amount keeps its id and hook", %{socket: socket} do
+      html = socket |> event("toggle_movement") |> html()
+      assert html =~ ~r/id="movement-modal-content"/
+
+      assert html =~
+               ~r/id="movement-amount-input"[^>]*phx-hook="MoneyInput"|phx-hook="MoneyInput"[^>]*id="movement-amount-input"/
+
+      assert html =~ ~s(<select name="category")
     end
   end
 

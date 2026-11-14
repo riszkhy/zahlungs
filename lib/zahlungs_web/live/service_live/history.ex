@@ -182,39 +182,21 @@ defmodule ZahlungsWeb.ServiceLive.History do
     |> Calendar.strftime("%d %b %Y %H:%M")
   end
 
-  defp status_label("success"), do: "Berhasil"
-  defp status_label("failed"), do: "Gagal"
-  defp status_label(_), do: "Diproses"
-
-  attr :transaction, :map, required: true
-
-  defp status_badge(assigns) do
-    ~H"""
-    <span class={[
-      "inline-block rounded-full px-2 py-0.5 text-xs",
-      @transaction.status == "success" && "bg-green-100 text-green-700",
-      @transaction.status == "failed" && "bg-red-100 text-red-700",
-      @transaction.status == "processing" && "bg-amber-100 text-amber-800"
-    ]}>
-      {status_label(@transaction.status)}
-    </span>
-    """
-  end
-
   attr :transaction, :map, required: true
   attr :user, :map, required: true
 
   defp correct_button(assigns) do
     ~H"""
-    <button
+    <.md_button
       :if={ServiceCorrection.button?(@user, @transaction)}
+      variant="text"
       type="button"
       phx-click="review_correction"
       phx-value-id={@transaction.id}
-      class="mt-1 block text-xs text-blue-600 hover:underline"
+      class="!h-8 !px-2 !text-label-md"
     >
       Koreksi status
-    </button>
+    </.md_button>
     """
   end
 
@@ -231,126 +213,173 @@ defmodule ZahlungsWeb.ServiceLive.History do
 
   defp outcome(assigns) do
     ~H"""
-    <span :if={@transaction.token_sn} class="block break-words text-xs text-gray-500">
+    <span :if={@transaction.token_sn} class="block break-words text-body-sm text-on-surface-variant">
       Token / SN: {Layanan.token_text(@transaction.token_sn)}
     </span>
-    <span :if={@transaction.corrected_at} class="block break-words text-xs text-gray-600">
+    <span :if={@transaction.corrected_at} class="block break-words text-body-sm text-on-surface-variant">
       Dikoreksi {corrector(@transaction)}, {corrected_time(@transaction)}: {@transaction.correction_reason}
     </span>
-    <span :if={@transaction.review_reason} class="block text-xs font-medium text-amber-700">
+    <span :if={@transaction.review_reason} class="block text-body-sm font-medium text-warning">
       Perlu ditinjau — admin akan meninjau
     </span>
-    <span :if={note(@transaction)} class="block text-xs text-gray-500">
+    <span :if={note(@transaction)} class="block text-body-sm text-on-surface-variant">
       {note(@transaction)}
     </span>
     <.link
       :if={@transaction.status == "success"}
       href={~p"/services/#{@transaction.id}/receipt"}
       target="_blank"
-      class="block text-xs text-blue-600 hover:underline"
+      class="block text-body-sm text-primary hover:underline"
     >
       Cetak struk
     </.link>
     """
   end
 
+  @status_options [
+    {"Semua status", ""},
+    {"Diproses", "processing"},
+    {"Berhasil", "success"},
+    {"Gagal", "failed"}
+  ]
+
+  defp category_options,
+    do: [{"Semua kategori", ""} | Enum.map(Services.categories(), fn {v, l} -> {l, v} end)]
+
   @impl true
   def render(assigns) do
+    assigns =
+      assign(assigns, status_options: @status_options, category_options: category_options())
+
     ~H"""
-    <.header>
-      Riwayat layanan
-      <:subtitle>Semua transaksi pulsa, paket data, token PLN dan tagihan</:subtitle>
-      <:actions>
-        <.link navigate={~p"/services"} class="chip">Layanan</.link>
-      </:actions>
-    </.header>
-
-    <form id="history-filter" phx-change="filter" phx-submit="filter" class="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-6">
-      <label class="block text-sm">Dari <input type="date" name="from" value={@from} class="form-control mt-1" /></label>
-      <label class="block text-sm">Sampai <input type="date" name="to" value={@to} class="form-control mt-1" /></label>
-      <label class="block text-sm">
-        Status
-        <select name="status" class="form-control mt-1">
-          <option value="" selected={@status == ""}>Semua status</option>
-          <option value="processing" selected={@status == "processing"}>Diproses</option>
-          <option value="success" selected={@status == "success"}>Berhasil</option>
-          <option value="failed" selected={@status == "failed"}>Gagal</option>
-        </select>
-      </label>
-      <label class="block text-sm">
-        Kategori
-        <select name="category" class="form-control mt-1">
-          <option value="" selected={@category == ""}>Semua kategori</option>
-          <option :for={{value, label} <- Services.categories()} value={value} selected={@category == value}>
-            {label}
-          </option>
-        </select>
-      </label>
-      <label class="col-span-2 block text-sm">
-        Cari
-        <input
-          type="search"
-          name="q"
-          value={@q}
-          phx-debounce="300"
-          placeholder="Nomor tujuan atau kode"
-          class="form-control mt-1"
-          autocomplete="off"
-        />
-      </label>
-    </form>
-
-    <p :if={not @valid_dates} class="mt-6 text-sm text-gray-500">Pilih rentang tanggal yang valid.</p>
-    <p :if={@valid_dates and @transactions == []} class="mt-6 text-sm text-gray-500">
-      Belum ada transaksi layanan pada pilihan ini.
-    </p>
-
-    <%!-- Below landscape-tablet width a row doesn't fit: one card per service. --%>
-    <div :if={@transactions != []} class="mt-4 space-y-2 lg:hidden">
-      <div :for={tx <- @transactions} id={"service-card-#{tx.id}"} class="list-card">
-        <span class="min-w-0 flex-1">
-          <span class="block truncate font-medium">{tx.product_name}</span>
-          <span class="block font-medium">{Layanan.group_digits(tx.customer_ref)}</span>
-          <span class="block text-xs text-gray-500">
-            {time(tx)} · {tx.code} · {cashier(tx)}
-            <span :if={is_nil(@current_scope.store)}>· {tx.store.name}</span>
-          </span>
-          <.outcome transaction={tx} />
-        </span>
-        <span class="text-right">
-          <span class="block font-semibold">{format_price(tx.price)}</span>
-          <.status_badge transaction={tx} />
-          <.correct_button transaction={tx} user={@current_user} />
-        </span>
+    <div class="md3 -m-6 rounded-xl bg-surface p-4 text-on-surface">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <h1 class="text-headline-sm">Riwayat layanan</h1>
+          <p class="mt-1 text-body-md text-on-surface-variant">
+            Semua transaksi pulsa, paket data, token PLN dan tagihan
+          </p>
+        </div>
+        <.md_button variant="outlined" navigate={~p"/services"}>Layanan</.md_button>
       </div>
+
+      <form
+        id="history-filter"
+        phx-change="filter"
+        phx-submit="filter"
+        class="mt-6 grid grid-cols-2 items-end gap-3 lg:grid-cols-6"
+      >
+        <.md_text_field type="date" name="from" value={@from} label="Dari" />
+        <.md_text_field type="date" name="to" value={@to} label="Sampai" />
+        <.md_text_field
+          type="select"
+          name="status"
+          value={@status}
+          label="Status"
+          options={@status_options}
+        />
+        <.md_text_field
+          type="select"
+          name="category"
+          value={@category}
+          label="Kategori"
+          options={@category_options}
+        />
+        <div class="col-span-2">
+          <.md_search
+            id="history-search"
+            name="q"
+            value={@q}
+            placeholder="Nomor tujuan atau kode"
+            phx-debounce="300"
+            autocomplete="off"
+            aria-label="Cari"
+          />
+        </div>
+      </form>
+
+      <p :if={not @valid_dates} class="mt-6 text-body-md text-on-surface-variant">
+        Pilih rentang tanggal yang valid.
+      </p>
+      <p :if={@valid_dates and @transactions == []} class="mt-6 text-body-md text-on-surface-variant">
+        Belum ada transaksi layanan pada pilihan ini.
+      </p>
+
+      <%!-- Below landscape-tablet width a row doesn't fit: one card per service. --%>
+      <div :if={@transactions != []} class="mt-4 space-y-2 lg:hidden">
+        <div
+          :for={tx <- @transactions}
+          id={"service-card-#{tx.id}"}
+          class="flex items-center gap-3 rounded-md3-md bg-surface-container-low p-3 text-body-md"
+        >
+          <span class="min-w-0 flex-1">
+            <span class="block truncate font-medium">{tx.product_name}</span>
+            <span class="block font-medium">{Layanan.group_digits(tx.customer_ref)}</span>
+            <span class="block text-body-sm text-on-surface-variant">
+              {time(tx)} · {tx.code} · {cashier(tx)}
+              <span :if={is_nil(@current_scope.store)}>· {tx.store.name}</span>
+            </span>
+            <.outcome transaction={tx} />
+          </span>
+          <span class="flex shrink-0 flex-col items-end gap-1 text-right">
+            <span class="block text-title-sm">{format_price(tx.price)}</span>
+            <ServiceCorrection.status_badge status={tx.status} />
+            <.correct_button transaction={tx} user={@current_user} />
+          </span>
+        </div>
+      </div>
+
+      <div
+        :if={@transactions != []}
+        id="service-history"
+        class="mt-4 hidden overflow-x-auto rounded-md3-lg bg-surface-container-lowest lg:block"
+      >
+        <table class="w-full">
+          <thead>
+            <tr class="text-left text-label-md text-on-surface-variant">
+              <th class="px-3 py-2">Waktu</th>
+              <th class="px-3 py-2">Kode</th>
+              <th class="px-3 py-2">Produk</th>
+              <th class="px-3 py-2">Nomor tujuan</th>
+              <th :if={is_nil(@current_scope.store)} class="px-3 py-2">Cabang</th>
+              <th class="px-3 py-2">Kasir</th>
+              <th class="px-3 py-2">Harga</th>
+              <th class="px-3 py-2">Status</th>
+            </tr>
+          </thead>
+          <tbody class="text-body-md">
+            <tr
+              :for={tx <- @transactions}
+              id={"service-history-#{tx.id}"}
+              class="border-t border-outline-variant"
+            >
+              <td class="px-3 py-2 align-top">{time(tx)}</td>
+              <td class="px-3 py-2 align-top">{tx.code}</td>
+              <td class="px-3 py-2 align-top">{tx.product_name}</td>
+              <td class="px-3 py-2 align-top">{Layanan.group_digits(tx.customer_ref)}</td>
+              <td :if={is_nil(@current_scope.store)} class="px-3 py-2 align-top">{tx.store.name}</td>
+              <td class="px-3 py-2 align-top">{cashier(tx)}</td>
+              <td class="px-3 py-2 align-top">{format_price(tx.price)}</td>
+              <td class="px-3 py-2 align-top">
+                <ServiceCorrection.status_badge status={tx.status} />
+                <.outcome transaction={tx} />
+                <.correct_button transaction={tx} user={@current_user} />
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <.pagination page={@page} per_page={@per_page} total={@total} noun="transaksi" />
+
+      <ServiceCorrection.popup
+        :if={@correcting}
+        transaction={@correcting}
+        error={@correction_error}
+        reason={@correction_reason}
+        token_sn={@correction_token_sn}
+      />
     </div>
-
-    <div :if={@transactions != []} class="hidden lg:block">
-      <.table id="service-history" rows={@transactions}>
-        <:col :let={tx} label="Waktu">{time(tx)}</:col>
-        <:col :let={tx} label="Kode">{tx.code}</:col>
-        <:col :let={tx} label="Produk">{tx.product_name}</:col>
-        <:col :let={tx} label="Nomor tujuan">{Layanan.group_digits(tx.customer_ref)}</:col>
-        <:col :let={tx} :if={is_nil(@current_scope.store)} label="Cabang">{tx.store.name}</:col>
-        <:col :let={tx} label="Kasir">{cashier(tx)}</:col>
-        <:col :let={tx} label="Harga">{format_price(tx.price)}</:col>
-        <:col :let={tx} label="Status">
-          <.status_badge transaction={tx} />
-          <.outcome transaction={tx} />
-          <.correct_button transaction={tx} user={@current_user} />
-        </:col>
-      </.table>
-    </div>
-
-    <.pagination page={@page} per_page={@per_page} total={@total} noun="transaksi" />
-
-    <ServiceCorrection.popup
-      :if={@correcting}
-      transaction={@correcting}
-      error={@correction_error}
-      reason={@correction_reason}
-      token_sn={@correction_token_sn}
-    />
     """
   end
 end

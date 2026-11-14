@@ -16,6 +16,10 @@ defmodule ZahlungsWeb.ServiceLiveTest do
 
   defp money(value), do: Decimal.new(value)
 
+  # The bar's button, whatever the order of its attributes.
+  defp bar_button(html),
+    do: html |> then(&Regex.run(~r/<button[^>]*id="service-bar-open"[^>]*>/, &1)) |> hd()
+
   # Paying is two steps: the popup, then its confirmation. What can't be paid
   # stops at the first, with its message still there to read.
   defp record(socket, params) do
@@ -44,7 +48,7 @@ defmodule ZahlungsWeb.ServiceLiveTest do
     test "without a shift it sends the cashier to open one" do
       rendered = ServiceLive.Index |> mount_live(user_fixture()) |> html()
 
-      assert rendered =~ ~s(href="/cashier")
+      assert rendered =~ ~r/<a[^>]*href="\/cashier"[^>]*>\s*Buka shift di Cashier/
       refute rendered =~ "Catat dan terima uang"
     end
 
@@ -163,6 +167,39 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       assert tx.customer_ref == "081234567890"
       refute socket.assigns.confirming
       refute html(socket) =~ "Konfirmasi pembayaran"
+    end
+
+    test "cash and the other methods are a segmented button in the form", ctx do
+      socket = event(ctx.socket, "select", %{"id" => ctx.product.id})
+      html = html(socket)
+
+      assert html =~
+               ~r/<input[^>]*type="radio"[^>]*name="service\[payment_method\]"[^>]*value="cash"[^>]*checked/
+
+      assert html =~ ~s(name="service[amount_paid]")
+
+      socket =
+        event(socket, "change", %{
+          "service" => %{"customer_ref" => "081234567890", "payment_method" => "qris"}
+        })
+
+      assert html(socket) =~ ~r/value="qris"[^>]*checked/
+      refute html(socket) =~ ~s(name="service[amount_paid]")
+    end
+
+    test "the confirm popup is an MD3 dialog, Batal first", ctx do
+      html =
+        ctx.socket
+        |> event("select", %{"id" => ctx.product.id})
+        |> event("review", %{
+          "service" => %{"customer_ref" => "081234567890", "amount_paid" => "12000"}
+        })
+        |> html()
+
+      assert html =~ ~s(id="confirm-service")
+      assert html =~ "rounded-md3-xl"
+      assert html =~ ~r/cancel_record.*Ya, catat/s
+      refute html =~ ~s(class="chip)
     end
 
     test "the first thing focused in the popup is Batal", ctx do
@@ -303,6 +340,46 @@ defmodule ZahlungsWeb.ServiceLiveTest do
 
       assert flash(bad_number, :error) == "Nomor tujuan harus 6–20 angka."
       assert Services.list_shift_transactions(ctx.shift) == []
+    end
+
+    test "a manual processing service gets MD3 mark forms", ctx do
+      tx = service_fixture(ctx.cashier, ctx.product)
+      html = ServiceLive.Index |> mount_live(ctx.cashier) |> html()
+
+      [card] = Regex.run(~r/<div[^>]*id="processing-#{tx.id}"[^>]*>/, html)
+      assert card =~ "border-outline-variant"
+
+      assert html =~
+               ~r/<input[^>]*name="token_sn"[^>]*maxlength="64"|<input[^>]*maxlength="64"[^>]*name="token_sn"/
+
+      assert html =~
+               ~r/<input[^>]*name="reason"[^>]*maxlength="255"|<input[^>]*maxlength="255"[^>]*name="reason"/
+    end
+
+    test "a failed service in the shift history has the error badge", ctx do
+      tx = service_fixture(ctx.cashier, ctx.product)
+
+      html =
+        ServiceLive.Index
+        |> mount_live(ctx.cashier)
+        |> event("mark_failed", %{"transaction_id" => tx.id, "reason" => "nomor tidak aktif"})
+        |> html()
+
+      assert html =~ ~r/id="history-#{tx.id}".*?bg-error-container[^>]*>\s*Gagal/s
+    end
+
+    test "no old classes are left below the panel", ctx do
+      _processing = service_fixture(ctx.cashier, ctx.product)
+      failed = service_fixture(ctx.cashier, ctx.product)
+
+      html =
+        ServiceLive.Index
+        |> mount_live(ctx.cashier)
+        |> event("mark_failed", %{"transaction_id" => failed.id, "reason" => "nomor tidak aktif"})
+        |> html()
+
+      refute html =~ ~r/class="[^"]*\b(chip|list-card|form-control|btn-primary)\b/
+      refute html =~ ~r/\b(gray|green|red|amber|blue)-\d{2,3}\b/
     end
 
     test "marking success keeps the token; failing tells how much to return", ctx do
@@ -499,7 +576,8 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       assert rendered =~ "Belum ada produk Tri. Yang tampil produk tanpa brand."
       assert rendered =~ "Tampilkan semua"
       # The brand is shown as the chosen chip, though it has no products.
-      assert rendered =~ ~r/class="chip chip-sm chip-sm-active"[^>]*>\s*Tri/
+      assert rendered =~
+               ~r/<button[^>]*aria-pressed="true"[^>]*>(?:(?!<\/button>).)*?\bTri\s*<\/button>/s
     end
 
     test "a brand with nothing at all to show says so, with a way back", ctx do
@@ -568,9 +646,46 @@ defmodule ZahlungsWeb.ServiceLiveTest do
                "Pilih produk di kiri."
     end
 
+    test "the ✕ shows only with a number and clears it", ctx do
+      refute html(ctx.socket) =~ ~s(aria-label="Hapus nomor")
+      socket = typed(ctx.socket, "0812")
+      assert html(socket) =~ ~s(aria-label="Hapus nomor")
+      assert event(socket, "clear_number").assigns.form["customer_ref"] == ""
+    end
+
+    # The category chips scroll sideways; without min-w-0 their row would
+    # widen the grid column past a phone's screen.
+    test "the product column may shrink below its chips' width", ctx do
+      assert html(ctx.socket) =~ ~r/<section class="[^"]*\bmin-w-0\b[^"]*lg:col-span-3/
+    end
+
+    test "the page is MD3 and links to the history", ctx do
+      html = html(ctx.socket)
+      assert html =~ ~s(class="md3 -m-6)
+      assert html =~ ~r/<a[^>]*href="\/services\/history"[^>]*>.*Lihat semua riwayat/s
+      refute html =~ ~s(class="chip)
+      refute html =~ "product-tile"
+    end
+
+    test "a branded product picked before any number is typed doesn't break the screen", ctx do
+      socket = event(ctx.socket, "select", %{"id" => ctx.tsel.id})
+      assert socket.assigns.selected.id == ctx.tsel.id
+      refute html(socket) =~ ~s(id="brand-mismatch")
+    end
+
+    test "a chosen tile is pressed", ctx do
+      html = ctx.socket |> event("select", %{"id" => ctx.tsel.id}) |> html()
+
+      assert html =~
+               ~r/<button[^>]*aria-pressed="true"[^>]*>(?:(?!<\/button>).)*?#{ctx.tsel.name}/s
+
+      refute html =~
+               ~r/<button[^>]*aria-pressed="true"[^>]*>(?:(?!<\/button>).)*?#{ctx.isat.name}/s
+    end
+
     test "brand chips are smaller than the category ones", ctx do
       rendered = html(ctx.socket)
-      assert rendered =~ ~r/class="chip chip-sm[^"]*"[^>]*>\s*Semua/
+      assert rendered =~ ~r/<button[^>]*min-h-\[36px\][^>]*>(?:(?!<\/button>).)*?Semua/s
     end
 
     test "another category forgets the brand", ctx do
@@ -602,7 +717,7 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       rendered = html(ctx.socket)
       assert rendered =~ ~s(id="service-bar")
       assert rendered =~ "Pilih produk"
-      assert rendered =~ ~r/<button[^>]*id="service-bar-open"[^>]*disabled/
+      assert bar_button(rendered) =~ ~r/\sdisabled[\s>]/
       refute ctx.socket.assigns.panel_open
     end
 
@@ -611,9 +726,9 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       assert socket.assigns.panel_open
 
       rendered = html(socket)
-      assert rendered =~ "cart-panel-open"
+      assert rendered =~ ~r/id="service-sheet"[^>]*class="[^"]*fixed inset-x-0 bottom-0/
       assert rendered =~ ~r/id="service-bar".*#{ctx.product.name}.*Rp 12.000/s
-      refute rendered =~ ~r/<button[^>]*id="service-bar-open"[^>]*disabled/
+      refute bar_button(rendered) =~ ~r/\sdisabled[\s>]/
     end
 
     test "Tutup closes the panel and keeps the product", ctx do
@@ -624,7 +739,7 @@ defmodule ZahlungsWeb.ServiceLiveTest do
 
       refute socket.assigns.panel_open
       assert socket.assigns.selected.id == ctx.product.id
-      refute html(socket) =~ "cart-panel-open"
+      refute html(socket) =~ ~r/id="service-sheet"[^>]*class="[^"]*fixed inset-x-0/
 
       assert event(socket, "toggle_panel").assigns.panel_open
     end
@@ -726,7 +841,7 @@ defmodule ZahlungsWeb.ServiceLiveTest do
       assert rendered =~ ~s(name="service[months]")
       assert rendered =~ ~s(<option value="12")
       refute rendered =~ ~s(<option value="13")
-      assert rendered =~ ~r/<option value="1" selected/
+      assert rendered =~ ~r/<option (selected value="1"|value="1" selected)/
     end
 
     test "a bill that doesn't ask has no months choice", ctx do

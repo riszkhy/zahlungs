@@ -264,7 +264,7 @@ defmodule ZahlungsWeb.MultiStoreAuthTest do
 
       assert response =~ ~s(class="ml-auto flex min-w-0 items-center gap-2")
       assert response =~ ~s(method="post" class="min-w-0")
-      assert response =~ ~s(class="max-w-full rounded border-0)
+      assert response =~ ~s(class="max-w-full rounded-md3-xs border-0)
       assert response =~ ~s(class="nav-tap shrink-0")
     end
 

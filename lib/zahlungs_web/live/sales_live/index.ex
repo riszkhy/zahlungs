@@ -16,6 +16,7 @@ defmodule ZahlungsWeb.SalesLive.Index do
      |> assign(date: "", page: 1, per_page: @per_page)
      |> assign(:voiding, nil)
      |> assign(:void_reason, "")
+     |> assign(:returning, nil)
      |> load_sales()}
   end
 
@@ -45,9 +46,28 @@ defmodule ZahlungsWeb.SalesLive.Index do
     {:noreply, socket |> assign(:page, max(1, to_int(to))) |> load_sales()}
   end
 
-  def handle_event("return", %{"id" => id}, socket) do
+  def handle_event("prompt_return", %{"id" => id}, socket) do
     if socket.assigns.current_user.role == "admin" do
-      sale = Sales.get_sale!(socket.assigns.current_scope, id)
+      {:noreply, assign(socket, :returning, Sales.get_sale!(socket.assigns.current_scope, id))}
+    else
+      {:noreply, put_flash(socket, :error, "You do not have permission to return sales.")}
+    end
+  end
+
+  def handle_event("cancel_return", _params, socket) do
+    {:noreply, assign(socket, :returning, nil)}
+  end
+
+  # Only while the popup is open, so a second click does nothing.
+  def handle_event("confirm_return", _params, %{assigns: %{returning: nil}} = socket) do
+    {:noreply, socket}
+  end
+
+  def handle_event("confirm_return", _params, socket) do
+    if socket.assigns.current_user.role == "admin" do
+      scope = socket.assigns.current_scope
+      sale = Sales.get_sale!(scope, socket.assigns.returning.id)
+      socket = assign(socket, :returning, nil)
 
       case Sales.return_sale(sale, socket.assigns.current_user) do
         {:ok, _returned} ->
@@ -64,7 +84,10 @@ defmodule ZahlungsWeb.SalesLive.Index do
           {:noreply, put_flash(socket, :error, "Could not return the sale.")}
       end
     else
-      {:noreply, put_flash(socket, :error, "You do not have permission to return sales.")}
+      {:noreply,
+       socket
+       |> assign(:returning, nil)
+       |> put_flash(:error, "You do not have permission to return sales.")}
     end
   end
 
@@ -152,128 +175,190 @@ defmodule ZahlungsWeb.SalesLive.Index do
   @impl true
   def render(assigns) do
     ~H"""
-    <.header>
-      Sales
-      <:subtitle>Riwayat transaksi</:subtitle>
-    </.header>
+    <div class="md3 -m-6 rounded-xl bg-surface p-4 text-on-surface">
+      <h1 class="text-headline-sm">Sales</h1>
+      <p class="text-body-md text-on-surface-variant">Riwayat transaksi</p>
 
-    <form phx-change="filter" class="mt-6 flex items-end gap-3">
-      <label class="text-sm">
-        Filter by date
-        <input type="date" name="date" value={@date} class="form-control" />
-      </label>
-    </form>
+      <form phx-change="filter" class="mt-4 max-w-xs">
+        <.md_text_field type="date" name="date" value={@date} label="Filter by date" />
+      </form>
 
-    <%!-- Below landscape-tablet width a row doesn't fit: one tappable card per sale. --%>
-    <div class="mt-4 space-y-2 lg:hidden">
-      <.link :for={sale <- @sales} id={"sale-card-#{sale.id}"} patch={~p"/sales/#{sale}"} class="list-card">
-        <span class="min-w-0 flex-1">
-          <span class="block truncate font-medium">{sale.code}</span>
-          <span class="block text-xs text-gray-500">
-            {Calendar.strftime(Zahlungs.LocalTime.to_local(sale.inserted_at, sale.store), "%d %b %Y %H:%M")}
-            · {length(sale.items)} item
-            <span :if={is_nil(@current_scope.store)}>· {sale.store.name}</span>
+      <%!-- Below landscape-tablet width a row doesn't fit: one tappable card per sale. --%>
+      <div class="mt-4 space-y-2 lg:hidden">
+        <.link
+          :for={sale <- @sales}
+          id={"sale-card-#{sale.id}"}
+          patch={~p"/sales/#{sale}"}
+          class="md-state flex items-center gap-3 rounded-md3-md border border-outline-variant bg-surface p-3"
+        >
+          <span class="min-w-0 flex-1">
+            <span class="block truncate text-title-sm">{sale.code}</span>
+            <span class="block text-body-sm text-on-surface-variant">
+              {sale_time(sale)} · {length(sale.items)} item
+              <span :if={is_nil(@current_scope.store)}>· {sale.store.name}</span>
+            </span>
           </span>
-        </span>
-        <span class="text-right">
-          <span class="block font-semibold">{format_money(sale.total)}</span>
-          <span class={["inline-block rounded-full px-2 py-0.5 text-xs", status_badge_class(sale.status)]}>
-            {sale.status}
+          <span class="flex shrink-0 flex-col items-end gap-1">
+            <span class="text-title-sm">{format_money(sale.total)}</span>
+            <.status_badge status={sale.status} />
           </span>
-        </span>
-      </.link>
-      <p :if={@sales == []} class="text-sm text-gray-500">Belum ada penjualan.</p>
+        </.link>
+        <p :if={@sales == []} class="text-body-md text-on-surface-variant">Belum ada penjualan.</p>
+      </div>
+
+      <div id="sales" class="mt-4 hidden overflow-x-auto rounded-md3-lg bg-surface-container-low lg:block">
+        <table class="w-full text-body-md">
+          <thead class="text-left text-label-lg text-on-surface-variant">
+            <tr>
+              <th class="px-4 py-3">Code</th>
+              <th class="px-4 py-3">Date</th>
+              <th :if={is_nil(@current_scope.store)} class="px-4 py-3">Store</th>
+              <th class="px-4 py-3">Cashier</th>
+              <th class="px-4 py-3">Items</th>
+              <th class="px-4 py-3 text-right">Total</th>
+              <th class="px-4 py-3">Status</th>
+              <th class="px-4 py-3"><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr :for={sale <- @sales} id={"sales-#{sale.id}"} class="border-t border-outline-variant">
+              <td class="px-4 py-2 font-medium">{sale.code}</td>
+              <td class="whitespace-nowrap px-4 py-2">{sale_time(sale)}</td>
+              <td :if={is_nil(@current_scope.store)} class="px-4 py-2">{sale.store.name}</td>
+              <td class="px-4 py-2">{sale.user && sale.user.email}</td>
+              <td class="px-4 py-2">{length(sale.items)}</td>
+              <td class="whitespace-nowrap px-4 py-2 text-right">{format_money(sale.total)}</td>
+              <td class="px-4 py-2"><.status_badge status={sale.status} /></td>
+              <td class="px-4 py-2 text-right">
+                <.link
+                  patch={~p"/sales/#{sale}"}
+                  class="md-state inline-flex h-8 items-center rounded-full px-2 text-label-lg text-primary"
+                >
+                  View
+                </.link>
+              </td>
+            </tr>
+            <tr :if={@sales == []}>
+              <td colspan="8" class="px-4 py-3 text-on-surface-variant">Belum ada penjualan.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <.pagination page={@page} per_page={@per_page} total={@total} noun="penjualan" />
     </div>
 
-    <div class="hidden lg:block">
-    <.table id="sales" rows={@sales}>
-      <:col :let={sale} label="Code">{sale.code}</:col>
-      <:col :let={sale} label="Date">{Calendar.strftime(Zahlungs.LocalTime.to_local(sale.inserted_at, sale.store), "%d %b %Y %H:%M")}</:col>
-      <:col :let={sale} :if={is_nil(@current_scope.store)} label="Store">{sale.store.name}</:col>
-      <:col :let={sale} label="Cashier">{sale.user && sale.user.email}</:col>
-      <:col :let={sale} label="Items">{length(sale.items)}</:col>
-      <:col :let={sale} label="Total">{format_money(sale.total)}</:col>
-      <:col :let={sale} label="Status">
-        <span class={["text-xs px-2 py-0.5 rounded-full", status_badge_class(sale.status)]}>
-          {sale.status}
-        </span>
-      </:col>
-      <:action :let={sale}>
-        <.link patch={~p"/sales/#{sale}"}>View</.link>
-      </:action>
-    </.table>
-    </div>
-
-    <.pagination page={@page} per_page={@per_page} total={@total} noun="penjualan" />
-
-    <.modal :if={@live_action == :show and @sale} id="sale-modal" show on_cancel={JS.patch(~p"/sales")}>
-      <h3 class="text-lg font-semibold">Sale {@sale.code}</h3>
+    <.md_dialog
+      :if={@live_action == :show and @sale}
+      id="sale-modal"
+      show
+      on_cancel={JS.patch(~p"/sales")}
+    >
+      <:title>Sale {@sale.code}</:title>
 
       <.sale_receipt sale={@sale} />
 
-      <div class="mt-2 flex justify-between text-sm">
-        <dt>Status</dt>
-        <dd class={status_text_class(@sale.status)}>{@sale.status}</dd>
-      </div>
-      <div :if={@sale.status == "void" and @sale.void_reason} class="mt-1 flex justify-between text-sm">
-        <dt>Alasan batal</dt>
-        <dd class="text-gray-600">{@sale.void_reason}</dd>
-      </div>
+      <dl class="mt-2 space-y-1 text-body-md">
+        <div class="flex items-center justify-between">
+          <dt>Status</dt>
+          <dd><.status_badge status={@sale.status} /></dd>
+        </div>
+        <div :if={@sale.status == "void" and @sale.void_reason} class="flex justify-between gap-4">
+          <dt>Alasan batal</dt>
+          <dd class="text-right text-on-surface-variant">{@sale.void_reason}</dd>
+        </div>
+      </dl>
 
-      <div class="mt-6 flex items-center justify-between gap-3">
-        <.link
+      <:actions>
+        <.md_button
+          variant="text"
           href={~p"/sales/#{@sale.id}/receipt"}
           target="_blank"
-          class="btn btn-sm btn-link"
+          rel="noopener"
         >
           Print receipt
-        </.link>
-        <div class="flex items-center gap-2">
-          <.button
-            :if={@sale.status == "completed" and (@current_user.role == "admin" or @sale.user_id == @current_user.id)}
-            phx-click={JS.push("prompt_void", value: %{id: @sale.id})}
-            class="!bg-amber-600"
-          >
-            Batalkan (koreksi)
-          </.button>
-          <.button
-            :if={@current_user.role == "admin" and @sale.status == "completed"}
-            phx-click={JS.push("return", value: %{id: @sale.id})}
-            data-confirm="Return this sale and restore stock? This cannot be undone."
-            class="!bg-red-600"
-          >
-            Return / Refund
-          </.button>
-        </div>
-      </div>
-    </.modal>
+        </.md_button>
+        <.md_button
+          :if={
+            @sale.status == "completed" and
+              (@current_user.role == "admin" or @sale.user_id == @current_user.id)
+          }
+          variant="tonal"
+          type="button"
+          phx-click={JS.push("prompt_void", value: %{id: @sale.id})}
+        >
+          Batalkan (koreksi)
+        </.md_button>
+        <.md_button
+          :if={@current_user.role == "admin" and @sale.status == "completed"}
+          variant="danger"
+          type="button"
+          phx-click={JS.push("prompt_return", value: %{id: @sale.id})}
+        >
+          Return / Refund
+        </.md_button>
+      </:actions>
+    </.md_dialog>
 
-    <.modal :if={@voiding} id="void-modal" show on_cancel={JS.push("cancel_void")}>
-      <h3 class="text-lg font-semibold">Batalkan penjualan {@voiding.code}</h3>
-      <p class="mt-1 text-sm text-gray-500">
+    <.md_dialog :if={@voiding} id="void-modal" show on_cancel={JS.push("cancel_void")}>
+      <:title>Batalkan penjualan {@voiding.code}</:title>
+      <p class="mt-1 text-body-md text-on-surface-variant">
         Invoice akan ditandai <strong>void</strong> dan stok dikembalikan. Setelah ini,
         input ulang transaksi yang benar di halaman Cashier.
       </p>
 
-      <form phx-change="void_change" phx-submit="do_void" class="mt-4 space-y-3">
-        <label class="block text-sm">
-          Alasan koreksi
-          <input type="text" name="reason" value={@void_reason} required class="form-control" placeholder="mis. salah qty / salah produk" />
-        </label>
-        <div class="flex justify-end gap-2">
-          <button type="button" phx-click="cancel_void" class="btn btn-sm">Batal</button>
-          <.button class="!bg-amber-600">Konfirmasi batalkan</.button>
-        </div>
+      <form id="void-form" phx-change="void_change" phx-submit="do_void" class="mt-4">
+        <.md_text_field
+          name="reason"
+          value={@void_reason}
+          label="Alasan koreksi"
+          required
+          placeholder="mis. salah qty / salah produk"
+        />
       </form>
-    </.modal>
+
+      <:actions>
+        <.md_button variant="text" type="button" phx-click="cancel_void">Batal</.md_button>
+        <.md_button type="submit" form="void-form">Konfirmasi batalkan</.md_button>
+      </:actions>
+    </.md_dialog>
+
+    <.md_dialog :if={@returning} id="return-modal" show on_cancel={JS.push("cancel_return")}>
+      <:title>Return penjualan {@returning.code}</:title>
+      <p class="mt-2 text-body-lg font-medium">{format_money(@returning.total)}</p>
+      <p class="mt-2 text-body-md text-on-surface-variant">
+        Penjualan ditandai <strong>returned</strong>, stok dikembalikan ke cabang penjualan,
+        dan uang tunai dikembalikan dari laci (penjualan piutang: uang mukanya saja).
+        Ini tidak bisa dibatalkan.
+      </p>
+      <:actions>
+        <.md_button variant="text" type="button" phx-click="cancel_return">Batal</.md_button>
+        <.md_button
+          variant="danger"
+          type="button"
+          phx-click="confirm_return"
+          phx-disable-with="Memproses..."
+        >
+          Return
+        </.md_button>
+      </:actions>
+    </.md_dialog>
     """
   end
 
-  defp status_badge_class("returned"), do: "bg-red-100 text-red-700"
-  defp status_badge_class("void"), do: "bg-gray-200 text-gray-700"
-  defp status_badge_class(_), do: "bg-green-100 text-green-700"
+  defp sale_time(sale) do
+    Calendar.strftime(Zahlungs.LocalTime.to_local(sale.inserted_at, sale.store), "%d %b %Y %H:%M")
+  end
 
-  defp status_text_class("returned"), do: "text-red-600"
-  defp status_text_class("void"), do: "text-gray-600"
-  defp status_text_class(_), do: "text-green-600"
+  attr :status, :string, required: true
+
+  defp status_badge(assigns) do
+    ~H"""
+    <.md_badge tone={status_tone(@status)}>{@status}</.md_badge>
+    """
+  end
+
+  defp status_tone("completed"), do: "success"
+  defp status_tone("returned"), do: "error"
+  defp status_tone(_), do: "neutral"
 end
