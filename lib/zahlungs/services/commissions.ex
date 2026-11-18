@@ -184,6 +184,7 @@ defmodule Zahlungs.Services.Commissions do
           code: t.code,
           inserted_at: t.inserted_at,
           product_name: t.product_name,
+          customer_ref: t.customer_ref,
           category: t.category,
           margin: margin_of(t),
           percent: t.commission_percent,

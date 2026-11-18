@@ -35,6 +35,7 @@ defmodule ZahlungsWeb.CommissionComponents do
       </:col>
       <:col :let={row} label="Kode">{row.code}</:col>
       <:col :let={row} label="Produk">{row.product_name} <span class="text-gray-500">· {category_label(row.category)}</span></:col>
+      <:col :let={row} label="No. pelanggan">{row.customer_ref}</:col>
       <:col :let={row} label="Margin">{format_money(row.margin)}</:col>
       <:col :let={row} label="Aturan">{rule(row)}</:col>
       <:col :let={row} label="Komisi">{format_money(row.commission)}</:col>

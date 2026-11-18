@@ -55,6 +55,23 @@ defmodule ZahlungsWeb.CommissionLiveTest do
       assert rendered =~ "Rp 185,00"
     end
 
+    test "each service shows its customer number", %{pulsa: pulsa} do
+      a = user_on_shift_fixture()
+
+      {:ok, tx} =
+        Services.mark_success(
+          service_fixture(a, pulsa, %{"customer_ref" => "081298765432"}),
+          a,
+          nil
+        )
+
+      rendered = CommissionLive |> mount_live(a) |> html()
+
+      assert rendered =~ "No. pelanggan"
+      [row] = Regex.run(~r{<tr[^>]*>(?:(?!</tr>).)*#{tx.code}.*?</tr>}s, rendered)
+      assert row =~ "081298765432"
+    end
+
     test "another period, or one that isn't a date", %{pulsa: pulsa} do
       a = user_on_shift_fixture()
       mine = success(a, pulsa)

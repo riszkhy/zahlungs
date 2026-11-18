@@ -179,6 +179,7 @@ defmodule Zahlungs.ServicesCommissionTest do
 
       assert length(details) == 2
       assert Enum.all?(details, &(&1.product_name == ctx.pulsa.name))
+      assert Enum.all?(details, &is_binary(&1.customer_ref))
       total = Enum.reduce(details, Decimal.new(0), &Decimal.add(&1.commission, &2))
       assert Decimal.equal?(total, 370)
     end
