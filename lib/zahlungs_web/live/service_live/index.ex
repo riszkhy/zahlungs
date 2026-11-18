@@ -418,8 +418,17 @@ defmodule ZahlungsWeb.ServiceLive.Index do
     assign(
       socket,
       :products,
-      Services.list_products(category: socket.assigns.category, active: true)
+      [category: socket.assigns.category, active: true]
+      |> Services.list_products()
+      |> Enum.sort_by(&tile_order/1)
     )
+  end
+
+  # Tiles by brand as the chips go (no brand last), then the cheapest first
+  # (the cost follows the nominal), then the name.
+  defp tile_order(product) do
+    brand = Enum.find_index(Brand.keys(), &(&1 == product.operator)) || length(Brand.keys())
+    {brand, Decimal.to_float(product.cost || Decimal.new(0)), product.name, product.id}
   end
 
   defp load_transactions(%{assigns: %{shift: nil}} = socket),
@@ -782,11 +791,21 @@ defmodule ZahlungsWeb.ServiceLive.Index do
               Tutup
             </.md_button>
           </div>
-          <p :if={is_nil(@selected)} class="text-body-md text-on-surface-variant">
-            {if brand_category?(@category),
-              do: "Isi nomor tujuan, lalu pilih produk.",
-              else: "Pilih produk di kiri."}
-          </p>
+          <div
+            :if={is_nil(@selected)}
+            id="service-panel-empty"
+            class="flex min-h-[16rem] flex-col items-center justify-center gap-2 text-center"
+          >
+            <span class="flex h-12 w-12 items-center justify-center rounded-full bg-secondary-container text-on-secondary-container">
+              <.md_icon name="receipt" />
+            </span>
+            <p class="text-title-sm">Belum ada produk dipilih</p>
+            <p class="max-w-[16rem] text-body-md text-on-surface-variant">
+              {if brand_category?(@category),
+                do: "Isi nomor tujuan, lalu pilih produk.",
+                else: "Pilih produk di kiri."}
+            </p>
+          </div>
 
           <%!-- An api bill or token: check it with the provider first. --%>
           <form :if={@api_bill} phx-change="change" phx-submit="inquire" class="space-y-3">
