@@ -132,6 +132,44 @@ defmodule ZahlungsWeb.ServiceHistoryLiveTest do
       assert box =~ "rounded-md3-lg"
     end
 
+    test "a row keeps short values on one line and the status alone", %{
+      cashier: cashier,
+      pulsa: pulsa
+    } do
+      {:ok, tx} = Services.mark_success(service_fixture(cashier, pulsa), cashier, "SN-123456")
+      html = ServiceLive.History |> mount_live(admin_fixture()) |> html()
+
+      [row] = Regex.run(~r/<tr[^>]*id="service-history-#{tx.id}".*?<\/tr>/s, html)
+      cells = ~r/<td[^>]*>.*?<\/td>/s |> Regex.scan(row) |> List.flatten()
+
+      [time, code, product, number, cashier_cell, price, status, actions] = cells
+
+      for cell <- [time, number, cashier_cell, price, actions] do
+        assert cell =~ "whitespace-nowrap", cell
+      end
+
+      assert code =~ "truncate"
+      assert code =~ ~s(title="#{tx.code}")
+
+      assert product =~ "SN-123456"
+      assert status =~ "Berhasil"
+      refute status =~ "SN-123456"
+      refute status =~ "Cetak struk"
+      refute status =~ "Koreksi status"
+      assert actions =~ "Cetak struk"
+      assert actions =~ "Koreksi status"
+    end
+
+    test "a card puts the code on its own line", %{cashier: cashier, pulsa: pulsa} do
+      tx = service_fixture(cashier, pulsa)
+      html = ServiceLive.History |> mount_live(cashier) |> html()
+      code = Regex.escape(tx.code)
+
+      [card] = Regex.run(~r/<div[^>]*id="service-card-#{tx.id}".*?<\/div>/s, html)
+      assert card =~ ~r/<span class="block truncate[^"]*" title="#{code}">\s*#{code}\s*<\/span>/
+      refute card =~ ~r/·\s*#{code}/
+    end
+
     test "a card stacks price, status and Koreksi status at its right", %{
       cashier: cashier,
       pulsa: pulsa

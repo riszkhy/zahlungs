@@ -225,11 +225,19 @@ defmodule ZahlungsWeb.ServiceLive.History do
     <span :if={note(@transaction)} class="block text-body-sm text-on-surface-variant">
       {note(@transaction)}
     </span>
+    """
+  end
+
+  attr :transaction, :map, required: true
+  attr :class, :any, default: nil
+
+  defp receipt_link(assigns) do
+    ~H"""
     <.link
       :if={@transaction.status == "success"}
       href={~p"/services/#{@transaction.id}/receipt"}
       target="_blank"
-      class="block text-body-sm text-primary hover:underline"
+      class={["text-body-sm text-primary hover:underline", @class]}
     >
       Cetak struk
     </.link>
@@ -315,11 +323,15 @@ defmodule ZahlungsWeb.ServiceLive.History do
           <span class="min-w-0 flex-1">
             <span class="block truncate font-medium">{tx.product_name}</span>
             <span class="block font-medium">{Layanan.group_digits(tx.customer_ref)}</span>
+            <span class="block truncate text-body-sm text-on-surface-variant" title={tx.code}>
+              {tx.code}
+            </span>
             <span class="block text-body-sm text-on-surface-variant">
-              {time(tx)} · {tx.code} · {cashier(tx)}
+              {time(tx)} · {cashier(tx)}
               <span :if={is_nil(@current_scope.store)}>· {tx.store.name}</span>
             </span>
             <.outcome transaction={tx} />
+            <.receipt_link transaction={tx} class="block" />
           </span>
           <span class="flex shrink-0 flex-col items-end gap-1 text-right">
             <span class="block text-title-sm">{format_price(tx.price)}</span>
@@ -343,8 +355,9 @@ defmodule ZahlungsWeb.ServiceLive.History do
               <th class="px-3 py-2">Nomor tujuan</th>
               <th :if={is_nil(@current_scope.store)} class="px-3 py-2">Cabang</th>
               <th class="px-3 py-2">Kasir</th>
-              <th class="px-3 py-2">Harga</th>
+              <th class="px-3 py-2 text-right">Harga</th>
               <th class="px-3 py-2">Status</th>
+              <th class="px-3 py-2"><span class="sr-only">Aksi</span></th>
             </tr>
           </thead>
           <tbody class="text-body-md">
@@ -353,17 +366,32 @@ defmodule ZahlungsWeb.ServiceLive.History do
               id={"service-history-#{tx.id}"}
               class="border-t border-outline-variant"
             >
-              <td class="px-3 py-2 align-top">{time(tx)}</td>
-              <td class="px-3 py-2 align-top">{tx.code}</td>
-              <td class="px-3 py-2 align-top">{tx.product_name}</td>
-              <td class="px-3 py-2 align-top">{Layanan.group_digits(tx.customer_ref)}</td>
-              <td :if={is_nil(@current_scope.store)} class="px-3 py-2 align-top">{tx.store.name}</td>
-              <td class="px-3 py-2 align-top">{cashier(tx)}</td>
-              <td class="px-3 py-2 align-top">{format_price(tx.price)}</td>
+              <td class="whitespace-nowrap px-3 py-2 align-top">{time(tx)}</td>
+              <td class="px-3 py-2 align-top">
+                <span class="block max-w-[11rem] truncate" title={tx.code}>{tx.code}</span>
+              </td>
+              <td class="min-w-[12rem] px-3 py-2 align-top">
+                {tx.product_name}
+                <.outcome transaction={tx} />
+              </td>
+              <td class="whitespace-nowrap px-3 py-2 align-top">
+                {Layanan.group_digits(tx.customer_ref)}
+              </td>
+              <td :if={is_nil(@current_scope.store)} class="whitespace-nowrap px-3 py-2 align-top">
+                {tx.store.name}
+              </td>
+              <td class="whitespace-nowrap px-3 py-2 align-top">
+                <span class="block max-w-[10rem] truncate" title={cashier(tx)}>{cashier(tx)}</span>
+              </td>
+              <td class="whitespace-nowrap px-3 py-2 text-right align-top">{format_price(tx.price)}</td>
               <td class="px-3 py-2 align-top">
                 <ServiceCorrection.status_badge status={tx.status} />
-                <.outcome transaction={tx} />
-                <.correct_button transaction={tx} user={@current_user} />
+              </td>
+              <td class="whitespace-nowrap px-3 py-2 text-right align-top">
+                <span class="inline-flex items-center gap-2">
+                  <.receipt_link transaction={tx} />
+                  <.correct_button transaction={tx} user={@current_user} />
+                </span>
               </td>
             </tr>
           </tbody>
