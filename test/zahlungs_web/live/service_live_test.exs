@@ -478,6 +478,77 @@ defmodule ZahlungsWeb.ServiceLiveTest do
     end
   end
 
+  describe "the panel before a product is chosen" do
+    test "a centred placeholder with a title and the hint" do
+      assign_account(default_store(), deposit_account_fixture())
+
+      socket =
+        ServiceLive.Index
+        |> mount_live(user_on_shift_fixture())
+        |> event("set_category", %{"category" => "pulsa"})
+
+      [tag] = Regex.run(~r/<div[^>]*id="service-panel-empty"[^>]*>/, html(socket))
+      assert tag =~ "items-center"
+      assert tag =~ "justify-center"
+      assert tag =~ "min-h-"
+
+      [_, empty] = String.split(html(socket), ~s(id="service-panel-empty"), parts: 2)
+      assert empty =~ ~r/Belum ada produk dipilih.*Isi nomor tujuan, lalu pilih produk\./s
+
+      token = socket |> event("set_category", %{"category" => "token_pln"}) |> html()
+      assert token =~ "Pilih produk di kiri."
+    end
+  end
+
+  describe "the order of the tiles" do
+    test "by brand as the chips go, then the cheapest first, then the name" do
+      assign_account(default_store(), deposit_account_fixture())
+      cashier = user_on_shift_fixture()
+      tag = System.unique_integer([:positive])
+
+      for {name, operator, cost} <- [
+            {"Urut#{tag} ISAT 100.000", "indosat", "99000"},
+            {"Urut#{tag} Lain 5.000", nil, "5000"},
+            {"Urut#{tag} TSEL 20.000", "telkomsel", "19500"},
+            {"Urut#{tag} ISAT 5.000", "indosat", "5200"},
+            {"Urut#{tag} TSEL 10.000", "telkomsel", "9900"},
+            {"Urut#{tag} ISAT 10.000", "indosat", "9900"},
+            {"Urut#{tag} BYU 10.000", "byu", "9800"},
+            {"Urut#{tag} A TSEL 10.000", "telkomsel", "9900"}
+          ] do
+        service_product_fixture(%{name: name, operator: operator, cost: cost})
+      end
+
+      rendered =
+        ServiceLive.Index
+        |> mount_live(cashier)
+        |> event("set_category", %{"category" => "pulsa"})
+        |> html()
+
+      shown =
+        ~r/Urut#{tag} [^<]+/
+        |> Regex.scan(rendered)
+        |> List.flatten()
+        |> Enum.map(&String.trim/1)
+        |> Enum.uniq()
+
+      assert shown ==
+               Enum.map(
+                 [
+                   "A TSEL 10.000",
+                   "TSEL 10.000",
+                   "TSEL 20.000",
+                   "BYU 10.000",
+                   "ISAT 5.000",
+                   "ISAT 10.000",
+                   "ISAT 100.000",
+                   "Lain 5.000"
+                 ],
+                 &"Urut#{tag} #{&1}"
+               )
+    end
+  end
+
   describe "brands on pulsa and paket data" do
     setup do
       assign_account(default_store(), deposit_account_fixture())
